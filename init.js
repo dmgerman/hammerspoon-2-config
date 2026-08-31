@@ -100,6 +100,71 @@ interactive.use("hs_time-gt", {
 // Stream Deck by hs_streamdeck-gt. Editing menus.js takes effect on the next reload.
 const menus = require(hs.appinfo.configDir + "/menus.js");
 
+interactive.use("hs_hass-gt", {
+    commands: (interactive, hass) => {
+        interactive.define({
+            name: "hass-office-brightness",
+            doc: "Set the office dimmer to a brightness, 1 to 255.",
+            interactive: [{ name: "brightness", reader: interactive.readers.number.prompted, default: 128 }],
+            fn: (brightness) => hass.officeDimmerOn(brightness)
+        });
+
+        interactive.define({
+            name: "hass-office-on",
+            doc: "Switch the office dimmer on at its last brightness.",
+            fn: () => hass.officeLightOn()
+        });
+
+        interactive.define({
+            name: "hass-office-off",
+            doc: "Switch the office dimmer off.",
+            fn: () => hass.officeLightOff()
+        });
+
+        interactive.define({
+            name: "hass-office-toggle",
+            doc: "Toggle the office dimmer.",
+            fn: () => hass.officeLightToggle()
+        });
+
+        interactive.define({
+            name: "hass-teac-toggle",
+            doc: "Toggle the Teac amplifier.",
+            fn: () => hass.teacToggle()
+        });
+
+        interactive.define({
+            name: "hass-teac-volume-up",
+            doc: "Raise the Teac's volume by one step.",
+            fn: () => hass.teacVolumeUp()
+        });
+
+        interactive.define({
+            name: "hass-teac-volume-down",
+            doc: "Lower the Teac's volume by one step.",
+            fn: () => hass.teacVolumeDown()
+        });
+
+        interactive.define({
+            name: "hass-marantz-toggle",
+            doc: "Switch the Marantz on if it is off, and off if it is on.",
+            fn: () => hass.marantzToggle()
+        });
+
+        interactive.define({
+            name: "hass-marantz-select",
+            doc: "Make the Marantz the default audio output, if it is on.",
+            fn: () => hass.selectMarantz()
+        });
+
+        interactive.define({
+            name: "hass-desk-amps-toggle",
+            doc: "Toggle both desk amplifiers, the Marantz and the Teac.",
+            fn: () => hass.deskAmpToggle()
+        });
+    }
+});
+
 interactive.use("hs_menu-gt", {
     commands: (interactive, menu) => {
         interactive.define({
@@ -213,6 +278,12 @@ interactive.define({
         );
         return true;
     }
+});
+
+interactive.define({
+    name: "paste",
+    doc: "Send cmd-v to the focused application.",
+    fn: () => hs.eventtap.keyStroke(["cmd"], "v")
 });
 
 interactive.define({
