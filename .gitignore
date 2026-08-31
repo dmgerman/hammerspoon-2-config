@@ -1,0 +1,13 @@
+# Rendered button tiles and encoded icons, written by hs_menu-gt. Regenerated on demand.
+.cache/
+
+# Emacs backups
+*~
+\#*\#
+.\#*
+
+# Coverage output left behind by debug builds of Hammerspoon 2
+default.profraw
+*.profraw
+
+.DS_Store

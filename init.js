@@ -1,125 +1,261 @@
 console.log("Hey I'm an init.js");
-const hyper = ["⌘", "⌥", "⌃", "⇧"];
 
-function eventHandler(eventName, appObject) {
-    console.log("INIT.JS appWatcher eventHandler: " + eventName + " " + appObject.title);
-}
+hs.ipc.start();
 
-hs.application.addWatcher("willLaunch", eventHandler);
-hs.application.addWatcher("didLaunch", eventHandler);
-hs.application.addWatcher("didTerminate", eventHandler);
+// hs_interactive-gt provides use(), so it is loaded first and directly. Every Spoon after
+// it is loaded by one use() call, which also applies its settings, defines its commands
+// and binds its keys. Skip one with `disabled: true` and reload.
+const interactive = hs.loadSpoon("hs_interactive-gt");
 
-const safari = hs.application.matchingBundleID("com.apple.Safari");
-function handler(notification, element) {
-    console.log("AX event: " + notification + " on: " + element.title);
-}
+interactive.use("hs_countdown-gt", {
+    config: {
+        defaultLenMinutes: 25,
+        alertSound: "Sonar"
+    },
+    commands: (interactive, countDown) => {
+        interactive.define({
+            name: "countdown-start",
+            doc: "Start a countdown for the default number of minutes.",
+            fn: () => countDown.startFor()
+        });
 
-if (safari != null) {
-    hs.ax.addWatcher(safari, hs.ax.notificationTypes["windowCreated"], handler);
-}
+        interactive.define({
+            name: "countdown-start-for",
+            doc: "Start a countdown for a given number of minutes.",
+            interactive: [{ name: "minutes", reader: interactive.readers.number.prompted, default: 25 }],
+            fn: (minutes) => countDown.startFor(minutes)
+        });
 
-hs.hotkey.bind(hyper, "4", () => { console.log("HYPER 4"); }, null);
-hs.hotkey.bind(hyper, "5",
-               () => { console.log("HYPER 5 DOWN"); },
-               () => { console.log("HYPER 5 UP");   });
+        interactive.define({
+            name: "countdown-start-until",
+            doc: "Start a countdown ending at a time of day, as hh:mm.",
+            interactive: [{ name: "time", reader: interactive.readers.string.prompted, default: "10:30" }],
+            fn: (time) => countDown.startUntil(time)
+        });
 
-function list_windows() {
-    const windows = hs.window.allWindows();
-    console.log(`\n=== Window List (${windows.length} windows) ===`);
+        interactive.define({
+            name: "countdown-pause-or-resume",
+            doc: "Pause a running countdown, or resume a paused one.",
+            fn: () => countDown.pauseOrResume()
+        });
 
-    windows.forEach((win, index) => {
-        const title = win.title || "(no title)";
-        const appName = win.application ? win.application.title : "(unknown app)";
-        const frame = win.frame;
+        interactive.define({
+            name: "countdown-cancel",
+            doc: "Cancel the running countdown.",
+            fn: () => countDown.cancel()
+        });
 
-        console.log(`\n[${index}] ${appName}: ${title}`);
-        console.log(`    Position: (${frame.x}, ${frame.y})`);
-        console.log(`    Size: ${frame.w} x ${frame.h}`);
-    });
-}
-
-function next_screen() {
-    const win = hs.window.focusedWindow();
-
-    if (!win) {
-        console.log("No focused window");
-        return;
+        interactive.define({
+            name: "countdown-set-progress",
+            doc: "Move the running countdown to a point in its progress, 0.0 to 1.0.",
+            interactive: [{ name: "progress", reader: interactive.readers.number.prompted, default: 0.5 }],
+            fn: (progress) => countDown.setProgress(progress)
+        });
     }
+});
 
-    try {
-        // Get current screen and all screens
-        const currentScreen = win.screen;
-        const allScreens = hs.screen.allScreens();
+interactive.use("hs_time-gt", {
+    // Carried over from dmg_load_spoon_hs_time() in ~/.hammerspoon/dmg-functions.lua.
+    // width was 1000 there to fit this format; "full" spans the screen instead, so it
+    // cannot be truncated. In v1 this was on alt-t:
+    //     keys: { "alt t": "clock-show" }
+    config: {
+        format: "Every second counts:\n%a %d %b %X",
+        textSize: 75,
+        showDuration: 3,
+        width: "full"
+    },
+    commands: (interactive, clock) => {
+        interactive.define({
+            name: "clock-show",
+            doc: "Show the clock for a few seconds.",
+            fn: () => clock.toggleShow()
+        });
 
-        if (!allScreens || allScreens.length <= 1) {
-            console.log("Only one screen available");
-            return;
-        }
+        interactive.define({
+            name: "clock-show-persistent",
+            doc: "Show the clock until it is dismissed with Escape.",
+            fn: () => clock.toggleShowPersistent()
+        });
 
-        // Find current screen index
-        let currentIndex = -1;
-        for (let i = 0; i < allScreens.length; i++) {
-            if (allScreens[i] === currentScreen) {
-                currentIndex = i;
-                break;
+        interactive.define({
+            name: "clock-hide",
+            doc: "Hide the clock.",
+            fn: () => clock.hide()
+        });
+
+        interactive.define({
+            name: "clock-set-format",
+            doc: "Change the clock's time format, in strftime terms such as %H:%M:%S.",
+            interactive: [{ name: "format", reader: interactive.readers.string.prompted, default: "%H:%M" }],
+            fn: (format) => {
+                clock.config.format = format;
+                return clock.formatTime(format);
             }
-        }
-
-        // Get next screen (wrap around)
-        const nextIndex = (currentIndex + 1) % allScreens.length;
-        const targetScreen = allScreens[nextIndex];
-        const targetFrame = targetScreen.frame;
-
-        // Get current window frame
-        const winFrame = win.frame;
-
-        // Calculate new dimensions
-        let newW = winFrame.w;
-        let newH = winFrame.h;
-
-        // Resize if window is larger than target screen
-        if (newW > targetFrame.w) {
-            newW = targetFrame.w;
-        }
-        if (newH > targetFrame.h) {
-            newH = targetFrame.h;
-        }
-
-        // Move window to new screen (top-left of target screen)
-        const newFrame = new HSRect(targetFrame.x, targetFrame.y, newW, newH);
-        win.frame = newFrame;
-
-        console.log(`Moved window to screen ${nextIndex + 1}/${allScreens.length}`);
-    } catch (error) {
-        console.log("Error moving window: " + error.message);
-        console.log("The screen API may not be available in this version");
+        });
     }
-}
+});
 
-function window_hor_half() {
-    const win = hs.window.focusedWindow();
+// Menus are defined once and displayed on any device: on screen by hs_menu-gt, and on the
+// Stream Deck by hs_streamdeck-gt. Editing menus.js takes effect on the next reload.
+const menus = require(hs.appinfo.configDir + "/menus.js");
 
-    if (!win) {
-        console.log("No focused window");
-        return;
+interactive.use("hs_menu-gt", {
+    commands: (interactive, menu) => {
+        interactive.define({
+            name: "menu-show",
+            doc: "Show the main menu on screen, and dismiss it if it is showing.",
+            fn: () => menu.toggleOnScreen(menus.rootMenu, { name: "Root" })
+        });
+
+        interactive.define({
+            name: "menu-show-buses",
+            doc: "Show the bus menu on screen.",
+            fn: () => menu.toggleOnScreen(menus.busMenu, { name: "Buses" })
+        });
+
+        interactive.define({
+            name: "menu-hide",
+            doc: "Dismiss the on-screen menu.",
+            fn: () => menu.hideScreen()
+        });
     }
+});
 
-    // Get current window frame
-    const frame = win.frame;
+// setMenu runs through `after`, which use() calls before the Spoon's start(), so every
+// deck already has its menu by the time start() attaches to the hardware.
+interactive.use("hs_streamdeck-gt", {
+    after: (deck) => {
+        deck.setMenu("A00NA33332Q8DH", menus.rootMenu, "Root");
+        deck.setDefaultMenu(menus.rootMenu, "Root");
+    }
+});
 
-    // Reduce width to 50%, keep left edge fixed
-    const newFrame = new HSRect(frame.x, frame.y, frame.w / 2, frame.h);
+// Window commands. Built on the Swift-side API rather than the helpers in hs.window.js
+// (hs.window.maximize and friends), which are erased by the first garbage collection and
+// hardcode a 1920x1080 screen besides. Not a Spoon, so they are defined directly.
+const place = (win, fraction) => {
+    const screen = win.screen.frame;
+    win.frame = new HSRect(
+        screen.x + (fraction.x === undefined ? 0 : fraction.x) * screen.w,
+        screen.y,
+        fraction.w * screen.w,
+        screen.h
+    );
+    return true;
+};
 
-    win.frame = newFrame;
-    console.log(`Reduced window width from ${frame.w} to ${newFrame.w}`);
-}
+interactive.define({
+    name: "window-maximize",
+    doc: "Fill the screen with a window.",
+    interactive: [{ name: "window", reader: interactive.readers.window.auto }],
+    fn: (win) => place(win, { x: 0, w: 1 })
+});
 
-hs.hotkey.bind(hyper, "6", list_windows, null);
-hs.hotkey.bind(hyper, "8", next_screen, null);
-hs.hotkey.bind(hyper, "7", window_hor_half, null);
+interactive.define({
+    name: "window-left-half",
+    doc: "Move a window to the left half of its screen.",
+    interactive: [{ name: "window", reader: interactive.readers.window.auto }],
+    fn: (win) => place(win, { x: 0, w: 0.5 })
+});
 
+interactive.define({
+    name: "window-right-half",
+    doc: "Move a window to the right half of its screen.",
+    interactive: [{ name: "window", reader: interactive.readers.window.auto }],
+    fn: (win) => place(win, { x: 0.5, w: 0.5 })
+});
 
-hs.alert.show("Hammerspoon 2 Config loaded\nAll systems operational.");
+interactive.define({
+    name: "window-center",
+    doc: "Centre a window on its screen, keeping its size.",
+    interactive: [{ name: "window", reader: interactive.readers.window.auto }],
+    fn: (win) => win.centerOnScreen()
+});
 
+interactive.define({
+    name: "window-toggle-fullscreen",
+    doc: "Enter or leave fullscreen for a window.",
+    interactive: [{ name: "window", reader: interactive.readers.window.auto }],
+    fn: (win) => win.toggleFullscreen()
+});
+
+interactive.define({
+    name: "window-minimize",
+    doc: "Minimize a window.",
+    interactive: [{ name: "window", reader: interactive.readers.window.auto }],
+    fn: (win) => win.minimize()
+});
+
+interactive.define({
+    name: "window-focus",
+    doc: "Choose a window by title and focus it.",
+    interactive: [{ name: "window", reader: interactive.readers.window.prompted }],
+    fn: (win) => win.focus()
+});
+
+interactive.define({
+    name: "window-move-to-screen",
+    doc: "Move a window to a chosen screen, keeping its relative position and size.",
+    interactive: [
+        { name: "window", reader: interactive.readers.window.auto },
+        { name: "screen", reader: interactive.readers.screen.prompted }
+    ],
+    fn: (win, screen) => {
+        const from = win.screen.frame;
+        const to = screen.frame;
+        const f = win.frame;
+        win.frame = new HSRect(
+            to.x + ((f.x - from.x) / from.w) * to.w,
+            to.y + ((f.y - from.y) / from.h) * to.h,
+            Math.min(f.w * (to.w / from.w), to.w),
+            Math.min(f.h * (to.h / from.h), to.h)
+        );
+        return true;
+    }
+});
+
+interactive.define({
+    name: "window-info",
+    doc: "Show the title, application, screen and frame of a window.",
+    interactive: [{ name: "window", reader: interactive.readers.window.auto }],
+    fn: (win) => {
+        const f = win.frame;
+        const text = `${interactive.describe(win)}\n${win.screen.name}  ${f.w}×${f.h} at ${f.x},${f.y}`;
+        hs.ui.alert(text).duration(4).show();
+        console.log("[window-info] " + text.replace("\n", " · "));
+        return text;
+    }
+});
+
+// Only the chooser gets a key while Hammerspoon 1 is still running: its hotkeys are
+// registered system-wide and the two would fight over any chord bound in both.
+interactive.setKeys({ "cmd-ctrl-alt x": "commands-execute" });
+
+interactive.use.report();
 
 console.log("Finished loading-------------------------");
+
+// const hyper = ["⌘", "⌥", "⌃", "⇧"];
+
+// function eventHandler(eventName, appObject) {
+//     console.log("INIT.JS appWatcher eventHandler: " + eventName + " " + appObject.title);
+// }
+
+// hs.application.addWatcher("willLaunch", eventHandler);
+// hs.application.addWatcher("didLaunch", eventHandler);
+// hs.application.addWatcher("didTerminate", eventHandler);
+
+// const safari = hs.application.matchingBundleID("com.apple.Safari");
+// function handler(notification, element) {
+//     console.log("AX event: " + notification + " on: " + element.title);
+// }
+
+// if (safari != null) {
+//     hs.ax.addWatcher(safari, hs.ax.notificationTypes["windowCreated"], handler);
+// }
+
+// hs.hotkey.bind(hyper, "4", () => { console.log("HYPER 4"); }, null);
+// hs.hotkey.bind(hyper, "5",
+//                () => { console.log("HYPER 5 DOWN"); },
+//                () => { console.log("HYPER 5 UP");   });
