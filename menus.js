@@ -81,6 +81,88 @@ function applicationsMenu() {
         }))
 }
 
+// MARK: - Buttons that draw themselves
+//
+// `stateProvider` decides whether anything has changed; the image is only redrawn when it
+// has. `imageProvider` returns the fields to draw — the ordinary button fields, so icons,
+// colours and labels all work.
+
+function pad(n) {
+    return String(n).padStart(2, "0")
+}
+
+// Redrawn once a minute, and only when the minute has actually changed.
+const clockButton = {
+    label: "Clock",
+    key: "0",
+    dismiss: false,
+    command: "clock-show",
+    updateInterval: 10,
+    stateProvider: () => {
+        const now = new Date()
+        return pad(now.getHours()) + ":" + pad(now.getMinutes())
+    },
+    imageProvider: (context) => ({
+        label: JSON.parse(context.state),
+        background: "#F5C542",
+        labelColor: "#101014"
+    })
+}
+
+// The current audio output. Changing device changes the button.
+const audioOutButton = {
+    label: "Audio out",
+    key: "9",
+    dismiss: false,
+    updateInterval: 15,
+    stateProvider: () => {
+        const device = hs.audiodevice.defaultOutputDevice()
+        return device ? device.name : "none"
+    },
+    imageProvider: (context) => ({
+        icon: "audioPower.png",
+        label: JSON.parse(context.state)
+    })
+}
+
+// The forecast images are written by something else, a couple of times a day. The button
+// watches the file's modification time rather than a clock, so it is redrawn when the
+// picture actually changes and not before. `iconKey` carries that time, because an icon is
+// otherwise cached under its path and this file keeps the same path with new contents.
+
+function weatherButton(label, file, target, key) {
+    return {
+        label: label,
+        key: key,
+        url: target,
+        dismiss: false,
+        updateInterval: 900,
+        stateProvider: () => {
+            const attributes = hs.fs.attributes(file)
+            return attributes ? attributes.modificationDate : 0
+        },
+        imageProvider: (context) => ({
+            icon: file,
+            iconKey: file + "@" + context.state,
+            hideLabel: true
+        })
+    }
+}
+
+const weatherToday = weatherButton(
+    "Today",
+    "/Users/dmg/tmDropbox/org/today.png",
+    "https://weather.gc.ca/en/forecast/hourly/index.html?coords=48.412,-123.294",
+    "7"
+)
+
+const weatherTomorrow = weatherButton(
+    "Tomorrow",
+    "/Users/dmg/tmDropbox/org/tomorrow.png",
+    "https://weather.gc.ca/en/location/index.html?coords=48.412,-123.294",
+    "8"
+)
+
 // MARK: - Window management
 //
 // The commands are defined in init.js. The Hammerspoon 1 menu also had thirds, quadrants
@@ -109,31 +191,44 @@ const teachingMenu = [
 
 // MARK: - Emacs
 //
-// Every one of these ran elisp through emacsclient in the Hammerspoon 1 configuration.
-// Porting them needs an equivalent of hs_emacs_helper, which raises Emacs and reports a
-// failed emacsclient.
+// Each runs elisp through emacsclient and brings Emacs forward. The commands are defined
+// in init.js, since which elisp to run belongs to this configuration rather than to the
+// Spoon that runs it.
 
 const emacsMenu = [
-    todo("Bookmarks", "bookmark.png", "an emacsclient helper"),
-    todo("Agenda", "agenda.png", "an emacsclient helper"),
-    todo("Daily", "daily.png", "an emacsclient helper"),
-    todo("Habits", "habits.png", "an emacsclient helper"),
-    todo("Capture", "emacs-capture.jpg", "an emacsclient helper"),
-    todo("Progress", "emacs-progress.png", "an emacsclient helper")
+    { label: "Bookmarks", icon: "bookmark.png", key: "b", command: "emacs-bookmarks" },
+    { label: "Agenda", icon: "agenda.png", key: "a", command: "emacs-agenda" },
+    { label: "Daily", icon: "daily.png", key: "d", command: "emacs-daily" },
+    { label: "Habits", icon: "habits.png", key: "h", command: "emacs-habits" },
+    { label: "Capture", icon: "emacs-capture.jpg", key: "c", command: "emacs-capture" },
+    { label: "Progress", icon: "emacs-progress.png", key: "p", command: "emacs-progress" },
+    { label: "Quick todo", icon: "symbol:checklist", key: "q", command: "emacs-quick-todo" }
 ]
 
 // MARK: - Chrome
 //
-// These switched to a tab by URL through ~/bin/focusTabChrome.py. Porting them needs a
-// command that runs it.
+// Each switches to the tab whose URL contains the address, and opens it when no tab does.
+// Netflix matches on the title instead, as it did in the Hammerspoon 1 configuration:
+// its URL changes as you move around the site.
+
+/** A button that switches to a Chrome tab by URL. */
+function tab(label, target, icon, key) {
+    return { label: label, icon: icon, key: key, command: "chrome-focus-url", args: [target] }
+}
 
 const chromeMenu = [
-    todo("YouTube", "youtube.png", "focusTabChrome.py"),
-    todo("ChatGPT", "openai.png", "focusTabChrome.py"),
-    todo("Pocket", "pocket.png", "focusTabChrome.py"),
-    todo("Disney", "disney.png", "focusTabChrome.py"),
-    todo("Netflix", "netflix.jpeg", "focusTabChrome.py"),
-    todo("Teams", "teams.png", "focusTabChrome.py")
+    tab("YouTube", "https://www.youtube.com/", "youtube.png", "y"),
+    tab("ChatGPT", "https://chat.openai.com/", "openai.png", "c"),
+    tab("Pocket", "https://getpocket.com/saves", "pocket.png", "p"),
+    tab("Disney", "https://disneyplus.com", "disney.png", "d"),
+    {
+        label: "Netflix",
+        icon: "netflix.jpeg",
+        key: "n",
+        command: "chrome-focus-title",
+        args: ["Netflix", "https://netflix.com"]
+    },
+    tab("Teams", "http://teams.microsoft.com/", "teams.png", "t")
 ]
 
 // MARK: - Root
@@ -143,23 +238,32 @@ const chromeMenu = [
 const rootMenu = [
     { label: "Windows", icon: "windows.jpg", key: "w", children: windowMenu },
 
-    url("Today", "https://weather.gc.ca/en/forecast/hourly/index.html?coords=48.412,-123.294", "symbol:cloud.sun"),
-    url("Tomorrow", "https://weather.gc.ca/en/location/index.html?coords=48.412,-123.294", "symbol:cloud.sun.rain"),
+    weatherToday,
+    weatherTomorrow,
 
     { label: "Apps", icon: "apps.png", key: "a", children: applicationsMenu },
     todo("Window switcher", "windows.jpeg", "a window list; snapshots are gone from HS2"),
 
     { label: "HASS", icon: "hass.png", key: "h", children: hassMenu },
 
-    todo("Audio out", "audioPower.png", "dynamic buttons, to show the current device"),
-    todo("Audio in", "symbol:mic", "dynamic buttons, to show the current device"),
+    audioOutButton,
+    todo("Audio in", "symbol:mic", "an input-device command"),
 
     { label: "Buses", icon: "bus2.png", key: "b", children: busMenu },
     { label: "Teaching", icon: "teaching.png", key: "y", children: teachingMenu },
 
-    todo("Gmail", "gmail.png", "focusTabChrome.py, or a Gmail command"),
-    todo("Calendar", "calendar.png", "focusTabChrome.py, or a Calendar command"),
-    todo("Teams", "teams.png", "focusTabChrome.py"),
+    // A hold on Gmail opens a compose window, as it did in the Hammerspoon 1 menu.
+    {
+        label: "Gmail",
+        icon: "gmail.png",
+        key: "g",
+        command: "chrome-focus-url",
+        args: ["https://mail.google.com/mail/u/0/#inbox"],
+        altCommand: "chrome-focus-url",
+        altArgs: ["https://mail.google.com/mail/u/0/#inbox?compose=new"]
+    },
+    tab("Calendar", "https://calendar.google.com", "calendar.png", "n"),
+    tab("Teams", "http://teams.microsoft.com/", "teams.png", "s"),
 
     todo("Next fullscreen", "nextFullscreen.png", "the dmgWin window helpers"),
     todo("Isolate", "isolate.png", "the annoy window helpers"),
@@ -177,7 +281,7 @@ const rootMenu = [
     todo("Whisper", "whisper.png", "the whisper dictation Spoon"),
     { label: "Paste", icon: "symbol:doc.on.clipboard", key: "v", command: "paste" },
 
-    { label: "Clock", icon: "symbol:clock", key: "c", command: "clock-show" }
+    clockButton
 ]
 
 module.exports = {

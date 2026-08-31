@@ -100,6 +100,86 @@ interactive.use("hs_time-gt", {
 // Stream Deck by hs_streamdeck-gt. Editing menus.js takes effect on the next reload.
 const menus = require(hs.appinfo.configDir + "/menus.js");
 
+// Switch to a Chrome tab rather than to Chrome. focusTabChrome.py lists Chrome's tabs,
+// focuses the first whose URL or title contains what was asked for, and opens the address
+// when none does. Chrome is raised afterwards, on a delay so it does not beat the script:
+// focusing a tab selects it within Chrome without bringing Chrome forward, and macOS does
+// not let an application that is not frontmost activate another one.
+//
+// PATH is set because the script runs under `env python3` and calls terminal-notifier,
+// and Hammerspoon's shell does not read the profile that puts either on PATH.
+const chromeTab = (() => {
+    const script = "/Users/dmg/bin/focusTabChrome.py";
+    const path = "/Users/dmg/.config/dmg/python/bin:/opt/homebrew/bin";
+    const quote = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
+    let raiseTimer = null;
+
+    return (field, match, fallback) => {
+        const command = `PATH=${quote(path)}:"$PATH" ${quote(script)} ` +
+            `${quote(field)} ${quote(match)} ${quote(fallback)}`;
+
+        // Held: a timer with no reference left is garbage collected before it fires.
+        raiseTimer = hs.timer.doAfter(0.4, () => {
+            hs.application.launchOrFocus("com.google.Chrome");
+        });
+
+        return hs.task.shell(command).catch((e) => {
+            console.error(`[chrome] ${field} ${match} failed: ${e && e.stderr ? e.stderr : e}`);
+        });
+    };
+})();
+
+interactive.define({
+    name: "chrome-focus-url",
+    doc: "Switch to the Chrome tab whose URL contains this, opening it if none does.",
+    interactive: [{ name: "url", reader: interactive.readers.string.prompted, default: "https://" }],
+    fn: (url) => chromeTab("url", url, "force")
+});
+
+interactive.define({
+    name: "chrome-focus-title",
+    doc: "Switch to the Chrome tab whose title contains this, opening a URL if none does.",
+    interactive: [
+        { name: "title", reader: interactive.readers.string.prompted },
+        { name: "url", reader: interactive.readers.string.prompted, default: "https://" }
+    ],
+    fn: (title, url) => chromeTab("title", title, url)
+});
+
+// The Spoon runs elisp; which elisp is this configuration's business, so these commands
+// live here rather than in a Spoon that is meant to be publishable.
+interactive.use("hs_emacs-gt", {
+    commands: (interactive, emacs) => {
+        const elispCommand = (name, doc, elisp) => interactive.define({
+            name: name,
+            doc: doc,
+            fn: () => emacs.executeAndRaise(elisp)
+        });
+
+        elispCommand("emacs-bookmarks", "Show the Emacs bookmarks.", "(bookmark-gt-list)");
+        elispCommand("emacs-agenda", "Show the org agenda.", "(dmg-agenda)");
+        elispCommand("emacs-daily", "Go to today's daily note.", "(dmg-goto-daily-today)");
+        elispCommand("emacs-habits", "Show habits.", "(dmg-habits)");
+        elispCommand("emacs-capture", "Capture an org-roam note.", "(org-roam-capture)");
+        elispCommand("emacs-progress", "Record progress, without a link.",
+                     "(call-interactively #'dmg-progress-no-link)");
+        elispCommand("emacs-quick-todo", "Add a quick todo.", "(dmg-quick-todo)");
+
+        interactive.define({
+            name: "emacs-execute",
+            doc: "Run elisp in Emacs and bring it forward.",
+            interactive: [{ name: "elisp", reader: interactive.readers.string.prompted, default: "(message \"hello\")" }],
+            fn: (elisp) => emacs.executeAndRaise(elisp)
+        });
+
+        interactive.define({
+            name: "emacs-toggle-keys",
+            doc: "Turn the keys forwarded to Emacs on or off.",
+            fn: () => emacs.toggleAllKeys()
+        });
+    }
+});
+
 interactive.use("hs_hass-gt", {
     commands: (interactive, hass) => {
         interactive.define({
