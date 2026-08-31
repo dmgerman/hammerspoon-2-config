@@ -1,0 +1,257 @@
+#+TITLE: Hammerspoon 2: what is missing, and what changed
+#+AUTHOR: Daniel M. German
+#+DATE: 2026-08-31
+
+Findings from porting the Hammerspoon 1 configuration to Hammerspoon 2: capabilities that
+Hammerspoon 1 had and Hammerspoon 2 does not, and behaviour that changed enough to break a
+direct port. Each entry says what it blocks here and what is being done instead.
+
+Everything below was established by running it against Hammerspoon 2 built from source at
+=origin/main= plus local commits, on Darwin 25.6.0, in August 2026. Where a claim rests on
+a measurement, the measurement is given.
+
+* Summary
+
+| Gap                                            | Severity | Worked around      |
+|------------------------------------------------+----------+--------------------|
+| No offscreen drawing (=hs.canvas=)              | Blocking | Yes, through SVG   |
+| =HSImage= cannot compose or render text         | Blocking | Yes, through SVG   |
+| SVG cannot load external files                 | Blocking | Yes, base64 inline |
+| No =btoa= / base64 in the JavaScript runtime    | Blocking | Yes, a subprocess  |
+| =hs.fs.read= returns nothing for binary files   | Blocking | Yes, a subprocess  |
+| No window snapshots                            | Blocking | No                 |
+| No system or media key events                  | Blocking | No                 |
+| Activation refused unless frontmost            | Changed  | Yes                |
+| =hs.ui= windows cannot be changed once shown    | Changed  | Partly             |
+| =hs.task= promises sometimes never resolve      | Unclear  | Yes, watch a file  |
+| No window lookup by identifier                 | Minor    | Yes                |
+| One Spoon directory, no search path            | Minor    | No                 |
+| Command line client has no =-c=                 | Minor    | Yes, standard input |
+
+* Blocking gaps
+
+** No offscreen drawing
+
+Hammerspoon 1 had =hs.canvas=, =hs.drawing= and =hs.styledtext=. Hammerspoon 2 has none of
+them. There is no way to draw shapes or text and obtain an image.
+
+=hs.ui= can /display/ shapes and text in a window, but nothing rasterises that into an
+=HSImage=.
+
+*Blocks*: every button image on the Stream Deck; the on-screen message in the Emacs Spoon,
+which was an =hs.canvas= in version 1; and the whole =Renderer= of the version 1
+=hs_streamdeck= Spoon.
+
+*Workaround*: write the button as SVG and load it through =HSImage.fromURL= with a
+=data:image/svg+xml= URL. This works, and gives text layout, shapes and composition. It is
+the single largest piece of machinery in =hs_menu-gt= that exists only because of a missing
+API.
+
+*Wanted*: an offscreen drawing surface that yields an =HSImage= — the equivalent of
+=hs.canvas:imageFromCanvas()=. Failing that, text-to-image on =HSImage= would cover most
+of the need.
+
+** HSImage cannot compose or render text
+
+=HSImage= can load, copy, crop, resize and save. It cannot draw text, and it cannot
+combine two images.
+
+*Blocks*: an icon with a label under it, which is most buttons; any badge or overlay.
+
+*Workaround*: SVG, as above. Composition requires the icon inside the markup, which leads
+to the next two entries.
+
+** SVG cannot load external files
+
+An =<image xlink:href="file:///path.png">= inside SVG rendered by =HSImage.fromURL= does
+not load. The result is a broken-image placeholder — a red-bordered box with a cross —
+rather than an error.
+
+This is AppKit rendering SVG as a self-contained document, and is unlikely to be
+considered a defect. It is recorded because the failure is silent: the promise resolves
+with a valid 96×96 image that happens to contain the placeholder, so nothing reports a
+problem.
+
+*Workaround*: embed the icon in the markup as a =data:image/png;base64,= URI. Data URLs of
+170 KB render without trouble; 400 KB was also fine.
+
+** No base64 in the JavaScript runtime
+
+=btoa= and =atob= are not defined. =TextEncoder=, =Buffer= and =Uint8Array= were also
+checked; nothing offers base64.
+
+*Blocks*: embedding an icon in SVG, which is the only way to compose images.
+
+*Workaround*: run =base64= as a subprocess. Its output is text, so it can be cached to disk
+and read back with =hs.fs.read=, and the subprocess runs once per icon ever.
+
+*Wanted*: =btoa=/=atob=, or base64 on =hs.hashing=.
+
+** hs.fs.read returns nothing for binary files
+
+=hs.fs.read= on a text file returns its contents. On a PNG it returns =undefined=. It
+decodes as UTF-8 and gives up rather than returning bytes.
+
+: hs.fs.read(configDir + "/menus.js")           → string, 2103 characters
+: hs.fs.read(configDir + "/icons/bus_7.png")    → undefined
+
+*Blocks*: encoding an icon in process. Together with the missing =btoa=, this is why an
+icon needs a subprocess.
+
+*Wanted*: a way to read a file as bytes — an =hs.fs.readData= returning something a
+base64 encoder could consume.
+
+** No window snapshots
+
+Hammerspoon 1 had =window:snapshot()=. =HSWindow= has no equivalent; =typeof w.snapshot= is
+=undefined=.
+
+*Blocks*: the window switcher, whose buttons in version 1 were a thumbnail of the window
+with the application icon drawn in the corner. There is no way to reproduce it.
+
+*Wanted*: =HSWindow.snapshot()= returning an =HSImage=.
+
+** No system or media key events
+
+Hammerspoon 1 had =hs.eventtap.event.newSystemKeyEvent("PLAY", true):post()=. Hammerspoon
+2 has =hs.eventtap.keyStroke= and =keyStrokes= only; nothing posts a system-defined event.
+
+*Blocks*: the play/pause button, and volume or brightness keys generally.
+
+*Wanted*: a way to post =NSSystemDefined= key events.
+
+* Behaviour that changed
+
+** An application cannot be activated unless Hammerspoon is frontmost
+
+=HSApplication.activate()= calls =NSRunningApplication.activate(options:)=, which macOS
+refuses when the calling application is not frontmost — which Hammerspoon never is at the
+moment a hotkey or a Stream Deck button is pressed. It fails silently: no error, no log,
+nothing happens.
+
+=HSWindow.focus()= has the same limitation in a more misleading form. It returns =true=,
+and the window is raised within its own application, but the application stays behind.
+
+: app.activate()      → Emacs does not come forward
+: app.activate(true)  → Emacs does not come forward
+: launchOrFocus(id)   → Emacs frontmost
+
+*Workaround*: =hs.application.launchOrFocus(bundleID)=, which goes through
+=NSWorkspace.openApplication= and is not restricted. To focus a particular window, raise
+the application first and then call =window.focus()=; that combination was verified to put
+the right window of the right application in front.
+
+The version 1 Emacs Spoon already used =launchOrFocusByBundleID= for this reason, with a
+comment explaining it, so the constraint predates Hammerspoon 2.
+
+*Wanted*: either =activate()= using the same mechanism, or documentation saying it cannot
+work from a background application. A silent failure is the worst of the three.
+
+** hs.ui windows cannot be changed once shown
+
+There is no way to alter a window's element tree after =show()=. Reactive =HSString= values
+update text, and =HSImage.set()= replaces an image already bound to an element, but
+elements cannot be added, removed or replaced.
+
+*Blocks*: progressive drawing of the on-screen menu — it shows nothing until every image is
+ready, where the Stream Deck fills in as each arrives. Also self-refreshing buttons on
+screen: a clock cannot tick without rebuilding the window, and rebuilding rebinds every
+hotkey and takes the keyboard with it.
+
+*Workaround*: rebuild the window on navigation, and do not refresh dynamic buttons on
+screen at all.
+
+* Unresolved
+
+** hs.task promises are sometimes never resolved
+
+A promise from =hs.task.shell= is sometimes neither resolved nor rejected. Nothing is
+logged. The child process runs to completion and writes its output correctly; only the
+JavaScript callback is lost.
+
+: 12 × hs.task.shell("sleep 1"), started inside an hs.ipc evaluation
+:     → 0, 4, 7 or 12 of 12 resolved, differing between identical runs
+: the same 12, started from a timer after that connection closed
+:     → 12 of 12, four times running
+
+*Not* caused by the size of the output: =sleep 1= writes nothing and still fails, while a
+single task returning 400 KB resolves. *Not* caused by the =HSTask= object being
+deallocated: twelve concurrent =hs.task.create= calls with plain callbacks completed 12 of
+12 whether or not the task was retained in JavaScript.
+
+The one variable that changes the outcome is whether the task is started from within an
+=hs.ipc= evaluation. That points at the IPC session's lifetime rather than at =hs.task=.
+
+*Not reported upstream*, deliberately: this checkout carries local commits that rewrite
+=hs.ipc=, which is the same subsystem the failure correlates with. It has to be reproduced
+on a stock build before it can be attributed to Hammerspoon 2.
+
+*Workaround*, in =hs_menu-gt=: run the encodings one at a time, have the command write its
+output to a file, and watch for the file rather than relying on the promise. The work
+always completes, so the file is a reliable answer.
+
+*Testing note*: do not test asynchronous behaviour by dispatching it inside an =hs2=
+evaluation. Start it from a timer that fires after the connection closes, or the harness
+manufactures failures that do not occur from =init.js=.
+
+* Smaller gaps
+
+** No window lookup by identifier
+
+Hammerspoon 1 had =hs.window.get(id)=. =hs.window= offers =focusedWindow=, =allWindows=,
+=visibleWindows=, =windowsForApp=, =windowsOnScreen=, =windowAtPoint= and
+=orderedWindows=, but nothing by identifier, although =HSWindow.id= exists.
+
+*Workaround*: filter =allWindows()=. Needed by the edit-with-Emacs round trip, which
+identifies the window it must paste into by id.
+
+** One Spoon directory, and no search path
+
+=hs.loadSpoon(name)= resolves =<configDir>/Spoons/<name>/init.js= and nothing else.
+
+*Blocks*: keeping Spoons that are specific to this machine apart from generic ones that
+could be published.
+
+*Wanted*: a list of directories to search.
+
+Related: =hs.loadSpoon= returns a cached module, so editing a Spoon has no effect until
+=hs.reload()=. Reasonable, but worth knowing while developing.
+
+** The command line client has no -c option
+
+Hammerspoon 1's =hs -c "code"= was how Emacs called back into Hammerspoon. The Hammerspoon
+2 client reads from standard input instead.
+
+*Workaround*: pipe the code in. From elisp, =call-process-region= with the command as the
+region and =--no-prompt= as the argument.
+
+Also worth noting: the client and the application must be the same build. An out-of-date
+client fails with =Connection to Hammerspoon 2 was lost= for every input, including
+=1+1=, which reads as Hammerspoon being down rather than as a version mismatch.
+
+** The console evaluates one statement
+
+Input to the client is evaluated as a single statement: no =//= comments, semicolons
+required, and anything multi-statement must be wrapped in a function expression.
+
+* Confirmed working
+
+Recorded so they are not investigated twice.
+
+| Capability                            | How                                              |
+|---------------------------------------+--------------------------------------------------|
+| SF Symbols, application icons         | =HSImage.fromSymbol=, =fromAppBundle=            |
+| Resizing an image                     | =copyImage()= then setting =size=                |
+| Rendering SVG                         | =HSImage.fromURL= with a data URL                |
+| Tinting a template image              | =feColorMatrix= in the SVG                       |
+| Press and release of a key            | =hs.hotkey.bind(mods, key, down, up)=            |
+| Key auto-repeat                       | Not delivered, so a hold needs no filtering      |
+| Enabling and disabling a hotkey       | =enable()=, =disable()=, =isEnabled()=           |
+| Sleeping in place                     | =hs.timer.usleep= exists, though it blocks       |
+| Directory creation, including parents | =hs.fs.mkdir=                                    |
+| File attributes, including size       | =hs.fs.attributes=                               |
+| Accessibility text of a focused field | =hs.ax.focusedElement().attributeValue("AXValue")= |
+| Pasteboard, and detecting a change    | =writeString=, =readString=, =changeCount=       |
+| Screen lock and unlock                | =hs.power.addEventWatcher=                       |
+| Menu bar items                        | =hs.menubar.create=                              |
+| Stream Deck                           | =hs.streamdeck=, images, brightness, callbacks   |

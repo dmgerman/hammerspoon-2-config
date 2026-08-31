@@ -177,6 +177,18 @@ interactive.use("hs_emacs-gt", {
             doc: "Turn the keys forwarded to Emacs on or off.",
             fn: () => emacs.toggleAllKeys()
         });
+
+        interactive.define({
+            name: "emacs-edit-selection",
+            doc: "Edit the selected text in Emacs, and paste the result back.",
+            fn: () => emacs.editSelection()
+        });
+
+        interactive.define({
+            name: "emacs-edit-all",
+            doc: "Edit the whole of the focused text field in Emacs.",
+            fn: () => emacs.editAll()
+        });
     }
 });
 

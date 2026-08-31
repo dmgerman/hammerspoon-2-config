@@ -3,9 +3,19 @@
 
 // MARK: - Helpers
 
-/** A button that opens a URL. */
+/** A button that opens a URL in the default browser. */
 function url(label, target, icon) {
     return { label: label, icon: icon, url: target }
+}
+
+/**
+ * A button that switches to the Chrome tab showing a URL.
+ *
+ * Unlike `url`, this reuses the tab if one is already open, and opens it only when none
+ * is. Chrome is brought forward either way.
+ */
+function tab(label, target, icon, key) {
+    return { label: label, icon: icon, key: key, command: "chrome-focus-url", args: [target] }
 }
 
 /**
@@ -30,14 +40,14 @@ function todo(label, icon, needs) {
 // MARK: - Buses
 
 const busMenu = [
-    url("Route 7", "https://bctransit.com/victoria/schedules-and-maps/route-overview?route=7", "bus_7.png"),
-    url("Route 15", "https://bctransit.com/victoria/schedules-and-maps/route-overview?route=15", "bus_15.png"),
-    url("Route 14", "https://bctransit.com/victoria/schedules-and-maps/route-overview?route=14", "bus_14.png"),
-    url("Hill down", "https://victoria.bctracker.ca/stops/100383", "bus_hd.png"),
-    url("Hill up", "https://victoria.bctracker.ca/stops/100390", "bus_hu.png"),
-    url("View St", "https://victoria.bctracker.ca/stops/100042"),
-    url("Anyride down", "https://bct.tmix.se/anyride/#f=100383", "bus_hd.png"),
-    url("Anyride up", "https://bct.tmix.se/anyride/#f=100390", "bus_hu.png")
+    tab("Route 7", "https://bctransit.com/victoria/schedules-and-maps/route-overview?route=7", "bus_7.png"),
+    tab("Route 15", "https://bctransit.com/victoria/schedules-and-maps/route-overview?route=15", "bus_15.png"),
+    tab("Route 14", "https://bctransit.com/victoria/schedules-and-maps/route-overview?route=14", "bus_14.png"),
+    tab("Hill down", "https://victoria.bctracker.ca/stops/100383", "bus_hd.png"),
+    tab("Hill up", "https://victoria.bctracker.ca/stops/100390", "bus_hu.png"),
+    tab("View St", "https://victoria.bctracker.ca/stops/100042"),
+    tab("Anyride down", "https://bct.tmix.se/anyride/#f=100383", "bus_hd.png"),
+    tab("Anyride up", "https://bct.tmix.se/anyride/#f=100390", "bus_hu.png")
 ]
 
 // MARK: - Home Assistant
@@ -134,7 +144,8 @@ function weatherButton(label, file, target, key) {
     return {
         label: label,
         key: key,
-        url: target,
+        command: "chrome-focus-url",
+        args: [target],
         dismiss: false,
         updateInterval: 900,
         stateProvider: () => {
@@ -185,8 +196,8 @@ const windowMenu = [
 // MARK: - Teaching
 
 const teachingMenu = [
-    url("Black", "https://bright.uvic.ca/d2l/home/335421"),
-    url("White", "https://bright.uvic.ca/d2l/home/335420")
+    tab("Black", "https://bright.uvic.ca/d2l/home/335421", null, "b"),
+    tab("White", "https://bright.uvic.ca/d2l/home/335420", null, "w")
 ]
 
 // MARK: - Emacs
@@ -210,11 +221,6 @@ const emacsMenu = [
 // Each switches to the tab whose URL contains the address, and opens it when no tab does.
 // Netflix matches on the title instead, as it did in the Hammerspoon 1 configuration:
 // its URL changes as you move around the site.
-
-/** A button that switches to a Chrome tab by URL. */
-function tab(label, target, icon, key) {
-    return { label: label, icon: icon, key: key, command: "chrome-focus-url", args: [target] }
-}
 
 const chromeMenu = [
     tab("YouTube", "https://www.youtube.com/", "youtube.png", "y"),
