@@ -12,23 +12,28 @@ a measurement, the measurement is given.
 
 * Summary
 
-| Gap                                            | Severity | Worked around      |
-|------------------------------------------------+----------+--------------------|
-| No offscreen drawing (=hs.canvas=)              | Blocking | Yes, through SVG   |
-| =HSImage= cannot compose or render text         | Blocking | Yes, through SVG   |
-| SVG cannot load external files                 | Blocking | Yes, base64 inline |
-| No =btoa= / base64 in the JavaScript runtime    | Blocking | Yes, a subprocess  |
-| =hs.fs.read= returns nothing for binary files   | Blocking | Yes, a subprocess  |
-| No window snapshots                            | Blocking | No                 |
-| No system or media key events                  | Blocking | No                 |
-| Activation refused unless frontmost            | Changed  | Yes                |
-| =hs.ui= windows cannot be changed once shown    | Changed  | Partly             |
-| =hs.task= promises sometimes never resolve      | Unclear  | Yes, watch a file  |
-| No window lookup by identifier                 | Minor    | Yes                |
-| One Spoon directory, no search path            | Minor    | No                 |
-| Command line client has no =-c=                 | Minor    | Yes, standard input |
+/Missing/ means the capability does not exist. /Defect/ means it exists and is documented
+but does not work. /Changed/ means it works differently from Hammerspoon 1 and a direct
+port fails. /Unexplained/ means the cause has not been established.
 
-* Blocking gaps
+| Finding                                        | Kind        | Blocks   | Worked around       |
+|------------------------------------------------+-------------+----------+---------------------|
+| No offscreen drawing (=hs.canvas=)              | Missing     | Yes      | Yes, through SVG    |
+| =HSImage= cannot compose or render text         | Missing     | Yes      | Yes, through SVG    |
+| SVG cannot load external files                 | Missing     | Yes      | Yes, base64 inline  |
+| No =btoa= / base64 in the JavaScript runtime    | Missing     | Yes      | Yes, a subprocess   |
+| =hs.fs.read= returns nothing for binary files   | Missing     | Yes      | Yes, a subprocess   |
+| No window snapshots                            | Missing     | Yes      | No                  |
+| No system or media key events                  | Missing     | Yes      | No                  |
+| No window lookup by identifier                 | Missing     | No       | Yes                 |
+| One Spoon directory, no search path            | Missing     | No       | No                  |
+| Command line client has no =-c=                 | Missing     | No       | Yes, standard input |
+| =hs.window= frame helpers raise a TypeError     | Defect      | Yes      | Yes, set =frame=    |
+| Activation refused unless frontmost            | Changed     | Yes      | Yes                 |
+| =hs.ui= windows cannot be changed once shown    | Changed     | Partly   | Partly              |
+| =hs.task= promises sometimes never resolve      | Unexplained | Yes      | Yes, watch a file   |
+
+* Missing capabilities
 
 ** No offscreen drawing
 
@@ -120,6 +125,41 @@ Hammerspoon 1 had =hs.eventtap.event.newSystemKeyEvent("PLAY", true):post()=. Ha
 
 *Wanted*: a way to post =NSSystemDefined= key events.
 
+* Defects
+
+** Every hs.window frame helper calls a method that does not exist
+
+
+=hs.window.js= defines =maximize=, =moveToLeftHalf=, =moveToRightHalf=, =grid.setGrid= and
+eight =tiling= functions. Each sets the window's frame with:
+
+: win.setFrame(screenFrame.x, screenFrame.y, screenFrame.w, screenFrame.h)
+
+=HSWindow= has no =setFrame=. It exposes =frame=, =position= and =size= as settable
+properties. So every one of these throws:
+
+: hs.window.maximize(win)
+: → TypeError: win.setFrame is not a function
+
+Verified against upstream =01c403b=, which is stock code — this checkout's local commits
+touch only =hs.ipc=, the Makefile and the project file, so the fault is not ours.
+
+That commit fixed two other faults in the same helpers: they were discarded by the first
+garbage collection (issue #185), and they assumed a 1920x1080 screen. Both are gone. The
+helpers now survive and compute the screen correctly, and still cannot move a window.
+
+=findByTitle=, =currentWindows= and =focused= do not call =setFrame=, and work.
+
+*Workaround*: set the property directly, which is a documented API:
+
+: win.frame = new HSRect(x, y, w, h)
+
+=init.js= builds halves, thirds and quadrants on a small =place(win, grid, cell)= helper
+over that property — what =hs.window.grid= would have provided.
+
+*Wanted*: either =setFrame(x, y, w, h)= on =HSWindow=, or the helpers changed to assign to
+=frame=. The second is a four-line change to =hs.window.js=.
+
 * Behaviour that changed
 
 ** An application cannot be activated unless Hammerspoon is frontmost
@@ -146,6 +186,12 @@ comment explaining it, so the constraint predates Hammerspoon 2.
 
 *Wanted*: either =activate()= using the same mechanism, or documentation saying it cannot
 work from a background application. A silent failure is the worst of the three.
+
+** The client evaluates one statement
+
+Hammerspoon 1 took a string of Lua on the command line. The Hammerspoon 2 client reads
+standard input and evaluates it as a single statement: no =//= comments, semicolons
+required, and anything of more than one statement wrapped in a function expression.
 
 ** hs.ui windows cannot be changed once shown
 
@@ -194,7 +240,10 @@ always completes, so the file is a reliable answer.
 evaluation. Start it from a timer that fires after the connection closes, or the harness
 manufactures failures that do not occur from =init.js=.
 
-* Smaller gaps
+* Also missing
+:PROPERTIES:
+:DESCRIPTION: Missing as well, but each has a workaround that costs a line or two.
+:END:
 
 ** No window lookup by identifier
 
@@ -228,11 +277,6 @@ region and =--no-prompt= as the argument.
 Also worth noting: the client and the application must be the same build. An out-of-date
 client fails with =Connection to Hammerspoon 2 was lost= for every input, including
 =1+1=, which reads as Hammerspoon being down rather than as a version mismatch.
-
-** The console evaluates one statement
-
-Input to the client is evaluated as a single statement: no =//= comments, semicolons
-required, and anything multi-statement must be wrapped in a function expression.
 
 * Confirmed working
 

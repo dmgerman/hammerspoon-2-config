@@ -288,16 +288,32 @@ interactive.use("hs_streamdeck-gt", {
     }
 });
 
-// Window commands. Built on the Swift-side API rather than the helpers in hs.window.js
-// (hs.window.maximize and friends), which are erased by the first garbage collection and
-// hardcode a 1920x1080 screen besides. Not a Spoon, so they are defined directly.
-const place = (win, fraction) => {
+// Window commands. Not a Spoon, so they are defined directly.
+//
+// The helpers in hs.window.js — maximize, tiling, grid — exist but raise a TypeError when
+// called, so the frame is set directly. See ai/features-missing.org.
+//
+// place() takes a grid and a cell within it, which covers halves, thirds and quadrants:
+// place(win, {cols: 3}, {col: 1}) is the middle third.
+const place = (win, grid, cell) => {
+    if (!win) return false;
+
     const screen = win.screen.frame;
+    const cols = grid.cols === undefined ? 1 : grid.cols;
+    const rows = grid.rows === undefined ? 1 : grid.rows;
+    const col = cell.col === undefined ? 0 : cell.col;
+    const row = cell.row === undefined ? 0 : cell.row;
+    const colSpan = cell.colSpan === undefined ? 1 : cell.colSpan;
+    const rowSpan = cell.rowSpan === undefined ? 1 : cell.rowSpan;
+
+    const cellWidth = screen.w / cols;
+    const cellHeight = screen.h / rows;
+
     win.frame = new HSRect(
-        screen.x + (fraction.x === undefined ? 0 : fraction.x) * screen.w,
-        screen.y,
-        fraction.w * screen.w,
-        screen.h
+        screen.x + col * cellWidth,
+        screen.y + row * cellHeight,
+        colSpan * cellWidth,
+        rowSpan * cellHeight
     );
     return true;
 };
@@ -306,22 +322,47 @@ interactive.define({
     name: "window-maximize",
     doc: "Fill the screen with a window.",
     interactive: [{ name: "window", reader: interactive.readers.window.auto }],
-    fn: (win) => place(win, { x: 0, w: 1 })
+    fn: (win) => place(win, {}, {})
 });
 
 interactive.define({
     name: "window-left-half",
     doc: "Move a window to the left half of its screen.",
     interactive: [{ name: "window", reader: interactive.readers.window.auto }],
-    fn: (win) => place(win, { x: 0, w: 0.5 })
+    fn: (win) => place(win, { cols: 2 }, { col: 0 })
 });
 
 interactive.define({
     name: "window-right-half",
     doc: "Move a window to the right half of its screen.",
     interactive: [{ name: "window", reader: interactive.readers.window.auto }],
-    fn: (win) => place(win, { x: 0.5, w: 0.5 })
+    fn: (win) => place(win, { cols: 2 }, { col: 1 })
 });
+
+// Thirds, quadrants and the remaining halves. These are what hs.window.tiling and
+// hs.window.grid would provide if they worked.
+const windowPlacements = [
+    ["window-top-half", "Move a window to the top half of its screen.", { rows: 2 }, { row: 0 }],
+    ["window-bottom-half", "Move a window to the bottom half of its screen.", { rows: 2 }, { row: 1 }],
+    ["window-left-third", "Move a window to the left third of its screen.", { cols: 3 }, { col: 0 }],
+    ["window-center-third", "Move a window to the middle third of its screen.", { cols: 3 }, { col: 1 }],
+    ["window-right-third", "Move a window to the right third of its screen.", { cols: 3 }, { col: 2 }],
+    ["window-left-two-thirds", "Move a window to the left two thirds of its screen.", { cols: 3 }, { col: 0, colSpan: 2 }],
+    ["window-right-two-thirds", "Move a window to the right two thirds of its screen.", { cols: 3 }, { col: 1, colSpan: 2 }],
+    ["window-top-left", "Move a window to the top left quarter of its screen.", { cols: 2, rows: 2 }, { col: 0, row: 0 }],
+    ["window-top-right", "Move a window to the top right quarter of its screen.", { cols: 2, rows: 2 }, { col: 1, row: 0 }],
+    ["window-bottom-left", "Move a window to the bottom left quarter of its screen.", { cols: 2, rows: 2 }, { col: 0, row: 1 }],
+    ["window-bottom-right", "Move a window to the bottom right quarter of its screen.", { cols: 2, rows: 2 }, { col: 1, row: 1 }]
+];
+
+for (const [name, doc, grid, cell] of windowPlacements) {
+    interactive.define({
+        name: name,
+        doc: doc,
+        interactive: [{ name: "window", reader: interactive.readers.window.auto }],
+        fn: (win) => place(win, grid, cell)
+    });
+}
 
 interactive.define({
     name: "window-center",

@@ -188,9 +188,27 @@ const windowMenu = [
     { label: "Minimize", icon: "symbol:arrow.down.right.and.arrow.up.left", key: "n", command: "window-minimize" },
     { label: "To screen", icon: "symbol:display.2", key: "s", command: "window-move-to-screen" },
     { label: "Info", icon: "symbol:info.circle", key: "i", command: "window-info" },
-    todo("Thirds", "symbol:square.split.1x2", "window-third commands"),
-    todo("Quadrants", "symbol:square.split.2x2", "window-quadrant commands"),
+    { label: "Thirds", icon: "symbol:square.split.1x2", key: "3", children: () => thirdsMenu },
+    { label: "Quadrants", icon: "symbol:square.split.2x2", key: "4", children: () => quadrantsMenu },
     todo("Undo", "undo.jpg", "a window position history")
+]
+
+// Reached through a function above, since they are declared after the menu holding them.
+const thirdsMenu = [
+    { label: "Left", icon: "symbol:rectangle.lefthalf.filled", key: "h", command: "window-left-third" },
+    { label: "Centre", icon: "symbol:rectangle.center.inset.filled", key: "j", command: "window-center-third" },
+    { label: "Right", icon: "symbol:rectangle.righthalf.filled", key: "l", command: "window-right-third" },
+    { label: "Left ⅔", key: "u", command: "window-left-two-thirds" },
+    { label: "Right ⅔", key: "i", command: "window-right-two-thirds" }
+]
+
+const quadrantsMenu = [
+    { label: "Top left", icon: "topLeft.png", key: "q", command: "window-top-left" },
+    { label: "Top right", icon: "topRight.png", key: "w", command: "window-top-right" },
+    { label: "Bottom left", icon: "bottomLeft.png", key: "a", command: "window-bottom-left" },
+    { label: "Bottom right", icon: "bottomRight.png", key: "s", command: "window-bottom-right" },
+    { label: "Top half", icon: "topHalf-w.png", key: "t", command: "window-top-half" },
+    { label: "Bottom half", icon: "bottomHalf-w.png", key: "b", command: "window-bottom-half" }
 ]
 
 // MARK: - Teaching
@@ -295,6 +313,8 @@ module.exports = {
     busMenu,
     hassMenu,
     windowMenu,
+    thirdsMenu,
+    quadrantsMenu,
     teachingMenu,
     emacsMenu,
     chromeMenu,
