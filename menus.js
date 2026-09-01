@@ -19,6 +19,17 @@ function tab(label, target, icon, key) {
 }
 
 /**
+ * Keep the menu displayed after this button acts.
+ *
+ * For a menu whose buttons are used several times in a row — placing a window, adjusting a
+ * light — where returning to the root each time would mean navigating back for every
+ * press. Map it over a menu. A button that sets `dismiss` itself keeps its own value.
+ */
+function stays(button) {
+    return { dismiss: false, ...button }
+}
+
+/**
  * A button for something not ported from the Hammerspoon 1 configuration yet.
  *
  * It occupies its place in the menu and says what is missing when pressed, so the layout
@@ -74,7 +85,7 @@ const hassMenu = [
     { label: "Teac −", key: "d", command: "hass-teac-volume-down" },
     { label: "Marantz", icon: "marantz.png", key: "m", command: "hass-marantz-toggle" },
     { label: "Amps", icon: "audioPower.png", key: "a", command: "hass-desk-amps-toggle" }
-].map((button) => ({ dismiss: false, ...button }))
+].map(stays)
 
 // MARK: - Applications
 //
@@ -191,7 +202,7 @@ const windowMenu = [
     { label: "Thirds", icon: "symbol:square.split.1x2", key: "3", children: () => thirdsMenu },
     { label: "Quadrants", icon: "symbol:square.split.2x2", key: "4", children: () => quadrantsMenu },
     todo("Undo", "undo.jpg", "a window position history")
-]
+].map(stays)
 
 // Reached through a function above, since they are declared after the menu holding them.
 const thirdsMenu = [
@@ -200,7 +211,7 @@ const thirdsMenu = [
     { label: "Right", icon: "symbol:rectangle.righthalf.filled", key: "l", command: "window-right-third" },
     { label: "Left ⅔", key: "u", command: "window-left-two-thirds" },
     { label: "Right ⅔", key: "i", command: "window-right-two-thirds" }
-]
+].map(stays)
 
 const quadrantsMenu = [
     { label: "Top left", icon: "topLeft.png", key: "q", command: "window-top-left" },
@@ -209,7 +220,7 @@ const quadrantsMenu = [
     { label: "Bottom right", icon: "bottomRight.png", key: "s", command: "window-bottom-right" },
     { label: "Top half", icon: "topHalf-w.png", key: "t", command: "window-top-half" },
     { label: "Bottom half", icon: "bottomHalf-w.png", key: "b", command: "window-bottom-half" }
-]
+].map(stays)
 
 // MARK: - Teaching
 
