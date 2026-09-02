@@ -1,0 +1,71 @@
+#+TITLE: Hammerspoon 2 configuration
+#+AUTHOR: Daniel M. German
+
+My early experiments with [[https://github.com/cmsj/Hammerspoon2][Hammerspoon 2]], which replaces Hammerspoon 1's Lua with JavaScript.
+
+Most of what is here is a port of a Hammerspoon 1 Spoon, or of a function from my
+=~/.hammerspoon/= configuration.
+
+I am publishing it because parts of it should be useful to anyone moving a configuration from version 1 to version 2.
+
+Hammerspoon 2 is itself under development, and so is this. The interfaces here change when
+the Hammerspoon 2 interfaces they depend on change.
+
+* Layout
+
+| Path                   | Holds                                                                                                          |
+|------------------------+----------------------------------------------------------------------------------------------------------------|
+| =init.js=                | The configuration. Loads each Spoon, defines the commands that are specific to my machine, and binds the keys. |
+| =menus.js=               | The menus, defined once and displayed either on screen or on a Stream Deck.                                    |
+| [[file:Spoons/readme.org][Spoons/]]                | Spoons written to be useful to anyone.                                                                         |
+| [[file:dmgSpoons/readme.org][dmgSpoons/]]             | Spoons written for my machine, naming my devices and files.                                                    |
+| [[file:features-missing.org][features-missing.org]]   | What Hammerspoon 1 could do that Hammerspoon 2 cannot yet, and what changed enough to break a port.            |
+
+The two Spoon directories are described in their own readmes, including how a Spoon is
+found in either of them: Hammerspoon 2 loads Spoons from =Spoons/= alone, and
+=hs_interactive-gt= extends that to a list of directories.
+
+* The Spoons
+
+Each has a readme of its own.
+
+** For anyone
+
+| Spoon              | Does                                                                                                                                               |
+|--------------------+----------------------------------------------------------------------------------------------------------------------------------------------------|
+| [[file:Spoons/hs_interactive-gt/readme.org][hs_interactive-gt]]  | Named commands with interactive argument readers, key bindings by command name, and an M-x style command chooser. It also loads every other Spoon. |
+| [[file:Spoons/hs_menu-gt/readme.org][hs_menu-gt]]         | Hierarchical menus of named commands, independent of the device that displays them, with a keyboard-driven on-screen presenter.                    |
+| [[file:Spoons/hs_streamdeck-gt/readme.org][hs_streamdeck-gt]]   | Displays =hs_menu-gt= menus on Elgato Stream Deck hardware.                                                                                          |
+| [[file:Spoons/hs_countdown-gt/readme.org][hs_countdown-gt]]    | Countdown timer with a screen-edge progress bar, menu bar item, periodic warnings and an end-of-time alert.                                        |
+| [[file:Spoons/hs_time-gt/readme.org][hs_time-gt]]         | A large clock floating above everything, shown briefly on demand or until dismissed.                                                               |
+| [[file:Spoons/hs_emacs-gt/readme.org][hs_emacs-gt]]        | Runs elisp through =emacsclient=, forwards keys into Emacs, and displays what Emacs returns.                                                         |
+
+** For my machine: to specific to be used unchanged
+
+| Spoon                                | Does                                                |
+|--------------------------------------+-----------------------------------------------------|
+| [[file:dmgSpoons/hs_hass-gt/readme.org][hs_hass-gt]]   | Home Assistant control: lights, scripts and the desk amplifiers, through =hass-cli=. |
+
+* Naming
+
+The =-gt= suffix distinguishes these from the Hammerspoon 1 Spoons they are ported from, so
+that both can be discussed without ambiguity. Where a Spoon is a port, its readme records
+what changed from the version 1 original.
+
+* Spoon directory: using any of it
+
+A Spoon is a directory holding =spoon.json= and =init.js=. Copy the one you want into your
+own =Spoons/= directory and load it:
+
+#+begin_src js   :exports both
+const countDown = hs.loadSpoon("hs_countdown-gt");
+countDown.config.defaultLenMinutes = 25;
+countDown.start();
+#+end_src
+
+=hs_menu-gt= and =hs_streamdeck-gt= require =hs_interactive-gt=, and =hs_streamdeck-gt=
+also requires =hs_menu-gt=. The rest are independent of each other.
+
+Nothing here reads a setting from my configuration: each Spoon takes its settings from its
+own =config= object, and the personal parts — which elisp to run, which lights to switch —
+are commands defined in =init.js= rather than values inside a Spoon.

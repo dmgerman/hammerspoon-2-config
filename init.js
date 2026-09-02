@@ -2,12 +2,14 @@ console.log("Hey I'm an init.js");
 
 hs.ipc.start();
 
-// hs_interactive-gt provides use(), so it is loaded first and directly. Every Spoon after
-// it is loaded by one use() call, which also applies its settings, defines its commands
-// and binds its keys. Skip one with `disabled: true` and reload.
+// hs_interactive-gt provides use(), so it is loaded first and directly, by hs.loadSpoon(),
+// which reads only from Spoons/. Every Spoon after it is loaded by one use() call, which
+// searches the directories in interactive.searchPath — Spoons/ and then dmgSpoons/ — and
+// also applies the Spoon's settings, defines its commands and binds its keys. Skip one
+// with `disabled: true` and reload.
 const interactive = hs.loadSpoon("hs_interactive-gt");
 
-interactive.use("test/hs_countdown-gt", {
+interactive.use("hs_countdown-gt", {
     config: {
         defaultLenMinutes: 25,
         alertSound: "Sonar"

@@ -69,9 +69,8 @@ The dialog is modal: it blocks Hammerspoon, including running timers, until it i
 
 ** pauseOrResume()
 
-Pause a running countdown, or resume a paused one. Time spent paused does not count
-against the countdown, so a 25 minute countdown paused for 5 minutes ends 30 minutes after
-it started.
+Pause a running countdown, or resume a paused one. Time spent paused is not counted as
+elapsed, so a 25 minute countdown paused for 5 minutes ends 30 minutes after it started.
 
 ** cancel()
 
@@ -129,8 +128,8 @@ spaces are ignored.
 
 Anything else is reported rather than interpreted. =24:00=, =23:60= and =13:00 pm= are out
 of range; =10:30 sharp= and =9:5= do not match. In particular, text after the time is never
-discarded: were a =pm= to be ignored, the countdown would end twelve hours from when it
-was meant to, which is the kind of mistake a timer should not make quietly.
+discarded: an ignored =pm= would end the countdown twelve hours from the intended time,
+with no error reported.
 
 * The callback
 
@@ -213,8 +212,8 @@ countDown.config.alertSound = "Glass"
   countdown runs, the menu instead offers /Start n min/ and /Start for .../, so the Spoon
   is usable without a key bound.
 - *=alertSound= also controls the notification.* The sound and the system notification are
-  sent together, so setting =alertSound= to =null= or =""= silences the countdown and stops
-  the notification. The on-screen alert (=alertLen=) and the dialog (=notify=) are
-  independent of it.
+  sent together, so setting =alertSound= to =null= or =""= stops both the sound and the
+  notification. The on-screen alert (=alertLen=) and the dialog (=notify=) are independent
+  of it.
 - *Restoring focus.* The end-of-time dialog and the =startForInteractive()= prompt take
   keyboard focus. Both return it to the window that had it when they appeared.

@@ -327,6 +327,37 @@ is called last.
 Spoons load in the order the calls appear, so a Spoon that others depend on is loaded
 first.
 
+** Where Spoons are looked for
+
+=hs.loadSpoon()= resolves a name against =Spoons/= and no other directory. =use()= searches
+the directories named in =searchPath= instead, relative to the configuration directory, and
+loads from the first one that holds the Spoon:
+
+#+begin_src js   :exports both
+interactive.searchPath              // ["Spoons", "dmgSpoons"]
+interactive.searchPath.push("workSpoons")
+#+end_src
+
+Assign to it before the first =use()= call. This is what allows Spoons meant for anyone and
+Spoons written for one machine to be kept in separate directories.
+
+Whichever directory it came from, a Spoon is registered under its bare name, so
+=hs.spoons["hs_menu-gt"]= finds it after a move from one directory to another. A directory
+must be inside the configuration directory. A name containing a =/= is used as given,
+relative to =Spoons/=, for a Spoon the search path does not cover.
+
+** loadSpoon(name)
+
+The search =use()= performs, on its own, for a Spoon that needs no configuring:
+
+#+begin_src js   :exports both
+const deck = interactive.loadSpoon("hs_streamdeck-gt")
+#+end_src
+
+It throws if no directory in =searchPath= holds that Spoon, and it does not catch what the
+Spoon's own loading throws — a Spoon that is present but broken is reported as broken,
+rather than as missing.
+
 ** Keywords
 
 The equivalent =use-package= keyword is given for reference:

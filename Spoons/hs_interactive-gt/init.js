@@ -628,10 +628,56 @@ function record(name, state, ms, error) {
     return state
 }
 
+// MARK: - Where Spoons are found
+//
+// hs.loadSpoon() reads from one directory, Spoons/, and registers what it loads in
+// hs.spoons under the exact string it was given. searchPath names directories relative to
+// the configuration directory, so that Spoons meant for anyone and Spoons written for one
+// machine can be kept separate. Directories other than Spoons/ are addressed by a path
+// relative to it, and the Spoon is then re-registered under its bare name, so that a Spoon
+// reading hs.spoons["hs_menu-gt"] resolves it from either directory.
+
+/** Directories holding Spoons, relative to the configuration directory, in search order. */
+const searchPath = ["Spoons", "dmgSpoons"]
+
+/**
+ * Load a Spoon by name, from the first directory in `searchPath` that holds it.
+ *
+ * A name containing a "/" is taken as a path relative to `Spoons/` and used as given, for
+ * a Spoon somewhere the search path does not name.
+ *
+ * @param {string} name The Spoon's directory name.
+ * @returns {object} The Spoon, also registered as `hs.spoons[name]`.
+ * @throws If no directory in `searchPath` holds a Spoon of that name.
+ */
+function loadSpoon(name) {
+    if (name.includes("/")) return hs.loadSpoon(name)
+
+    for (const directory of searchPath) {
+        if (!hs.fs.isDirectory(`${hs.appinfo.configDir}/${directory}/${name}`)) continue
+
+        // hs.loadSpoon() resolves its argument against Spoons/, so every other directory
+        // is named by a path relative to Spoons/.
+        const path = directory === "Spoons" ? name : `../${directory}/${name}`
+
+        // Not wrapped in try: a Spoon that is present but throws while loading is an error
+        // to report, not a reason to continue searching and then report it as missing.
+        const spoon = hs.loadSpoon(path)
+
+        if (path !== name) {
+            hs.spoons[name] = spoon
+            delete hs.spoons[path]
+        }
+        return spoon
+    }
+
+    throw new Error(`no Spoon named ${name} in ${searchPath.join(", ")}`)
+}
+
 /**
  * Load and configure a Spoon.
  *
- * @param {string} name The Spoon's directory name under `Spoons/`.
+ * @param {string} name The Spoon's directory name, looked for in each `searchPath` entry.
  * @param {object} [spec] Any of:
  *        `disabled` — skip it, keeping the form;
  *        `when` — a predicate; the Spoon loads only if it returns true;
@@ -659,7 +705,7 @@ function use(name, spec) {
     try {
         if (options.before) options.before()
 
-        const spoon = hs.loadSpoon(name)
+        const spoon = loadSpoon(name)
 
         if (options.config && spoon.config) Object.assign(spoon.config, options.config)
         if (options.after) options.after(spoon)
@@ -802,6 +848,8 @@ module.exports = {
     CANCEL,
     SKIP,
     use,
+    loadSpoon,
+    searchPath,
     readers,
     describe,
     define,

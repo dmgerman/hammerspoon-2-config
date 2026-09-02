@@ -370,8 +370,8 @@ function startFor(minutes, callback) {
  * @returns {{minutes: number}|{error: string}} One key or the other, never both.
  */
 function parseTimeOfDay(time) {
-    // Anchored, so trailing text is reported rather than ignored. A suffix read as
-    // nothing would otherwise move the target by twelve hours without saying so.
+    // Anchored, so trailing text is reported rather than ignored. An ignored suffix would
+    // otherwise shift the end time by twelve hours with no error reported.
     const match = /^\s*(\d{1,2}):(\d{2})\s*([ap]m)?\s*$/i.exec(time)
     if (!match) {
         return { error: `Illegal time [${time}]. Must be <hour>:<min>, optionally followed by am or pm` }
@@ -479,8 +479,8 @@ function startForInteractive(callback) {
         const error = startFromAnswer(answer, callback)
         if (!error) break
 
-        // Report it where the answer was given, rather than in a message the prompt
-        // would cover, and offer the answer back rather than the default.
+        // Report the error in the prompt itself, rather than in a message the prompt
+        // would obscure, and present the rejected answer instead of the default.
         informative = `${error}\n\n${hint}`
         defaultText = answer
     }
