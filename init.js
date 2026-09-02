@@ -7,7 +7,7 @@ hs.ipc.start();
 // and binds its keys. Skip one with `disabled: true` and reload.
 const interactive = hs.loadSpoon("hs_interactive-gt");
 
-interactive.use("hs_countdown-gt", {
+interactive.use("test/hs_countdown-gt", {
     config: {
         defaultLenMinutes: 25,
         alertSound: "Sonar"
@@ -28,7 +28,7 @@ interactive.use("hs_countdown-gt", {
 
         interactive.define({
             name: "countdown-start-until",
-            doc: "Start a countdown ending at a time of day, as hh:mm.",
+            doc: "Start a countdown ending at a time of day, as hh:mm on a 24-hour clock, or h:mm am / pm.",
             interactive: [{ name: "time", reader: interactive.readers.string.prompted, default: "10:30" }],
             fn: (time) => countDown.startUntil(time)
         });

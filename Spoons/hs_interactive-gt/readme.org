@@ -1,0 +1,441 @@
+* hs_interactive-gt
+
+A Spoon for defining commands, modelled on Emacs's =interactive= declaration and =M-x=.
+
+A /command/ is a function that a user can invoke directly. A function becomes a command by
+being defined here with a name, a one-line docstring and, when it takes arguments, an
+=interactive= specification stating how each of them is to be read.
+
+The specification applies only when a person invokes the command. It states what each
+argument is — a window, an application, a screen, a number, a string — and this Spoon
+reads the value: from the current state, or by presenting a chooser or a dialog. The
+command itself contains no input handling. Called from other code, the same command
+receives its arguments directly and nothing is read.
+
+#+begin_src js   :exports both
+interactive: [
+    {
+        name: "minutes",
+        reader: interactive.readers.number.prompted,
+        default: 25
+    }
+]
+#+end_src
+
+Commands are invoked by name. =commands-execute= presents a chooser listing every command
+with its docstring and runs the one selected, so a command needs no key binding to be
+reachable — which matters for the majority of commands, used too seldom to justify a
+chord. A command may also be bound to a key, and is bound by name.
+
+Two further consequences follow from commands having names:
+
+- *Keys are bound to command names not functions.* 
+- *Spoons are loaded by* =use()=, which loads one Spoon and applies its settings, its
+  commands and its keys in a single call, in a manner similar to Emacs's =use-package=.
+
+* Simple usage
+
+#+begin_src js   :exports both
+const interactive = hs.loadSpoon("hs_interactive-gt")
+
+interactive.define({
+    name: "window-left-half",
+    doc:  "Move a window to the left half of its screen.",
+    interactive: [
+        {
+            name: "window",
+            reader: interactive.readers.window.auto
+        }
+    ],
+    fn: (win) => {
+        const screen = win.screen.frame
+        win.frame = new HSRect(screen.x, screen.y, screen.w / 2, screen.h)
+    }
+})
+
+interactive.setKeys({
+    "cmd-ctrl-alt left": "window-left-half",
+    "cmd-ctrl-alt x":    "commands-execute"    // the chooser
+})
+#+end_src
+
+The =fn:= parameter is the function that corresponds to this command.
+
+The =interactive:= parameter lists the parameters to gather before the function can be
+executed. In this case there is only one. Its =reader:= indicates how to obtain it from
+the user: use the current window; if there is no current window, a chooser shows the title
+and application of each available window for the user to select one.
+
+There are two ways to invoke this command:
+
+1. Pressing =cmd-ctrl-alt left=, as bound by =setKeys= above, and
+
+2. Pressing =cmd-ctrl-alt x=, which runs =commands-execute=. It shows a chooser of every
+   command, from which the user selects =window-left-half=.
+
+In both cases the reader of the interactive parameter is executed, which computes the
+window parameter, and the lambda is executed with this parameter.
+
+* Defining commands
+
+** define(spec)
+
+/spec/ takes four fields. Only /name/ and /fn/ are required.
+
+| Field         | Meaning                                                          |
+|---------------+------------------------------------------------------------------|
+| =name=        | The command name. Hyphenated, like =countdown-start=.            |
+| =doc=         | One line, shown in the chooser and by =describeKey=.             |
+| =fn=          | The implementation. Receives the arguments.                      |
+| =interactive= | How to obtain each argument. Omit for a command that takes none. |
+
+Defining a command whose name already exists replaces the previous definition. A
+configuration can therefore be reloaded without error.
+
+#+begin_src js   :exports both
+interactive.define({
+    name: "countdown-cancel",
+    doc:  "Cancel the running countdown.",
+    fn:   () => hs.spoons["hs_countdown-gt"].cancel()
+})
+#+end_src
+
+** Interactive arguments
+
+Each entry in /interactive/ describes one argument:
+
+#+begin_src js   :exports both
+interactive.define({
+    name: "countdown-start-for",
+    doc:  "Start a countdown for a given number of minutes.",
+    interactive: [
+        {
+            name: "minutes",
+            reader: interactive.readers.number.prompted,
+            default: 25
+        }
+    ],
+    fn: (minutes) => hs.spoons["hs_countdown-gt"].startFor(minutes)
+})
+#+end_src
+
+| Field      | Meaning                                                              |
+|------------+----------------------------------------------------------------------|
+| =name=     | Shown as the prompt's title and in the parameter table.              |
+| =reader=   | How the value is obtained — /one variant/. See /Readers/ below.      |
+| =default=  | Prefills the prompt, and is used when the argument is skipped.       |
+| =optional= | When true the prompt offers *Skip*, which falls back to the default. |
+
+Note =readers.number.prompted=, not =readers.number=. The command states which variant it
+uses, so whether it prompts is never decided for it. Passing =readers.number= raises an
+error saying that a variant must be chosen.
+
+Running =countdown-start-for= displays a dialog. Its text names the command, the argument
+being requested and its position, and lists the values collected so far:
+
+#+begin_example
+countdown-start-for · argument 1 of 1
+Start a countdown for a given number of minutes.
+
+▸ minutes = ?
+#+end_example
+
+Cancelling any prompt abandons the whole command — no argument is left unset and =fn= is
+not called.
+
+* Readers
+
+A reader specifies how a value is obtained. Each provides up to three /variants/, and the
+parameter states which one it uses:
+
+- =implicit= reads the value from the snapshot. If the snapshot has none, the argument
+  takes the parameter's =default=.
+- =prompted= always prompts, with a chooser or a dialog.
+- =auto= reads the snapshot value if there is one, and prompts otherwise.
+
+| Reader                | implicit / auto source      | prompted                     |
+|-----------------------+-----------------------------+------------------------------|
+| =readers.window=      | the focused window          | a chooser of open windows    |
+| =readers.application= | the frontmost application   | a chooser of running apps    |
+| =readers.screen=      | the focused window's screen | a chooser of screens         |
+| =readers.number=      | —                           | a dialog, parsed as a number |
+| =readers.string=      | —                           | a dialog                     |
+
+Each is reached through the Spoon object, as =interactive.readers.window= and so on.
+
+Rows in the window chooser read =Application — Title=, so typing either finds the
+window.
+
+#+begin_src js   :exports both
+reader: interactive.readers.window.auto      // the focused window, or prompt if none
+reader: interactive.readers.window.prompted  // always prompt
+reader: interactive.readers.window.implicit  // the focused window, or the default
+#+end_src
+
+** The snapshot
+
+The /snapshot/ records the focused window, the frontmost application and the current
+screen. It is taken when the command is invoked, not when each argument is read, because a
+chooser or a dialog takes keyboard focus: while one is displayed,
+=hs.window.focusedWindow()= returns Hammerspoon's own window.
+
+A command invoked from a key takes its snapshot at the keypress. =commands-execute= takes
+one before it displays the chooser, so selecting =window-maximize= from the chooser resizes
+the window that was focused before the chooser appeared.
+
+** Writing a reader
+
+A reader variant is a function =(context, parameter, snapshot)=. It returns the value, or
+=interactive.CANCEL= to abandon the command, or =interactive.SKIP= to leave the argument
+unset. It may return a promise. Group the variants of one reader in an object, as the
+built-in readers do.
+
+#+begin_src js   :exports both
+const readSpoonName = {
+    prompted: (context, parameter, snapshot) => new Promise((resolve) => {
+        const chooser = hs.chooser.create()
+        chooser.placeholder = "Spoon"
+        chooser.setChoices(Object.keys(hs.spoons).map((name) => ({
+            text: name,
+            value: name
+        })))
+        chooser.onSelect = (item) => resolve(item ? item.value : interactive.CANCEL)
+        chooser.show()
+    })
+}
+
+interactive: [
+    {
+        name: "spoon",
+        reader: readSpoonName.prompted
+    }
+]
+#+end_src
+
+/context/ is the text to display above the prompt. /snapshot/ is =({window, application,
+screen})=; any of the three may be null.
+
+** How values are displayed
+
+=interactive.describe(value)= renders a value for a prompt or a log line. Hammerspoon
+types are identified by their =typeName=, so a window renders as its title and its
+application rather than as =[object Object]=. A type with no entry in the table renders
+through its own =toString()=.
+
+* Calling commands
+
+** call(name, ...args)
+
+Runs a command with explicit arguments, prompting for nothing. Use this when calling a
+command from other code.
+
+#+begin_src js   :exports both
+interactive.call("countdown-start-for", 25)
+#+end_src
+
+** callInteractively(name, options)
+
+Reads any missing arguments through the command's readers, then runs it.
+
+| Option     | Meaning                                                           |
+|------------+-------------------------------------------------------------------|
+| =args=     | Arguments already known. An argument given here skips its reader. |
+| =snapshot= | A snapshot taken earlier, as =commands-execute= takes one.        |
+| =via=      | Pass ="key"= when a hotkey triggered the call. See /Command order/. |
+
+#+begin_src js   :exports both
+// prompts for both arguments
+interactive.callInteractively("window-move-to-screen")
+
+// prompts only for the screen
+interactive.callInteractively("window-move-to-screen", { args: [win] })
+#+end_src
+
+** execute()
+
+Displays the chooser listing every command with its docstring. The =commands-execute=
+command calls it; bind a key to that command.
+
+* Command order
+
+The chooser lists commands in one of two orders, selected by configuration:
+
+- =mru= — most recently used first, followed by commands never run, in alphabetical
+  order. The default.
+- =alphabetic= — by name, always.
+
+#+begin_src js   :exports both
+interactive.setOrder("alphabetic")
+interactive.getOrder()                    // "alphabetic"
+
+interactive.commands()                    // in the configured order
+interactive.commands("alphabetic")        // in a given order, whatever the setting
+#+end_src
+
+Or change it from the chooser itself, with the built-in =commands-set-order=.
+
+Only invocations by name are recorded: from the chooser, or through =call= and
+=callInteractively=. Invoking a command from a key does not change its position, so the
+order lists the commands that have no key binding. Emacs behaves the same way:
+=extended-command-history= records =M-x= input and key bindings do not modify it.
+
+A command is recorded once all its arguments have been read and =fn= is called. Cancelling
+a prompt therefore does not change its position. The order is held in memory and is cleared
+when the configuration is reloaded.
+
+* Loading Spoons
+
+=use()= replaces the several statements a Spoon otherwise needs: =hs.loadSpoon=, a
+=try=/=catch= around it, the assignment of its settings, the =define()= calls for its
+commands, and =setKeys= for its keys.
+
+#+begin_src js   :exports both
+// init.js — this Spoon loads by hand, since it provides use()
+const interactive = hs.loadSpoon("hs_interactive-gt")
+
+interactive.use("hs_countdown-gt", {
+    config: {
+        defaultLenMinutes: 25,
+        alertSound: "Sonar"
+    },
+
+    commands: (interactive, countDown) => {
+        interactive.define({
+            name: "countdown-start",
+            doc:  "Start a countdown for the default number of minutes.",
+            fn:   () => countDown.startFor()
+        })
+    },
+
+    keys: {
+        "cmd-ctrl-alt t": "countdown-start"
+    }
+})
+
+// Not loaded.
+interactive.use("PaperWM-gt", {
+    disabled: true
+})
+
+interactive.use.report()
+#+end_src
+
+In this example, =config:= sets two of the countdown Spoon's settings, =commands:= defines
+one command that calls it, and =keys:= binds a key to that command. The Spoon's =start()=
+is called last.
+
+Spoons load in the order the calls appear, so a Spoon that others depend on is loaded
+first.
+
+** Keywords
+
+The equivalent =use-package= keyword is given for reference:
+
+| Keyword    | use-package | Meaning                                                        |
+|------------+-------------+----------------------------------------------------------------|
+| =disabled= | =:disabled= | Do not load the Spoon. The call remains.                       |
+| =when=     | =:if=       | A predicate. The Spoon loads only if it returns true.          |
+| =before=   | =:init=     | A function run before the Spoon is loaded.                     |
+| =config=   | =:custom=   | Settings merged onto the Spoon's own =config= object.          |
+| =after=    | =:config=   | =(spoon)=, run after loading. Use it to connect two Spoons.    |
+| =commands= | =:commands= | =(interactive, spoon)=, which defines the Spoon's commands.    |
+| =keys=     | =:bind=     | A table of key to command name, bound through =setKeys=.       |
+| =start=    | —           | Pass false to skip the Spoon's =start()=, called otherwise.    |
+
+Each call catches its own exceptions. A Spoon that fails to load is reported to the
+console and the calls after it still run, whereas a bare =hs.loadSpoon= that throws stops
+the rest of =init.js= from executing.
+
+** use.file(path, spec)
+
+Loads a plain JavaScript file rather than a Spoon, for a configuration split across
+several files. =disabled=, =when= and =after= mean what they mean above.
+
+#+begin_src js   :exports both
+interactive.use.file("./work-only.js", {
+    when: () => hs.appinfo.configDir.includes("work")
+})
+#+end_src
+
+** use.report() and use.status()
+
+=use.report()= logs the outcome of every =use()= call, followed by a summary line. Call it
+at the end of =init.js=, or run the =spoons-list= command at any time.
+
+#+begin_example
+[use] hs_countdown-gt      loaded    7 ms
+[use] hs_time-gt           loaded    1 ms
+[use] PaperWM-gt           disabled
+[use] 2 loaded, 1 disabled, 0 skipped, 0 failed, in 8 ms
+#+end_example
+
+=use.status()= returns the same information as an array of =({name, state, ms, error})=
+objects.
+
+* Key bindings
+
+** setKeys(table)
+
+#+begin_src js   :exports both
+interactive.setKeys({
+    "cmd-ctrl-alt t":       "countdown-start",
+    "cmd-ctrl-alt shift t": "countdown-start-for",
+    "cmd-ctrl-alt x":       "commands-execute"
+})
+#+end_src
+
+A key is written as its modifiers followed by the key itself: =cmd-ctrl-alt t=, or
+=cmd-ctrl-alt-t=. Both are accepted. The modifiers are =cmd=, =shift=, =alt= and =ctrl=,
+and their aliases. The key names are those =hs.hotkey.getKeyCodeMap()= lists, such as =t=,
+=left=, =space= and =f1=. An unknown modifier or key raises an error that names it.
+
+=setKeys= may be called any number of times. Each call adds its keys, and replaces the
+binding of any key it names.
+
+The command need not exist when the key is bound. If the key is pressed and no command of
+that name has been defined, the error is logged to the console.
+
+** Other functions
+
+| Function              | Returns or does                                        |
+|-----------------------+--------------------------------------------------------|
+| =setKey(key, name)=   | Binds one key, replacing any binding it already has.   |
+| =unsetKey(key)=       | Removes a binding.                                     |
+| =whereIs(name)=       | The keys that run a command.                           |
+| =describeKey(key)=    | The command a key runs, with its docstring.            |
+| =bindings()=          | Every binding, sorted by key.                          |
+| =stop()=              | Destroys every binding. The commands remain defined.   |
+
+This Spoon retains every hotkey it creates. In Hammerspoon 2 a hotkey with no remaining
+reference is garbage collected and stops firing; binding through =setKeys= prevents
+that.
+
+* Built-in commands
+
+| Command                  | Does                                          |
+|--------------------------+-----------------------------------------------|
+| =commands-execute=       | Chooses a command by name and runs it.        |
+| =commands-set-order=     | Sets =mru= or =alphabetic= ordering.          |
+| =commands-describe-key=  | Reports which command a key runs.             |
+| =commands-list-bindings= | Logs every binding and the command it runs.   |
+| =spoons-list=            | Logs the outcome of every =use()= call.       |
+
+The names begin with =commands-= rather than with the Spoon's name, because they describe
+the operation rather than its source.
+
+* Notes
+
+- *Prompts take keyboard focus.* This is why implicit values are read from a snapshot
+  rather than when each argument is needed: while a prompt is displayed, the focused window
+  is Hammerspoon's own. A reader you write should read the /snapshot/ argument for the same
+  reason, not =hs.window.focusedWindow()=.
+- *Dialogs are modal.* =hs.ui.textPrompt= blocks Hammerspoon's main thread while it is
+  displayed, suspending everything else, including running timers.
+- *Button order.* =hs.ui.textPrompt= reports an index into the array given to
+  =.buttons()=, so button 0 is the first label. This was reversed until
+  ([[https://github.com/cmsj/Hammerspoon2/issues/183][cmsj/Hammerspoon2#183]]) was fixed;
+  on an older build, cancelling and accepting are exchanged. The mapping from index to
+  OK / Skip / Cancel is made in one function, so that is the only place to adjust.
+- *Prefer one or two prompted arguments.* Hammerspoon has no multi-field form, so each
+  argument requires a dialog of its own. For more than two, use one reader that reads a
+  single compound answer.

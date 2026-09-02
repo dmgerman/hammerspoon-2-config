@@ -1,0 +1,6 @@
+{
+    "name": "hs_emacs-gt",
+    "author": "Daniel German <dmg@turingmachine.org>",
+    "version": "0.1.0",
+    "description": "Run elisp through emacsclient, forward keys into Emacs, and show what Emacs has to say."
+}

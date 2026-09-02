@@ -1,0 +1,171 @@
+* hs_time-gt
+
+A large clock, displayed above all other windows.
+
+It is displayed for a set number of seconds, or until dismissed. It appears centred on the
+screen holding the focused window, and Escape hides it.
+
+This is a port of the Hammerspoon 1 /AClock/ spoon to Hammerspoon 2 and JavaScript.
+
+* Simple usage
+
+#+begin_src js   :exports both
+const clock = hs.loadSpoon("hs_time-gt")
+
+clock.config.format = "%H:%M"
+clock.config.textColor = "#1891C3"
+clock.config.showDuration = 4
+
+clock.bindHotkeys({
+    toggleShow: [["cmd", "ctrl", "alt"], "t"]
+})
+
+clock.start()
+#+end_src
+
+Pressing the key displays the clock for four seconds. Pressing it again while the clock is
+displayed hides it immediately.
+
+* Methods
+
+** show()
+
+Show the clock and leave it displayed. The text is updated every second, so the displayed
+time stays current.
+
+#+begin_src js   :exports both
+hs.spoons["hs_time-gt"].show()
+#+end_src
+
+** hide()
+
+Hide the clock. Calling this when the clock is already hidden has no effect.
+
+** toggleShow()
+
+Show the clock for /showDuration/ seconds, then hide it. If it is already displayed, hide
+it immediately and cancel the pending hide. This is the method to bind to a key.
+
+** toggleShowPersistent()
+
+Show the clock with no time limit, or hide it if it is already displayed. Escape also
+hides it.
+
+** isShowing()
+
+Returns true while the clock is displayed.
+
+** formatTime(format, date)
+
+The formatter the clock uses, exposed so a format string can be checked before it is set.
+
+#+begin_src js   :exports both
+const clock = hs.spoons["hs_time-gt"]
+clock.formatTime("%A %d %B — %I:%M %p")    // "Saturday 29 August — 05:45 PM"
+#+end_src
+
+** bindHotkeys(mapping)
+
+Bind keys to the actions. The mapping is keyed by action name, each holding modifiers and
+a key:
+
+#+begin_src js   :exports both
+clock.bindHotkeys({
+    toggleShow:           [["cmd", "ctrl", "alt"], "t"],
+    toggleShowPersistent: [["cmd", "ctrl", "alt", "shift"], "t"]
+})
+#+end_src
+
+The four actions are =toggleShow=, =toggleShowPersistent=, =show= and =hide=. An unknown
+name is reported in the console and skipped.
+
+** start() and stop()
+
+=start()= exists for consistency with other Spoons and performs no setup. =stop()= hides
+the clock and destroys every hotkey this Spoon bound.
+
+* Configuration
+
+Settings are properties of =config=, and take effect at the next =show()=.
+
+| Setting        | Default     | Meaning                                                   |
+|----------------+-------------+-----------------------------------------------------------|
+| =format=       | ="%H:%M"=   | What to display. See /Time formats/ below.                |
+| =textFont=     | ="Impact"=  | Any font installed on the system.                         |
+| =textSize=     | =135=       | Point size.                                               |
+| =textColor=    | ="#1891C3"= | Hex colour.                                               |
+| =width=        | ="full"=    | ="full"= spans the screen; a number is a width in points. |
+| =height=       | =230=       | Height of the clock's area, in points.                    |
+| =showDuration= | =4=         | Seconds =toggleShow()= displays the clock for.            |
+| =hotkey=       | ="escape"=  | Key that hides the clock while it is displayed. =null= for none. |
+| =hotkeyMods=   | =[]=        | Modifiers for that key.                                   |
+| =level=        | ="floating"= | Stacking: ="floating"=, ="status"=, ="screenSaver"=, ="popUpMenu"=. |
+
+#+begin_src js   :exports both
+const clock = hs.spoons["hs_time-gt"]
+clock.config.format = "%H:%M:%S"
+clock.config.textSize = 200
+clock.config.textColor = "#FF3B30"
+#+end_src
+
+=width= defaults to the width of the screen, so a long format is not truncated. Set it to
+a number for the fixed width the v1 spoon used. =height= is not computed from =textSize=:
+a larger font, or a format containing =%n=, may require raising it.
+
+* Time formats
+
+=format= is a strftime-style string. The following codes are recognised:
+
+| Code | Means                        | Example      |
+|------+------------------------------+--------------|
+| =%H= | Hour, 24-hour, zero padded   | =17=         |
+| =%I= | Hour, 12-hour, zero padded   | =05=         |
+| =%M= | Minute                       | =45=         |
+| =%S= | Second                       | =18=         |
+| =%p= | AM or PM                     | =PM=         |
+| =%P= | am or pm                     | =pm=         |
+| =%d= | Day of month, zero padded    | =29=         |
+| =%e= | Day of month, space padded   | =29=         |
+| =%m= | Month number                 | =08=         |
+| =%y= | Year, two digits             | =26=         |
+| =%Y= | Year                         | =2026=       |
+| =%A= | Weekday                      | =Saturday=   |
+| =%a= | Weekday, short               | =Sat=        |
+| =%B= | Month                        | =August=     |
+| =%b= | Month, short                 | =Aug=        |
+| =%j= | Day of year                  | =241=        |
+| =%X= | Time, locale format          | =6:14:37 PM= |
+| =%x= | Date, locale format          | =2026-08-29= |
+| =%c= | Date and time, locale format | =2026-08-29, 6:14:37 PM= |
+| =%n= | Newline                      |              |
+| =%t= | Tab                          |              |
+| =%%= | A literal percent sign       | =%=          |
+
+Any other code is left as written, so an unsupported code is displayed rather than
+removed.
+
+* Notes
+
+- *Which screen.* The clock appears on the screen holding the focused window, or on the
+  main screen when no window is focused. Its position is computed at each =show()=, so it
+  is displayed on whichever screen holds the focused window at that moment.
+- *Escape.* The dismiss key is bound only while the clock is displayed, so Escape reaches
+  other applications at all other times.
+- *The background is transparent.* Only the text is drawn; the windows behind it remain
+  visible.
+- *Changing settings while the clock is displayed.* =config= is read when the window is
+  built, so a change to =textSize= or =width= takes effect at the next =show()=. =format=
+  is read on every tick, so it takes effect within one second.
+
+* Differences from the Hammerspoon 1 spoon
+
+- Settings are properties of =config= rather than of the Spoon object. In v1, assigning to
+  a property re-ran =init()= through a metatable; here settings are read at the next
+  =show()=.
+- =width= defaults to ="full"= rather than 320 points, so long formats are not truncated.
+- =level= replaces v1's implicit canvas level and is named rather than numeric.
+- The codes in the table above are the full set. Other =os.date()= codes, such as =%Z= and
+  =%U=, are not implemented.
+- The clock's window is rebuilt on each =show()=. Hammerspoon 2 windows take their frame
+  when they are created, so rebuilding is what allows the clock to appear on a different
+  screen than the previous time.

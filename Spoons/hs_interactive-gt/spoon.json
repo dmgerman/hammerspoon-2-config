@@ -1,0 +1,6 @@
+{
+    "name": "hs_interactive-gt",
+    "author": "Daniel German <dmg@turingmachine.org>",
+    "version": "0.1.0",
+    "description": "Named commands with interactive argument readers, key bindings by command name, and an M-x style command chooser."
+}

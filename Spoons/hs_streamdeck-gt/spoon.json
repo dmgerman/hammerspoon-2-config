@@ -1,0 +1,6 @@
+{
+    "name": "hs_streamdeck-gt",
+    "author": "Daniel German <dmg@turingmachine.org>",
+    "version": "0.1.0",
+    "description": "Displays hs_menu-gt menus on Elgato Stream Deck hardware."
+}

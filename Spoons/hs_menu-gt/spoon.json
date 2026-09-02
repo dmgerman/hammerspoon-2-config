@@ -1,0 +1,6 @@
+{
+    "name": "hs_menu-gt",
+    "author": "Daniel German <dmg@turingmachine.org>",
+    "version": "0.1.0",
+    "description": "Hierarchical menus of named commands, independent of the device that displays them, with a keyboard-driven on-screen presenter."
+}

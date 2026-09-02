@@ -1,0 +1,6 @@
+{
+    "name": "hs_time-gt",
+    "author": "ashfinal <ashfinal@gmail.com>, Daniel German <dmg@turingmachine.org>",
+    "version": "2.0.0",
+    "description": "A large clock floating above everything, shown briefly on demand or until dismissed."
+}

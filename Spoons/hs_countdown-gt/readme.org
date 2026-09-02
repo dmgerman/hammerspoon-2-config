@@ -1,0 +1,220 @@
+* hs_countdown-gt
+
+A countdown timer, shown as a progress bar along the bottom edge of the screen.
+
+While a countdown runs, three indicators report it: the bar, a menu bar item counting down,
+and warnings at 1, 2, 4, 8, ... minutes remaining. When the time is up a sound plays, an
+alert appears, and a dialog asks for acknowledgement.
+
+This is a port of the Hammerspoon 1 /hs_countdown_timer/ spoon to Hammerspoon 2 and
+JavaScript.
+
+* Simple usage
+
+#+begin_src js   :exports both
+const countDown = hs.loadSpoon("hs_countdown-gt")
+
+countDown.config.defaultLenMinutes = 25
+countDown.config.barColorToPass = "#FF3B30"
+
+countDown.bindHotkeys({
+    startFor:         [["cmd", "ctrl", "alt"], "t"],
+    startInteractive: [["cmd", "ctrl", "alt", "shift"], "t"],
+    pauseOrResume:    [["cmd", "ctrl", "alt"], "p"],
+    cancel:           [["cmd", "ctrl", "alt"], "c"]
+})
+
+countDown.start()
+#+end_src
+
+Pressing the first key starts a 25 minute countdown. Only one countdown runs at a time:
+starting another while one is running is refused, with a message.
+
+* Methods
+
+Every method returns the Spoon, so calls can be chained.
+
+** startFor(minutes, callback)
+
+Start a countdown of /minutes/ whole minutes, defaulting to =config.defaultLenMinutes=. A
+non-integer or negative length is refused with a message.
+
+#+begin_src js   :exports both
+hs.spoons["hs_countdown-gt"].startFor(45)
+#+end_src
+
+** startUntil(time, callback)
+
+Start a countdown ending at a time of day. A time earlier than the current time means
+tomorrow, so at 22:00 a countdown until =7:00= runs for nine hours.
+
+#+begin_src js   :exports both
+const countDown = hs.spoons["hs_countdown-gt"]
+countDown.startUntil("14:30")     // 24-hour clock
+countDown.startUntil("9:30 pm")   // same as 21:30
+#+end_src
+
+See /Time formats/ below for what is accepted. An unaccepted time is reported and no
+countdown starts.
+
+** startForInteractive(callback)
+
+Ask for a length in a dialog, then start a countdown with it. The answer is either a
+number of minutes or a time of day, and the two are told apart by the presence of a colon.
+
+An answer that is neither is reported in the dialog itself, which is shown again with the
+rejected answer left in place to be corrected. Cancel abandons the countdown.
+
+The dialog is modal: it blocks Hammerspoon, including running timers, until it is answered.
+
+** pauseOrResume()
+
+Pause a running countdown, or resume a paused one. Time spent paused does not count
+against the countdown, so a 25 minute countdown paused for 5 minutes ends 30 minutes after
+it started.
+
+** cancel()
+
+Cancel a running countdown. The /cancelled/ event is fired; /ended/ is not.
+
+** setProgress(progress)
+
+Move a running countdown to a point in its progress, from =0.0= to =1.0=. =setProgress(0.9)=
+on a 25 minute countdown leaves 2.5 minutes.
+
+** isRunning()
+
+Returns true while a countdown is running. A paused countdown is still running.
+
+** timeLeft()
+
+Seconds remaining, or 0 when no countdown is running.
+
+** bindHotkeys(mapping)
+
+Bind keys to the actions. The mapping is keyed by action name, each holding modifiers and a
+key. It defaults to =config.defaultKeyBindings=:
+
+#+begin_src js   :exports both
+countDown.bindHotkeys({
+    startFor:         [["cmd", "ctrl", "alt"], "t"],
+    startInteractive: [["cmd", "ctrl", "alt", "shift"], "t"],
+    pauseOrResume:    [["cmd", "ctrl", "alt"], "p"],
+    cancel:           [["cmd", "ctrl", "alt"], "c"]
+})
+#+end_src
+
+The four actions are =startFor=, =startInteractive=, =pauseOrResume= and =cancel=. An
+unknown name is reported in the console and skipped. =startFor= bound to a key starts a
+countdown of the default length, since a key passes no argument.
+
+** start() and stop()
+
+=start()= creates the menu bar item and the progress bar. =stop()= cancels any running
+countdown and removes the menu bar item, the bar and every hotkey this Spoon bound.
+
+* Time formats
+
+=startUntil()= accepts a time of day in these forms:
+
+| Form         | Example    | Means |
+|--------------+------------+-------|
+| =hh:mm=      | =14:30=    | 24-hour clock, hours 00 to 23 |
+| =h:mm am=    | =9:30 am=  | Morning. =12:00 am= is midnight |
+| =h:mm pm=    | =9:30 pm=  | Afternoon, so 21:30. =12:00 pm= is noon |
+
+The =am= or =pm= suffix may be upper or lower case, and the space before it is optional, so
+=9:30PM= and =9:30pm= are the same as =9:30 pm=. Minutes are always two digits. Surrounding
+spaces are ignored.
+
+Anything else is reported rather than interpreted. =24:00=, =23:60= and =13:00 pm= are out
+of range; =10:30 sharp= and =9:5= do not match. In particular, text after the time is never
+discarded: were a =pm= to be ignored, the countdown would end twelve hours from when it
+was meant to, which is the kind of mistake a timer should not make quietly.
+
+* The callback
+
+=startFor()=, =startUntil()= and =startForInteractive()= take a callback, called as
+=(event, minutes)=:
+
+#+begin_src js   :exports both
+countDown.startFor(25, (event, minutes) => {
+    console.log(`countdown ${event}, ${minutes} minutes`)
+})
+#+end_src
+
+| Event           | =minutes= is                        |
+|-----------------+-------------------------------------|
+| ="started"=     | 0                                   |
+| ="paused"=      | Minutes remaining                   |
+| ="resumed"=     | Minutes remaining                   |
+| ="cancelled"=   | Minutes remaining                   |
+| ="ended"=       | The length the countdown ran for    |
+| ="setProgress"= | Minutes remaining after the jump    |
+
+The names are also properties of =events=, so =countDown.events.end= is ="ended"=. A
+callback that throws is reported in the console and does not stop the countdown.
+
+A cancelled countdown fires ="cancelled"= and never ="ended"=.
+
+* Configuration
+
+Settings are properties of =config=.
+
+| Setting                 | Default     | Meaning                                                    |
+|-------------------------+-------------+------------------------------------------------------------|
+| =defaultLenMinutes=     | =25=        | Length used when =startFor()= is given none.               |
+| =useLastTimerAsDefault= | =true=      | The last length started becomes =defaultLenMinutes=.       |
+| =notify=                | =true=      | Show a dialog that must be acknowledged when time is up.   |
+| =messageDuration=       | =2=         | Seconds a progress or error message stays on screen.       |
+| =barHeight=             | =5=         | Height of the progress bar, in points.                     |
+| =barTransparency=       | =0.8=       | Opacity of the bar, 0.0 to 1.0.                            |
+| =barColorPassed=        | ="#28CD41"= | Colour of the elapsed part.                                |
+| =barColorToPass=        | ="#FF3B30"= | Colour of the remaining part.                              |
+| =barSegments=           | =240=       | Rectangles the bar is built from. See /Notes/.             |
+| =alertLen=              | =5=         | Seconds the end-of-time alert is shown. =0= for none.      |
+| =alertSound=            | ="Sonar"=   | System sound played when time is up. See /Notes/.          |
+| =warningShow=           | =true=      | Show the warnings at 1, 2, 4, 8, ... minutes remaining.    |
+| =warningDuration=       | =3=         | Seconds a warning stays on screen.                         |
+| =menuBarAlwaysShow=     | =true=      | Keep the menu bar item visible while no countdown runs.    |
+| =menuBarIconIdle=       | ="⏰"       | Menu bar icon while no countdown runs.                      |
+| =menuBarIconActive=     | ="☣️"       | Menu bar icon while one runs.                               |
+| =menuBarIconPlay=       | ="▶️"       | Shown on the /Resume/ menu entry.                           |
+| =menuBarIconPause=      | ="⏸️"       | Menu bar icon while paused, and on the /Pause/ entry.       |
+| =menuBarIconStop=       | ="🛑"       | Shown on the /Stop/ menu entry.                             |
+| =defaultKeyBindings=    | see above   | Used by =bindHotkeys()= when called with no argument.      |
+
+#+begin_src js   :exports both
+const countDown = hs.spoons["hs_countdown-gt"]
+countDown.config.defaultLenMinutes = 50
+countDown.config.warningShow = false
+countDown.config.alertSound = "Glass"
+#+end_src
+
+* Notes
+
+- *One countdown at a time.* Starting a countdown while one runs is refused with a message
+  rather than replacing it. Cancel the running one first.
+- *=useLastTimerAsDefault= changes a setting.* Starting a countdown of 45 minutes with it
+  on assigns 45 to =config.defaultLenMinutes=, so later calls with no length use 45 rather
+  than the value you configured.
+- *The bar is on the primary screen.* It spans the bottom edge of the primary screen, and
+  is built for that screen's width. It is not moved to the screen holding the focused
+  window.
+- *=barSegments= is the bar's resolution.* The bar is a row of fixed-width rectangles,
+  re-coloured as the countdown advances, because element geometry in =hs.ui= is fixed once
+  a window is built while a colour is reactive. More segments give a smoother bar and more
+  elements to build.
+- *Warnings are at powers of two.* They appear at 1, 2, 4, 8, 16, ... minutes remaining,
+  and only when that is less than the countdown's own length. A 4 minute countdown warns at
+  2 and 1 minutes, not at 4.
+- *The menu bar item counts seconds.* Its title is =mm:ss=, or =h:mm:ss= past an hour. Its
+  menu holds /Stop/ and /Pause/, the latter becoming /Resume/ while paused. While no
+  countdown runs, the menu instead offers /Start n min/ and /Start for .../, so the Spoon
+  is usable without a key bound.
+- *=alertSound= also controls the notification.* The sound and the system notification are
+  sent together, so setting =alertSound= to =null= or =""= silences the countdown and stops
+  the notification. The on-screen alert (=alertLen=) and the dialog (=notify=) are
+  independent of it.
+- *Restoring focus.* The end-of-time dialog and the =startForInteractive()= prompt take
+  keyboard focus. Both return it to the window that had it when they appeared.

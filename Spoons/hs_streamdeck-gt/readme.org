@@ -1,0 +1,165 @@
+* hs_streamdeck-gt
+
+Displays [[file:../hs_menu-gt/readme.org][hs_menu-gt]] menus on Elgato Stream Deck
+hardware.
+
+This Spoon is a presenter and nothing more. The menus, their buttons and what a press does
+all belong to hs_menu-gt, and the same menu can be displayed on screen at the same time.
+What is added here is the hardware, and the furniture the hardware needs: a back button,
+an on/off button, and a fixed grid to fit them into.
+
+#+begin_src js   :exports both
+const deck = hs.loadSpoon("hs_streamdeck-gt")
+
+deck.setMenu("A00NA33332Q8DH", mainMenu, "Main")   // one particular deck
+deck.setMenu("large", mainMenu)                    // any deck of 15 keys or more
+deck.setMenu("small", smallMenu)                   // any smaller deck
+deck.setDefaultMenu(fallbackMenu)                  // anything else
+deck.start()
+#+end_src
+
+Through =use()=, where =after= runs before the Spoon's =start()=, so every deck has its
+menu before the hardware is attached:
+
+#+begin_src js   :exports both
+interactive.use("hs_streamdeck-gt", {
+    after: (deck) => {
+        deck.setMenu("A00NA33332Q8DH", menus.rootMenu, "Root");
+        deck.setDefaultMenu(menus.rootMenu, "Root");
+    }
+});
+#+end_src
+
+* Which menu a deck displays
+
+Looked up by serial number, then by size, then the default. A deck of 15 keys or more is
+="large"=; anything smaller is ="small"=.
+
+Print the serial numbers of the decks attached with:
+
+#+begin_src js   :exports both
+hs.streamdeck.all().forEach((d) => console.log(d.deckType + " " + d.serialNumber))
+#+end_src
+
+* The keys the Spoon adds
+
+The menu's own buttons never see these, and neither does any other presenter.
+
+| Key            | Holds                                                              |
+|----------------+--------------------------------------------------------------------|
+| First          | *Back*, in a submenu only. Returns to the parent menu.             |
+| Last           | *On/off*. Blanks the deck; press again to restore the root menu.   |
+| Any unused key | Filler, drawn in =config.fillerColor=.                             |
+
+While the deck is off, only the on/off key responds.
+
+A menu longer than the keys available is *truncated*, and how many buttons were left out
+is written to the console. Scrolling is not implemented; the Hammerspoon 1 Spoon put
+scroll arrows in the left column, and that has not been carried over.
+
+* Presses
+
+A press acts on release, and on whatever the key held when it went *down*. This matters
+because Back occupies the same key as the first button of the parent menu: acting on the
+press and then reading the release against the newly drawn menu would return to the parent
+and immediately re-enter the submenu.
+
+Holding a button past =hs_menu-gt='s =holdSeconds= runs its long-press action while the
+key is still held. The release that follows is discarded.
+
+A button that dismisses returns the deck to its root menu, since a deck is always
+displayed and has nothing to be dismissed to.
+
+* Configuration
+
+| Setting                  | Default            | Meaning                                         |
+|--------------------------+--------------------+-------------------------------------------------|
+| =brightnessDay=          | 60                 | Percentage during the day.                      |
+| =brightnessNight=        | 25                 | Percentage at night.                            |
+| =dayStartHour=           | 8                  | The day begins at this hour.                    |
+| =dayEndHour=             | 18                 | And ends at it. 18 means the last day hour is 17. |
+| =brightnessCheckSeconds= | 60                 | How often the time of day is checked.           |
+| =autoOffSeconds=         | 1800               | Blank the deck after this long unused.          |
+| =backButton=             | =back.png=, "Back" | A button specification. Null for no back key.   |
+| =toggleButton=           | =symbol:power=     | A button specification. Null for no on/off key. |
+| =fillerColor=            | =#000000=          | Colour drawn on keys holding nothing.           |
+
+=backButton= and =toggleButton= are ordinary hs_menu-gt button specifications, so they take
+=icon=, =label=, =background= and the rest.
+
+** Brightness
+
+The brightness follows the clock: =brightnessDay= from =dayStartHour= up to, but not
+including, =dayEndHour=, and =brightnessNight= otherwise. It is applied when a deck is
+attached, when it is switched back on, and whenever a check finds that the hour has
+crossed a boundary. The hardware is only written to when the value changes, so the check
+costs a comparison a minute.
+
+** Turning off when unused
+
+A deck with no press for =autoOffSeconds= goes dark. The countdown starts when the deck is
+attached, so a deck never touched still turns off, and it restarts at every press.
+
+Off means the backlight at zero, not the keys painted black, so every key goes dark
+including the on/off key. The images are left in place, which is why /any/ key wakes the
+deck — there is nothing visible to aim at — and why waking is immediate and returns to the
+menu that was displayed rather than to the root. The press that wakes it runs no action.
+
+Set =autoOffSeconds= to null or 0 to leave the deck lit indefinitely.
+
+Note that this counts presses on the deck, not activity on the machine: a deck sitting
+untouched beside a busy keyboard still goes dark.
+
+** Locking
+
+With =blankWhenLocked=, locking the screen turns the deck off and unlocking turns it back
+on, through =hs.power='s =screensDidLock= and =screensDidUnlock=. =blankWhenScreensaverRuns=
+does the same for the screen sleeping and for the screen saver.
+
+A deck turned off by locking is remembered separately from one turned off by hand or by
+the idle countdown, so unlocking restores only what locking turned off.
+
+** Changing a setting while running
+
+The brightness and the countdown are applied when a deck is attached. A setting changed
+afterwards takes hold at the next press or the next reload — call =applySettings()= to
+apply it at once.
+
+#+begin_src js   :exports both
+const deck = hs.spoons["hs_streamdeck-gt"]
+deck.config.autoOffSeconds = 300
+deck.applySettings()
+#+end_src
+
+* API
+
+| Function                          | Does                                                |
+|-----------------------------------+-----------------------------------------------------|
+| =setMenu(key, buttons, name)=     | Registers a menu by serial number or size.          |
+| =setDefaultMenu(buttons, name)=   | Registers the menu for any deck without one.        |
+| =start()=                         | Attaches to every deck, and to any plugged in later. |
+| =stop()=                          | Releases every deck and resets it.                  |
+| =refreshAll()=                    | Redraws every deck from its root menu.              |
+| =applySettings()=                 | Applies changed settings to the decks at once.      |
+| =getDeck(serialNumber)=           | One attached deck's record, or null.                |
+| =getDecks()=                      | Every attached deck's record.                       |
+
+A record holds =device=, =session=, =layout= and =on=. =session= is the hs_menu-gt session
+displaying on that deck, so =getDecks()[0].session.push(...)= opens a submenu from code.
+
+Decks are attached and released as they are plugged in and unplugged, through
+=hs.streamdeck.addWatcher=. =refreshAll()= is called whenever a menu is registered, so
+changing a menu redraws the deck.
+
+* Notes
+
+- *Button images are 96×96*, which is the Stream Deck XL's native size. A deck whose
+  buttons are a different size scales them.
+- *Encoders and the touch strip are not supported.* =hs.streamdeck= exposes them, and a
+  Stream Deck Plus reports them through =encoderCount=; nothing here uses them.
+- *The first drawing of a menu is slow*, a few hundred milliseconds per icon that has not
+  been drawn before. Afterwards the tiles are read from disk. See /How buttons are drawn/
+  in the hs_menu-gt documentation.
+- *Another application may be driving the same deck.* Hammerspoon 1's Stream Deck Spoon
+  and Elgato's own software claim the same hardware. If buttons are drawn and then
+  replaced, or presses reach the wrong place, check what else is running.

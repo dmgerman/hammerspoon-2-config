@@ -1,0 +1,6 @@
+{
+    "name": "hs_countdown-gt",
+    "author": "ashfinal <ashfinal@gmail.com>, Daniel Marques <danielbmarques@gmail.com>, Omar El-Domeiri <omar@doesnotexist.com>, Daniel German <dmg@turingmachine.org>",
+    "version": "2.0.0",
+    "description": "Countdown timer with a screen-edge progress bar, menu bar item, periodic warnings and an end-of-time alert."
+}

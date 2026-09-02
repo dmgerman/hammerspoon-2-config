@@ -1,0 +1,291 @@
+* hs_menu-gt
+
+A Spoon for hierarchical menus that do not belong to any one device.
+
+A /menu/ is an array of button specifications. A /presenter/ displays one page of a menu on
+some device and reports presses back. The menu holds no knowledge of the device, so the
+same menu is displayed on screen, on a Stream Deck, or on both at once, and a button's
+action is written once.
+
+This Spoon provides the menus themselves and a keyboard-driven on-screen presenter.
+[[file:../hs_streamdeck-gt/readme.org][hs_streamdeck-gt]] adds a presenter for Stream Deck
+hardware.
+
+#+begin_src js   :exports both
+const menu = hs.loadSpoon("hs_menu-gt")
+
+menu.showOnScreen([
+    { label: "Emacs",  app: "org.gnu.Emacs", key: "e" },
+    { label: "Clock",  command: "clock-show" },
+    { label: "Buses",  icon: "bus2.png", children: busMenu }
+])
+#+end_src
+
+A button's action is normally a /command/ defined by
+[[file:../hs_interactive-gt/readme.org][hs_interactive-gt]], named rather than written
+inline, so that the same action is reachable from a menu, from a key binding and from the
+command chooser.
+
+* Buttons
+
+Every field is optional, though a button with none of them is an empty square.
+
+| Field            | Meaning                                                            |
+|------------------+--------------------------------------------------------------------|
+| =label=          | Text drawn on the button, beneath the icon.                        |
+| =icon=           | The picture. See /Icons/.                                          |
+| =hideLabel=      | Draw the icon without the label.                                   |
+| =key=            | The letter that selects it on screen. Assigned when omitted.       |
+| =command=        | Name of the command a short press runs.                            |
+| =args=           | Arguments passed to that command.                                  |
+| =altCommand=     | Name of the command a long press runs.                             |
+| =altArgs=        | Arguments passed to that command.                                  |
+| =children=       | A submenu: an array, or a function returning one.                  |
+| =app=            | Bundle ID. Short press brings it forward, long press hides it.     |
+| =url=            | Opened on press.                                                   |
+| =urlBundle=      | Bundle ID of the browser to open =url= in.                         |
+| =fn=             | A function, for an action not worth naming. =(context, button)=.   |
+| =altFn=          | The same, for a long press.                                        |
+| =dismiss=        | Whether acting closes the menu. Defaults to true.                  |
+| =background=     | Background colour of the button, as a hex string.                  |
+| =labelColor=     | Colour of the label.                                               |
+| =image=          | A ready-made =HSImage=, used as it stands.                         |
+| =imageProvider=  | Draws the button. See /Buttons that draw themselves/.              |
+| =stateProvider=  | What the button depends on. Redrawn only when it changes.          |
+| =updateInterval= | Seconds between checks.                                            |
+
+An action is chosen in this order: =fn=, =command=, =app=, =url=. A short press on a button
+with =children= opens the submenu and ignores the rest.
+
+** Actions
+
+#+begin_src js   :exports both
+// A command, with an argument supplied by the menu
+{ label: "25 min", command: "countdown-start-for", args: [25] }
+
+// Different actions for a tap and a hold
+{
+    label: "Gmail",
+    icon: "gmail.png",
+    command:    "gmail-open",
+    altCommand: "gmail-compose"
+}
+
+// A submenu computed when it is opened
+{ label: "Windows", children: () => hs.window.allWindows().map((w) => ({
+    label: w.title,
+    fn: () => w.focus()
+})) }
+#+end_src
+
+Commands run through =callInteractively=, so a command whose arguments the menu does not
+supply reads them through its own readers, from the snapshot taken at the press. Note that
+a reader which prompts will open a dialog, and =hs.ui.textPrompt= blocks Hammerspoon while
+it is displayed.
+
+** dismiss
+
+By default a button closes the menu once it has acted, which suits a menu displayed on
+demand. =dismiss: false= leaves it displayed, for a button pressed several times in a row.
+A submenu never dismisses.
+
+On a Stream Deck, which is always displayed, dismissing returns to the root menu.
+
+* Buttons that draw themselves
+
+A button with =imageProvider= draws its own picture, so it can show the time, a
+temperature, or which audio device is selected.
+
+#+begin_src js   :exports both
+const clockButton = {
+    label: "Clock",
+    updateInterval: 10,
+    stateProvider: () => new Date().getHours() + ":" + new Date().getMinutes(),
+    imageProvider: (context) => ({
+        label: JSON.parse(context.state),
+        background: "#F5C542",
+        labelColor: "#101014"
+    })
+}
+#+end_src
+
+=stateProvider= returns whatever the button depends on. It is called every
+=updateInterval= seconds and its result compared with the last, as text, so an object or
+an array is compared by value. The button is redrawn only when the result differs, which
+is why the example above can be checked every ten seconds while being drawn once a minute.
+
+A button with =updateInterval= and no =stateProvider= is redrawn at every interval.
+
+=imageProvider(context)= receives ={session, index, state}=, where =state= is the text
+=stateProvider= produced, and returns any of:
+
+| Returns              | Meaning                                                       |
+|----------------------+---------------------------------------------------------------|
+| button fields        | Merged over the button and drawn as any other button is.      |
+| a string             | Drawn as the button's label.                                  |
+| SVG markup           | Rendered as the whole button. Must begin with =<svg=.         |
+| an =HSImage=         | Used as it stands.                                            |
+| a promise of any     | Awaited.                                                      |
+
+Returning button fields is usually what you want: icons, colours, labels and text
+wrapping all behave as they do elsewhere.
+
+** What is not cached
+
+A self-drawing button is never written to the disk tile cache — a clock would otherwise
+leave a file behind every minute. It is redrawn whenever its state changes, so keep
+=imageProvider= cheap, and put anything expensive in =stateProvider= where its result is
+reused.
+
+** Only where the display can change
+
+Buttons refresh on a Stream Deck. On screen they are drawn once when the menu opens and
+not refreshed, because =hs.ui= cannot alter a window after it is built: rebuilding it
+would rebind every letter and take the keyboard with it. Call =session.update(index)= to
+refresh one button on demand.
+
+* Icons
+
+=icon= accepts any of these:
+
+| Form                     | Meaning                                              |
+|--------------------------+------------------------------------------------------|
+| ="bus_7.png"=            | A file in =config.iconDir=.                          |
+| ="~/pictures/x.png"=     | An absolute or =~=-relative path.                    |
+| ="symbol:hammer"=        | An SF Symbol, recoloured to =config.symbolColor=.    |
+| ="bundle:com.apple.Mail"= | An application's icon.                              |
+| an =HSImage=             | Used as it stands.                                   |
+
+A button with =app= and no =icon= uses that application's icon.
+
+SF Symbols are template images — black on transparent — and are recoloured so they are
+visible on a dark button. Without that they draw black on black.
+
+* Letters
+
+Each button on screen carries a letter that selects it. A button's own =key= is honoured,
+and the rest are given unused letters from =config.alphabet=, home row first. A menu with
+more buttons than the alphabet has letters leaves the remainder unlettered: those are
+reachable on a Stream Deck but not from the keyboard.
+
+Declaring =key= on the buttons that matter keeps them stable as a menu grows, which
+matters for a menu whose contents are computed.
+
+* Presses
+
+A press is reported as the button going down and later coming up, on both devices: a
+Stream Deck reports it through its button callback, and the on-screen presenter binds each
+letter with a press and a release handler. One recogniser turns those into a short press
+or a long press, so a hold behaves the same way on either.
+
+A hold fires as soon as =config.holdSeconds= elapses, while the button is still down, as
+the Hammerspoon 1 Spoon did. The release that follows is discarded.
+
+* The on-screen menu
+
+#+begin_src js   :exports both
+menu.showOnScreen(rootMenu, { name: "Root" })   // replaces any menu displayed
+menu.toggleOnScreen(rootMenu)                   // hides it if it is displayed
+menu.hideScreen()
+menu.isShowingOnScreen()
+#+end_src
+
+The menu is driven from the keyboard. While it is displayed the letters are bound
+globally, so typing goes to the menu until it is dismissed.
+
+| Key      | Does                          |
+|----------+-------------------------------|
+| a letter | Selects that button.          |
+| Escape   | Dismisses the menu.           |
+| Delete   | Returns to the parent menu.   |
+
+Bind a key to a command that calls =toggleOnScreen=, rather than binding one here, so the
+menu is reachable the same way as everything else.
+
+* Configuration
+
+Settings are on =menu.config=, and through =use()= in =init.js=.
+
+| Setting            | Default                    | Meaning                                     |
+|--------------------+----------------------------+---------------------------------------------|
+| =iconDir=          | =<config>/icons=           | Where a relative icon name is looked up.    |
+| =cacheDir=         | =<config>/.cache/menu-gt=  | Rendered tiles and encoded icons.           |
+| =tileSize=         | 96                         | Edge of a button image, in pixels.          |
+| =holdSeconds=      | 0.5                        | A press this long is a long press.          |
+| =alphabet=         | home row first             | Letters offered to buttons without a =key=. |
+| =urlBundle=        | null                       | Browser for =url= buttons.                  |
+| =iconScale=        | 0.74                       | Icon size with a label beneath it.          |
+| =iconScaleAlone=   | 0.94                       | Icon size without a label.                  |
+| =background=       | =#101014=                  | Button background.                          |
+| =labelColor=       | =#F0F0F0=                  | Label colour.                               |
+| =labelSize=        | 15                         | Largest label size. Long labels shrink.     |
+| =font=             | Helvetica                  | Label font.                                 |
+| =symbolColor=      | =#FFFFFF=                  | Colour SF Symbols are drawn in.             |
+| =taskTimeout=      | 4                          | Seconds before an icon encoding is dropped. |
+| =taskPollInterval= | 0.05                       | How often the encoding's output is checked. |
+
+=config.screen= holds the on-screen presenter's settings: =tile=, =spacing=, =padding=,
+=background=, =letterSize=, =letterColor=, =level=, =cancelKeys=, =backKeys=, and
+=columnsFor(count)=, which returns the number of columns to lay the buttons out in.
+
+* How buttons are drawn
+
+Hammerspoon 2 has no canvas and cannot draw text into an image, so a button is written as
+SVG and loaded through =HSImage.fromURL=. Composing an icon with a label means embedding
+the icon in that markup as a =data:= URI: AppKit renders SVG as a self-contained document
+and will not load a =file://= reference, and the bytes cannot be read in process, since
+=hs.fs.read= decodes as text and returns nothing for a PNG. The encoding is therefore done
+by =base64= as a subprocess.
+
+This is slow enough to matter, so the results are kept:
+
+- The finished tile is written to =cacheDir= as a PNG. Drawing one costs roughly 200 ms,
+  loading it costs one call, so an icon is drawn once and reused for good.
+- An icon with no label needs no composition at all and skips this entirely.
+- Encodings run one at a time and are cancelled when the menu is navigated away from.
+
+#+begin_src js   :exports both
+menu.clearImageCache()   // forget the images held in memory
+menu.clearDiskCache()    // delete the cached tiles as well
+#+end_src
+
+Call =clearDiskCache()= after changing =tileSize=, the colours or the fonts: a tile is
+keyed by its icon and label, not by the settings it was drawn under, so an existing tile
+would otherwise be reused.
+
+* Writing a presenter
+
+A presenter is an object with these members. =openSession(menu, presenter, options)= walks
+a menu on one of them and returns the session.
+
+| Member                     | Meaning                                                        |
+|----------------------------+----------------------------------------------------------------|
+| =progressive=              | True if the display can be changed after it is shown.          |
+| =present(session, buttons)= | Display a page. Called on every navigation.                   |
+| =setImage(index, image)=   | Set one button's image. Progressive presenters only.           |
+| =close()=                  | The menu was dismissed.                                        |
+
+A progressive presenter is given the page at once and each image as it is drawn. One that
+cannot change what it displays — an =hs.ui= window cannot — is given the page only when
+every image is ready, with each button's =image= already set.
+
+The session offers =down(index)=, =up(index)=, =activate(index, kind)=, =push(button)=,
+=pop()=, =popToRoot()=, =refresh()=, =close()=, =canPop()=, =buttons()=, =letters()=,
+=indexOfLetter(letter)= and =title()=.
+
+Report presses with =down= and =up= rather than acting directly, so that the hold is
+recognised. Each presenter owns its own session, so opening a submenu on one device does
+not move the menu displayed on another.
+
+* Notes
+
+- *A menu that is a function is resolved when it is opened*, so a menu of running
+  applications or open windows lists what exists at that moment.
+- *Navigating cancels drawing.* A menu can take seconds to draw the first time, which is
+  long enough to move on. Images belonging to a menu that is no longer displayed are
+  neither drawn nor painted.
+- *The on-screen menu shows nothing until every image is ready*, because =hs.ui= cannot
+  alter a window once it is built. A Stream Deck fills in as each image arrives. Only the
+  first draw of a menu is affected.
+- *Only running applications can be hidden.* =app= buttons start an application that is
+  not running, but a long press hides only one that is frontmost.

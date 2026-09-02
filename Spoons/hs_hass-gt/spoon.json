@@ -1,0 +1,6 @@
+{
+    "name": "hs_hass-gt",
+    "author": "Daniel German <dmg@turingmachine.org>",
+    "version": "0.1.0",
+    "description": "Home Assistant control: lights, scripts and the desk amplifiers, through hass-cli."
+}

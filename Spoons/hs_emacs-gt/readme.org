@@ -1,0 +1,196 @@
+* hs_emacs-gt
+
+Emacs from Hammerspoon 2: run elisp, forward keys that would otherwise never reach Emacs,
+and show what Emacs has to say.
+
+A port of the Hammerspoon 1 =hs_emacs_helper=, merged with =editWithEmacs=. The editing
+round trip is not included yet; see /Not here yet/.
+
+#+begin_src js   :exports both
+const emacs = hs.loadSpoon("hs_emacs-gt")
+
+emacs.executeAndRaise("(bookmark-bmenu-list)")
+emacs.bindKey(["cmd", "ctrl"], "space")
+emacs.message("saved")
+#+end_src
+
+The elisp is yours. Nothing in this Spoon names a function that is not part of Emacs, so
+what to run belongs in your configuration:
+
+#+begin_src js   :exports both
+interactive.use("hs_emacs-gt", {
+    commands: (interactive, emacs) => {
+        interactive.define({
+            name: "emacs-agenda",
+            doc:  "Show the org agenda.",
+            fn:   () => emacs.executeAndRaise("(dmg-agenda)")
+        });
+    }
+});
+#+end_src
+
+* Requirements
+
+- =emacsclient=, at =config.emacsClient=.
+- A running Emacs server: =(server-start)=, or =emacs --daemon=.
+
+=isRunning()= reports whether Emacs is running at all, and =execute()= reports a failed
+=emacsclient= to the console and on screen.
+
+* Running elisp
+
+| Function                      | Does                                                |
+|-------------------------------+-----------------------------------------------------|
+| =execute(elisp, options)=     | Runs elisp. =options.raise= brings Emacs forward.   |
+| =executeAndRaise(elisp)=      | The same, with =raise= set.                         |
+
+Both return a promise resolving to whether =emacsclient= succeeded.
+
+The elisp is passed to =emacsclient= as a single argument rather than through a shell, so
+it needs no quoting — which matters, since elisp is made of parentheses, quotes and
+backslashes.
+
+Raising is best effort: the code runs whether or not Emacs comes forward.
+
+=emacsclient= is run with =-n=, so it does not wait for a result. To read a value back,
+call =hs.task.runAsync= directly without =-n=:
+
+#+begin_src js   :exports both
+hs.task.runAsync(emacs.config.emacsClient, ["-e", "(buffer-name)"])
+    .then((r) => console.log(r.stdout))
+#+end_src
+
+* Bringing Emacs forward
+
+| Function                  | Does                                                    |
+|---------------------------+---------------------------------------------------------|
+| =isRunning()=             | Whether Emacs is running.                               |
+| =isFrontmost()=           | Whether Emacs is the frontmost application.             |
+| =focus()=                 | Brings Emacs forward. Resolves to whether it worked.    |
+| =waitForFrontmost(secs)=  | Resolves when Emacs is frontmost, or when time runs out. |
+
+=focus()= uses =hs.application.launchOrFocus= rather than =activate()=. macOS does not let
+an application that is not frontmost activate another one, and Hammerspoon never is at the
+moment a key is pressed; =activate()= fails silently there, while =launchOrFocus= goes
+through =NSWorkspace= and is not restricted.
+
+=waitForFrontmost= polls every =config.focusPollInterval= up to =config.focusTimeout=. The
+Hammerspoon 1 version used a busy-wait, which stopped everything else in Hammerspoon,
+timers included, for as long as it ran.
+
+* Forwarding keys to Emacs
+
+A chord bound here is sent on to Emacs instead of being acted on: Emacs is brought forward
+and the same chord is typed into it. Use it for a chord macOS or another application would
+otherwise swallow.
+
+#+begin_src js   :exports both
+const id = emacs.bindKey(["cmd", "ctrl"], "space")   // "cmd+ctrl+space"
+emacs.toggleKey(id)          // off, then on again
+emacs.toggleAllKeys(false)   // all off
+emacs.keys()                 // [{id, enabled}]
+#+end_src
+
+| Function                    | Does                                                  |
+|-----------------------------+-------------------------------------------------------|
+| =bindKey(mods, key)=        | Forwards a chord. Returns its identifier.             |
+| =toggleKey(id, enable)=     | Enables or disables one. Omit =enable= to toggle.     |
+| =toggleAllKeys(enable)=     | The same for all of them.                             |
+| =keys()=                    | Every forwarded key, as ={id, enabled}=.              |
+| =unbindAll()=               | Releases them all.                                    |
+
+The binding is disabled while the key is sent and re-enabled afterwards, so it does not
+catch its own keystroke and recurse. When Emacs is not running the chord is sent to
+whatever is in front instead, so the key is never simply swallowed.
+
+* Messages
+
+| Function              | Does                                                     |
+|-----------------------+----------------------------------------------------------|
+| =message(text, secs)= | Shows text on screen for a few seconds.                  |
+| =messageHide()=       | Hides it now.                                            |
+| =setStatus(text)=     | Shows text in the menu bar until it is cleared.          |
+| =clearStatus()=       | Returns the menu bar to its resting icon.                |
+
+In Hammerspoon 1 the on-screen message was an =hs.canvas=. Hammerspoon 2 has no canvas, so
+it is an =hs.ui= window, rebuilt at each message — an =hs.ui= window takes its frame when
+it is created, which is also what lets the message follow the primary screen.
+
+The menu bar item is created by =start()= and shows =config.menubar.iconEmpty= when there
+is nothing to report.
+
+* Configuration
+
+| Setting             | Default                     | Meaning                              |
+|---------------------+-----------------------------+--------------------------------------|
+| =emacsClient=       | =/opt/homebrew/bin/emacsclient= | The client to run.               |
+| =bundleID=          | =org.gnu.Emacs=             | Used to find and raise Emacs.        |
+| =focusTimeout=      | 1                           | Seconds to wait for Emacs to appear. |
+| =focusPollInterval= | 0.05                        | How often to look while waiting.     |
+| =alertOnFailure=    | true                        | Show a failed emacsclient on screen. |
+
+=config.message= holds =width=, =height=, =duration=, =font=, =textSize=, =textColor=,
+=background= and =level=. =config.menubar= holds =enabled=, =iconEmpty= and =iconMessage=.
+
+* Editing a text field in Emacs
+
+Take the text of whatever field is focused, edit it in Emacs, and have the result pasted
+back. This is the =editWithEmacs= half of the Spoon.
+
+#+begin_src js   :exports both
+emacs.editSelection()   // just the selection
+emacs.editAll()         // the whole field
+#+end_src
+
+| Function                       | Does                                                    |
+|--------------------------------+---------------------------------------------------------|
+| =editSelection()=              | Edits the selection.                                    |
+| =editAll()=                    | Edits the whole field.                                  |
+| =beginEditing(everything)=     | What both call.                                         |
+| =endEditing(id, everything)=   | Pastes the result back. Emacs calls this.               |
+| =readFocusedText(everything)=  | The focused element's text, or null.                    |
+| =windowInfo(id)=               | =x||y||w||h||application||title=.                       |
+
+** What happens
+
+1. The focused window is noted, and its identity written to =config.editing.infoFile=
+   (=/tmp/emacs-everywhere.txt=) for Emacs to read.
+2. The text is put on the pasteboard — through accessibility where the application
+   exposes it, and by sending copy keystrokes where it does not.
+3. Emacs is told to open an editing buffer, and brought forward.
+4. When you finish, Emacs puts the text on the pasteboard and calls =endEditing= through
+   the Hammerspoon command line. The original window is raised and the text pasted.
+
+** Setting it up
+
+Emacs needs =hammerspoon.el=, which ships beside this file, and =emacs-everywhere=. It
+also needs the Hammerspoon command line client installed, and =hs.ipc.start()= in your
+configuration:
+
+#+begin_src js   :exports both
+hs.ipc.installBinary("/usr/local/bin")   // from the Hammerspoon console, once
+#+end_src
+
+An out-of-date client is worse than a missing one: it fails with a connection error that
+looks like Hammerspoon being down. Reinstall it whenever Hammerspoon is updated.
+
+** Differences from the Hammerspoon 1 Spoon
+
+=hammerspoon.el= sends *JavaScript* rather than Lua, and pipes it to the client's standard
+input, because the Hammerspoon 2 client has no =-c= option. Calls go to
+=hs.spoons["hs_emacs-gt"]= rather than to =spoon.editWithEmacs=.
+
+Pasting back takes two steps rather than one. In Hammerspoon 1, =w:focus()= was enough.
+macOS does not let an application that is not frontmost activate another one, so
+=window.focus()= now reports success while the application stays where it was: the
+application is raised with =launchOrFocus= first, and the window focused within it.
+
+** When an application will not give up its text
+
+Some applications — terminals such as kitty, and anything drawing its own text — expose no
+readable value through accessibility. The Spoon then puts
+=config.editing.captureFailureSentinel= on the pasteboard and sends the copy keystrokes.
+If the pasteboard has not changed afterwards, the application ignored them, and the
+sentinel is what appears in Emacs. That is deliberate: it is better to see
+=(application did not allow clipboard extraction)= than to silently edit whatever happened
+to be on the pasteboard.

@@ -1,0 +1,116 @@
+* hs_hass-gt
+
+Home Assistant control: the office dimmer, the desk amplifiers, and any light, switch or
+script. A port of the Hammerspoon 1 =hs_hass= Spoon.
+
+Every call runs =hass-cli= through a wrapper script that supplies the server address and
+the access token, so no credentials appear in this Spoon or in the configuration.
+
+#+begin_src js   :exports both
+const hass = hs.loadSpoon("hs_hass-gt")
+
+hass.officeDimmerOn(128)    // half brightness
+hass.officeLightToggle()
+hass.teacToggle()
+hass.marantzToggle()
+#+end_src
+
+* Requirements
+
+- =hass-cli=, the Home Assistant command line client.
+- A wrapper script at =config.cli= that exports =HASS_SERVER= and =HASS_TOKEN= and passes
+  its arguments to =hass-cli=.
+
+The wrapper calls =hass-cli= by name, and Hammerspoon's shell does not read the profile
+that puts it on =PATH=. =config.pathPrepend= supplies the directory. Without it every call
+fails with =command not found= and exit code 127 — and fails silently as far as the menu
+is concerned, since the light simply does not come on.
+
+Check the path Hammerspoon will actually use:
+
+#+begin_src js   :exports both
+hs.task.shell("PATH='/Users/dmg/.config/dmg/python/bin':\"$PATH\" which hass-cli")
+    .then((r) => console.log(r.exitCode + " " + r.stdout))
+#+end_src
+
+* Functions
+
+** Home Assistant, generally
+
+| Function                        | Does                                                |
+|---------------------------------+-----------------------------------------------------|
+| =service(name, args)=           | Calls a service, as =light.turn_on=, with arguments. |
+| =lightOn(entity, brightness)=   | Switches a light on. Brightness is 1 to 255.        |
+| =lightOff(entity)=              | Switches a light off.                               |
+| =toggle(domain, entity)=        | Toggles an entity. =domain= is "light", "switch".   |
+| =runScript(name)=               | Runs a script, named =script.something=.            |
+
+=service= returns a promise resolving to whether =hass-cli= exited successfully. A failure
+is written to the console; nothing waits for the result.
+
+** The office dimmer
+
+Acts on =config.officeDimmer=.
+
+| Function                     | Does                                        |
+|------------------------------+---------------------------------------------|
+| =officeDimmerOn(brightness)= | On, at a brightness of 1 to 255.            |
+| =officeLightOn()=            | On, at its last brightness.                 |
+| =officeLightOff()=           | Off.                                        |
+| =officeLightToggle()=        | Toggles it.                                 |
+
+** The amplifiers
+
+| Function                | Does                                                       |
+|-------------------------+------------------------------------------------------------|
+| =marantzToggle()=       | On if off, off if on, and selects it as the audio output.  |
+| =marantzEnsureOn()=     | On and selected, unless it is already on.                  |
+| =marantzEnsureOff()=    | Off, unless it is already off.                             |
+| =marantzToggleRaw()=    | Presses its power button, whatever state it is in.         |
+| =selectMarantz()=       | Makes it the default output. Returns whether it is on.     |
+| =isMarantzOn()=         | Whether it is on.                                          |
+| =teacToggle()=          | Toggles the Teac.                                          |
+| =teacVolumeUp()=        | Raises the Teac's volume one step.                         |
+| =teacVolumeDown()=      | Lowers it one step.                                        |
+| =deskAmpToggle()=       | Toggles both.                                              |
+
+The Marantz does not report its power state to Home Assistant, so it is inferred: the DAC
+only appears as a macOS audio output device while it is powered. =isMarantzOn()= looks for
+=config.marantzDevice= among the audio devices.
+
+Switching it on takes a few seconds to appear, so =marantzEnsureOn()= selects it after
+=config.marantzWakeSeconds= and reports on screen if it never arrives.
+
+* Configuration
+
+| Setting               | Default                        | Meaning                              |
+|-----------------------+--------------------------------+--------------------------------------|
+| =cli=                 | =~/bin/my-hass-cli.sh=         | The wrapper script.                  |
+| =pathPrepend=         | the hass-cli directory         | Prepended to PATH for that script.   |
+| =officeDimmer=        | =light.dmgDimmer=              | Entity the office functions act on.  |
+| =marantzDevice=       | =HD-DAC1=                      | Audio device the Marantz appears as. |
+| =scripts=             | marantzPower, teac, volume     | Script entities in Home Assistant.   |
+| =marantzWakeSeconds=  | 5                              | Wait before checking it switched on. |
+| =alerts=              | true                           | Announce actions on screen.          |
+| =alertDuration=       | 1.5                            | Seconds an announcement is shown.    |
+
+* Commands
+
+=init.js= defines these, so they are reachable from the command chooser, from a key, and
+from a menu: =hass-office-brightness= (prompts for 1 to 255), =hass-office-on=,
+=hass-office-off=, =hass-office-toggle=, =hass-teac-toggle=, =hass-teac-volume-up=,
+=hass-teac-volume-down=, =hass-marantz-toggle=, =hass-marantz-select= and
+=hass-desk-amps-toggle=.
+
+* Differences from the Hammerspoon 1 Spoon
+
+Two buttons in the version 1 menu did not do what their labels said, through defects in
+=hs_hass.spoon= rather than by intent. Both behave as labelled here.
+
+- *On* called =of_light_on()=, which was never defined, so pressing it did nothing.
+- *Off* called =of_light_off()=, which was defined twice; the second definition called
+  =light_on=, so the button switched the dimmer /on/.
+
+=marantz_ensure_off()= also called =setDefaultOutputDevice()= on the result of a lookup
+that returns nothing when the Marantz is off, so it raised an error in exactly the case it
+was meant to handle. It checks first here.
