@@ -632,13 +632,21 @@ function record(name, state, ms, error) {
 //
 // hs.loadSpoon() reads from one directory, Spoons/, and registers what it loads in
 // hs.spoons under the exact string it was given. searchPath names directories relative to
-// the configuration directory, so that Spoons meant for anyone and Spoons written for one
-// machine can be kept separate. Directories other than Spoons/ are addressed by a path
-// relative to it, and the Spoon is then re-registered under its bare name, so that a Spoon
-// reading hs.spoons["hs_menu-gt"] resolves it from either directory.
+// the configuration directory, so that Spoons can be kept in more than one — those meant
+// for anyone apart from those written for one machine, say. Directories other than Spoons/
+// are addressed by a path relative to it, and the Spoon is then re-registered under its
+// bare name, so that a Spoon reading hs.spoons["hs_menu-gt"] resolves it from any of them.
 
-/** Directories holding Spoons, relative to the configuration directory, in search order. */
-const searchPath = ["Spoons", "dmgSpoons"]
+/**
+ * Directories holding Spoons, relative to the configuration directory, in search order.
+ *
+ * Only `Spoons/` by default, which is where Hammerspoon 2 itself looks. Which further
+ * directories exist, and what they are called, is the configuration's to decide, so
+ * `init.js` adds them:
+ *
+ *     interactive.searchPath.push("dmgSpoons")
+ */
+const searchPath = ["Spoons"]
 
 /**
  * Load a Spoon by name, from the first directory in `searchPath` that holds it.
@@ -653,7 +661,11 @@ const searchPath = ["Spoons", "dmgSpoons"]
 function loadSpoon(name) {
     if (name.includes("/")) return hs.loadSpoon(name)
 
-    for (const directory of searchPath) {
+    // Read through the export, so that init.js can either add to searchPath or replace it
+    // outright. Reading the local const would honour only the first.
+    const directories = module.exports.searchPath || searchPath
+
+    for (const directory of directories) {
         if (!hs.fs.isDirectory(`${hs.appinfo.configDir}/${directory}/${name}`)) continue
 
         // hs.loadSpoon() resolves its argument against Spoons/, so every other directory
@@ -671,7 +683,7 @@ function loadSpoon(name) {
         return spoon
     }
 
-    throw new Error(`no Spoon named ${name} in ${searchPath.join(", ")}`)
+    throw new Error(`no Spoon named ${name} in ${directories.join(", ")}`)
 }
 
 /**

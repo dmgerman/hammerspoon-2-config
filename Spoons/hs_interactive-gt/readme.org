@@ -334,12 +334,14 @@ the directories named in =searchPath= instead, relative to the configuration dir
 loads from the first one that holds the Spoon:
 
 #+begin_src js   :exports both
-interactive.searchPath              // ["Spoons", "dmgSpoons"]
-interactive.searchPath.push("workSpoons")
+interactive.searchPath              // ["Spoons"]
+interactive.searchPath.push("dmgSpoons")
 #+end_src
 
-Assign to it before the first =use()= call. This is what allows Spoons meant for anyone and
-Spoons written for one machine to be kept in separate directories.
+=Spoons/= alone by default, since that is where Hammerspoon 2 itself looks. Which further
+directories exist, and what they are called, is for the configuration to decide, so add
+them in =init.js= before the first =use()= call. This is what allows Spoons meant for
+anyone and Spoons written for one machine to be kept in separate directories.
 
 Whichever directory it came from, a Spoon is registered under its bare name, so
 =hs.spoons["hs_menu-gt"]= finds it after a move from one directory to another. A directory

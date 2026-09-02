@@ -4,86 +4,18 @@ Spoons in this directory are written to be useful to anyone. They read their set
 a =config= object, take no personal detail from the machine they run on, and each has a
 readme of its own.
 
-Spoons written for one person's machine are in =../dmgSpoons/= instead. See /Two
-directories/ below.
+Spoons written for one person's machine are in =../dmgSpoons/= instead.
 
 * What is here
 
-| Spoon                | Does                                                                    |
-|----------------------+-------------------------------------------------------------------------|
-| =hs_interactive-gt=  | Named commands with interactive argument readers, key bindings by command name, and an M-x style command chooser. Also loads every other Spoon, through =use()=. |
-| =hs_menu-gt=         | Hierarchical menus of named commands, independent of the device that displays them, with a keyboard-driven on-screen presenter. |
-| =hs_streamdeck-gt=   | Displays =hs_menu-gt= menus on Elgato Stream Deck hardware.             |
-| =hs_countdown-gt=    | Countdown timer with a screen-edge progress bar, menu bar item, periodic warnings and an end-of-time alert. |
-| =hs_time-gt=         | A large clock floating above everything, shown briefly on demand or until dismissed. |
-| =hs_emacs-gt=        | Runs elisp through =emacsclient=, forwards keys into Emacs, and displays what Emacs returns. The elisp itself is defined by the configuration, so those commands are in =init.js=. |
+| Spoon                                            | Does                                            |
+|--------------------------------------------------+-------------------------------------------------|
+| [[file:hs_interactive-gt/][hs_interactive-gt]] | Named commands with interactive argument readers, key bindings by command name, and an M-x style command chooser. Also loads every other Spoon, through =use()=. |
+| [[file:hs_menu-gt/][hs_menu-gt]]               | Hierarchical menus of named commands, independent of the device that displays them, with a keyboard-driven on-screen presenter. |
+| [[file:hs_streamdeck-gt/][hs_streamdeck-gt]]   | Displays =hs_menu-gt= menus on Elgato Stream Deck hardware.                                                     |
+| [[file:hs_countdown-gt/][hs_countdown-gt]]     | Countdown timer with a screen-edge progress bar, menu bar item, periodic warnings and an end-of-time alert.     |
+| [[file:hs_time-gt/][hs_time-gt]]               | A large clock floating above everything, shown briefly on demand or until dismissed.                           |
+| [[file:hs_emacs-gt/][hs_emacs-gt]]             | Runs elisp through =emacsclient=, forwards keys into Emacs, and displays what Emacs returns. The elisp itself is defined by the configuration, so those commands are in =init.js=. |
 
 Three of them depend on another: =hs_menu-gt= and =hs_streamdeck-gt= both need
-=hs_interactive-gt=, and =hs_streamdeck-gt= needs =hs_menu-gt=. Each looks the other up in
-=hs.spoons= by name, so load order is what matters, not directory.
-
-* Two directories
-
-Hammerspoon 2's =hs.loadSpoon()= resolves a name against =Spoons/= and no other directory.
-=hs_interactive-gt= searches several: =searchPath= names directories relative to the
-configuration directory, and =use()= loads from the first one that holds the named Spoon.
-
-#+begin_src js   :exports both
-interactive.searchPath      // ["Spoons", "dmgSpoons"]
-#+end_src
-
-| Directory     | For                                                              |
-|---------------+------------------------------------------------------------------|
-| =Spoons/=     | Spoons meant to be used by anyone, and publishable as they are.  |
-| =dmgSpoons/=  | Spoons written for one machine, holding personal detail.         |
-
-The split is about who a Spoon is for, not about what it does. A Spoon belongs in
-=dmgSpoons/= when it names one person's devices, accounts or files, and would be of no use
-to anyone else without being rewritten.
-
-A Spoon is loaded by bare name whichever directory it is in:
-
-#+begin_src js   :exports both
-interactive.use("hs_countdown-gt", { config: { defaultLenMinutes: 25 } });
-interactive.use("hs_hass-gt", { /* found in dmgSpoons/ */ });
-#+end_src
-
-It is then registered as =hs.spoons["hs_countdown-gt"]=, under the bare name rather than
-the path it was found at, so a Spoon that looks another up by name keeps working if the
-other is moved between directories.
-
-=hs_interactive-gt= itself is the exception: it provides =use()=, so =init.js= loads it
-with =hs.loadSpoon()= directly, and it must therefore be in =Spoons/=.
-
-* Adding a directory
-
-Assign to =searchPath= before the first =use()= call. Directories are searched in the order
-given, and the first one holding the Spoon is used:
-
-#+begin_src js   :exports both
-const interactive = hs.loadSpoon("hs_interactive-gt");
-interactive.searchPath.push("workSpoons");
-#+end_src
-
-A directory must be inside the configuration directory, because it is reached on a path
-relative to =Spoons/=. A name containing a =/= is passed through unchanged, so a Spoon
-somewhere the search path does not name can still be loaded by giving its path relative to
-=Spoons/=.
-
-* Writing a Spoon
-
-A Spoon is a directory holding =spoon.json= and =init.js=. =spoon.json= gives =name=,
-=author=, =version= and =description=; Hammerspoon 2 reads it and copies the last three
-onto the loaded object. =init.js= sets =module.exports= to an object, which is what =use()=
-returns and what =hs.spoons= holds.
-
-The Spoons here follow three conventions beyond that:
-
-- Settings are properties of an exported =config= object, so =use()= can merge over them.
-- =start()= creates whatever the Spoon displays, and =stop()= destroys all of it, including
-  any hotkey the Spoon bound. =use()= calls =start()= unless told not to.
-- Anything personal — which elisp to run, which lights to switch, which windows to place —
-  is a command defined in =init.js=, not a value written into the Spoon.
-
-The third is why =hs_emacs-gt= is here rather than in =dmgSpoons/=: it implements the
-connection to Emacs and contains none of the elisp sent over it.
+=hs_interactive-gt=, and =hs_streamdeck-gt= needs =hs_menu-gt=.

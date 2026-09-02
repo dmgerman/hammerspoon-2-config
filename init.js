@@ -4,10 +4,19 @@ hs.ipc.start();
 
 // hs_interactive-gt provides use(), so it is loaded first and directly, by hs.loadSpoon(),
 // which reads only from Spoons/. Every Spoon after it is loaded by one use() call, which
-// searches the directories in interactive.searchPath — Spoons/ and then dmgSpoons/ — and
-// also applies the Spoon's settings, defines its commands and binds its keys. Skip one
-// with `disabled: true` and reload.
+// searches the directories in interactive.searchPath and also applies the Spoon's
+// settings, defines its commands and binds its keys. Skip one with `disabled: true` and
+// reload.
 const interactive = hs.loadSpoon("hs_interactive-gt");
+
+// Two directories hold Spoons, and which one a Spoon is in records who it is for:
+//
+//   Spoons/     general use: written to be useful to anyone, and publishable as they are.
+//   dmgSpoons/  this machine only: naming particular devices, accounts and files.
+//
+// hs_interactive-gt searches Spoons/ on its own, that being where Hammerspoon 2 looks.
+// Which further directories exist is this configuration's business, so they are added here.
+interactive.searchPath.push("dmgSpoons");
 
 interactive.use("hs_countdown-gt", {
     config: {

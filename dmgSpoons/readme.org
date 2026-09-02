@@ -4,39 +4,10 @@ Spoons written for one machine. They name particular devices, accounts or files,
 have to be rewritten before they were of use to anyone else. Nothing here is meant to be
 published as it stands.
 
-Spoons meant to be used by anyone are in =../Spoons/=, whose readme describes how the two
-directories are searched.
+Spoons meant to be used by anyone are in =../Spoons/=.
 
 * What is here
 
-| Spoon         | Does                                                                |
-|---------------+---------------------------------------------------------------------|
-| =hs_hass-gt=  | Home Assistant control: lights, scripts and the desk amplifiers, through =hass-cli=. Names the entities in one house. |
-
-* Loading
-
-Nothing inside a Spoon marks it as belonging here, only the directory it is in. Loading is
-by bare name, exactly as for =Spoons/=:
-
-#+begin_src js   :exports both
-interactive.use("hs_hass-gt", {
-    commands: (interactive, hass) => {
-        interactive.define({
-            name: "hass-office-on",
-            doc: "Turn the office light on.",
-            fn: () => hass.officeLightOn()
-        });
-    }
-});
-#+end_src
-
-=use()= searches =interactive.searchPath= in order — =Spoons/= first, then here — so a name
-that exists in both directories resolves to the Spoon in =Spoons/=.
-
-* Moving a Spoon out
-
-A Spoon becomes publishable when it no longer names anything particular: when it implements
-only the mechanism, and the specifics have moved into commands defined in =init.js=. At
-that point move the directory to =../Spoons/= and add a readme. Nothing else changes — it is
-loaded by the same bare name, and is registered in =hs.spoons= under that name from either
-directory, so any Spoon that looks it up keeps working.
+| Spoon                            | Does                                                        |
+|----------------------------------+-------------------------------------------------------------|
+| [[file:hs_hass-gt/][hs_hass-gt]] | Home Assistant control: lights, scripts and the desk amplifiers, through =hass-cli=. Names the entities in one house. |
