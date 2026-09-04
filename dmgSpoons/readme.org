@@ -11,3 +11,4 @@ Spoons meant to be used by anyone are in =../Spoons/=.
 | Spoon                            | Does                                                        |
 |----------------------------------+-------------------------------------------------------------|
 | [[file:hs_hass-gt/][hs_hass-gt]] | Home Assistant control: lights, scripts and the desk amplifiers, through =hass-cli=. Names the entities in one house. |
+| [[file:hs_url-gt/][hs_url-gt]]   | Routes every link opened on the system, by a table of patterns or by handing it to Emacs =browse-url=. Names particular sites and browsers. |

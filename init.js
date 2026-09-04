@@ -203,6 +203,58 @@ interactive.use("hs_emacs-gt", {
     }
 });
 
+// Ported from dmg-url.lua. Loaded after hs_emacs-gt, which it reaches through hs.spoons
+// for the "emacs" route and for add-video. Its start() claims http and https, so loading
+// it is what puts Hammerspoon 2 in charge of links; url-restore-default-browser gives
+// them back.
+interactive.use("hs_url-gt", {
+    commands: (interactive, url) => {
+        interactive.define({
+            name: "url-route-switch",
+            doc: "Choose how URLs are routed, or stop handling them.",
+            fn: () => url.switchRoute()
+        });
+
+        interactive.define({
+            name: "url-route-emacs",
+            doc: "Route URLs through Emacs browse-url, when Emacs is running.",
+            fn: () => url.useEmacs()
+        });
+
+        interactive.define({
+            name: "url-route-patterns",
+            doc: "Route URLs by the pattern table.",
+            fn: () => url.usePatterns()
+        });
+
+        interactive.define({
+            name: "url-route-show",
+            doc: "Report which route URLs are taking.",
+            fn: () => {
+                const state = url.route();
+                const message = state.configured === state.effective
+                    ? `URLs routed by ${state.effective}`
+                    : `URLs routed by ${state.effective}, ${state.configured} is configured`;
+                hs.ui.alert(message).duration(3).show();
+                return state;
+            }
+        });
+
+        interactive.define({
+            name: "url-become-default-browser",
+            doc: "Make Hammerspoon 2 the system handler for http and https.",
+            fn: () => url.setAsDefaultBrowser()
+        });
+
+        interactive.define({
+            name: "url-restore-default-browser",
+            doc: "Give http and https back to the handler displaced earlier.",
+            interactive: [{ name: "bundleID", reader: interactive.readers.string.prompted, optional: true, default: "org.hammerspoon.Hammerspoon" }],
+            fn: (bundleID) => url.restoreDefaultBrowser(bundleID)
+        });
+    }
+});
+
 interactive.use("hs_hass-gt", {
     commands: (interactive, hass) => {
         interactive.define({

@@ -1,0 +1,170 @@
+* hs_url-gt
+
+Routes every link opened anywhere on the system.
+
+When Hammerspoon 2 is the system handler for =http= and =https=, a link clicked in any
+application arrives here rather than at a browser. This Spoon decides where it goes: by a
+table of patterns, or by handing it to Emacs =browse-url=.
+
+This is a port of =dmg-url.lua=, which used the Hammerspoon 1 /URLDispatcher/ spoon.
+
+It is in =dmgSpoons/= because the rules name particular sites, browsers and an elisp
+function. The routing itself is not personal; the table is.
+
+* Simple usage
+
+#+begin_src js   :exports both
+const url = hs.loadSpoon("hs_url-gt");
+url.start();
+#+end_src
+
+=start()= claims =http= and =https=, so loading the Spoon is what puts Hammerspoon 2 in
+charge of links. macOS asks for confirmation the first time. Nothing else is needed: the
+rules and the browsers have defaults.
+
+* The two routes
+
+=config.route= selects one:
+
+| Route        | Where a URL goes                                                       |
+|--------------+------------------------------------------------------------------------|
+| ="emacs"=    | =(browse-url "...")=, leaving the decision to Emacs. The default.      |
+| ="patterns"= | The table in =config.patterns=, then =config.defaultBrowser=. This is what version 1 did. |
+
+Emacs is the more capable router, so it is the default. ="patterns"= remains because Emacs
+is not always running: when the route is ="emacs"= and Emacs is not, the URL takes the
+pattern table instead and the fallback is logged. Emacs is checked on each URL, not once at
+=start()=, so starting or quitting it takes effect immediately.
+
+** useEmacs() / usePatterns() / toggleRoute()
+
+Change the route. =toggleRoute()= also shows which one is now in use, and returns it.
+
+** route()
+
+What is happening now, as =({configured, effective})=. The two differ when the route is
+="emacs"= and Emacs is not running.
+
+#+begin_src js   :exports both
+hs.spoons["hs_url-gt"].route()   // {configured: "emacs", effective: "patterns"}
+#+end_src
+
+* Configuration
+
+** Browsers
+
+Named by role rather than by application, so the rules say what a browser is /for/:
+
+#+begin_src js   :exports both
+url.config.browsers = {
+    default: "/Applications/Google Chrome.app",
+    uvic:    "/Applications/Firefox.app",
+    banking: "/Applications/Safari.app"
+};
+url.config.defaultBrowser = "default";
+#+end_src
+
+They are given as paths, not bundle identifiers, and =start()= resolves each one. An
+application that is not installed is reported to the console and shown as an alert then,
+rather than failing at the first link that needs it. =browsers()= returns what was
+resolved.
+
+** Patterns
+
+First match decides. =browser= names a role; =open= is a function called with the URL,
+which is then responsible for everything, including not opening it.
+
+#+begin_src js   :exports both
+url.config.patterns = [
+    { match: /https?:\/\/.*\.acm\.org/,     browser: "uvic" },
+    { match: /https?:\/\/.*\.youtube\.com/, open: (u) => url.youtube(u) }
+];
+#+end_src
+
+A URL that matches nothing goes to =defaultBrowser=.
+
+** Decoders
+
+Applied before either route, because they repair the URL rather than decide where it goes.
+Every decoder that matches is applied, not just the first.
+
+#+begin_src js   :exports both
+url.config.decoders = [
+    { name: "MS Teams URLs",
+      match: /(https:\/\/teams\.microsoft\.com.*)/g,
+      replace: "msteams:$1",
+      skipUnescape: true },
+    { name: "Fix broken Preview anchor URLs",
+      match: /%23/g, replace: "#", sourceApp: "Preview" }
+];
+#+end_src
+
+| Field          | Means                                                                |
+|----------------+----------------------------------------------------------------------|
+| =name=         | Identifies the decoder in the log.                                   |
+| =match=        | Tested against the URL. Use the =g= flag to replace every occurrence. |
+| =replace=      | Replacement, with =$1= for a captured group.                         |
+| =skipUnescape= | Leave the result percent-encoded. Without it the URL is decoded after the decoder runs. |
+| =sourceApp=    | Apply only to URLs opened by this application, by name.              |
+
+** chromeCli
+
+Path to =chrome-cli=, used by the YouTube rule to open a tab without raising Chrome.
+=start()= reports it if it is not there.
+
+* Becoming the system's browser
+
+** setAsDefaultBrowser()
+
+Claims =http= and =https=. Called by =start()=, and safe to call again: a scheme already
+held here is left alone. It returns what it displaced, and records that for restoring.
+
+** restoreDefaultBrowser(bundleID)
+
+Hands the two schemes back. With no argument it uses what =setAsDefaultBrowser()= displaced
+in this session. After a reload there is no such record, because the schemes were already
+Hammerspoon 2's and nothing was displaced, so pass the identifier:
+
+#+begin_src js   :exports both
+url.restoreDefaultBrowser("org.hammerspoon.Hammerspoon");
+#+end_src
+
+* The add-video event
+
+=start()= binds =hammerspoon2://add-video=, sent by the browser:
+
+: hammerspoon2://add-video?url=...&title=...&selection=...
+
+It calls =(dmg-chrome-callback event url title selection)= in Emacs, through
+=hs_emacs-gt='s =execute=, so Emacs is not brought forward. Quotes and backslashes in the
+parameters are escaped.
+
+* Logging
+
+Every URL produces one line naming what handled it, and each decoder that alters a URL logs
+separately:
+
+: [hs_url-gt] <url> from <app> -> sent to Emacs browse-url
+: [hs_url-gt] <url> from <app> -> handled here by /regex/, opening in uvic (org.mozilla.firefox)
+: [hs_url-gt] <url> from <app> -> handled here, no pattern matched, opening in default (com.google.Chrome)
+: [hs_url-gt] decoder 'Fix broken Preview anchor URLs': <before> -> <after>
+
+These appear in Hammerspoon 2's own console. They do not come back through the =hs=
+command-line binary, whatever =--log-level= is given, and although =console.log= also
+reaches the unified log, os_log treats the text as private, so =log stream= shows
+=JS Console: <private>= rather than the message.
+
+* Notes
+
+- *It depends on =hs_emacs-gt=,* which it finds as =hs.spoons["hs_emacs-gt"]=, so that
+  Spoon must be loaded first. Without it the ="emacs"= route reports the problem and falls
+  back to the pattern table, and =add-video= reports it and does nothing.
+- *Which build is registered.* The handler is whichever copy of Hammerspoon 2 is running.
+  Registering one built into DerivedData and then deleting that build leaves every link on
+  the system pointing at a bundle that no longer exists.
+- *The route is not remembered.* A change made with =useEmacs()= or =usePatterns()= lasts
+  until the next reload, when =config.route= returns to its default. Set it in the =use()=
+  call in =init.js= to have a different choice survive.
+- *Patterns are ported as they were.* The =acm.org= and =ieeexplore.ieee.org= rules require
+  a subdomain, as their version 1 originals did, so =https://ieeexplore.ieee.org/...= with
+  no =www.= falls through to the default browser.

@@ -45,6 +45,7 @@ Each has a readme of its own.
 | Spoon                                | Does                                                |
 |--------------------------------------+-----------------------------------------------------|
 | [[file:dmgSpoons/hs_hass-gt/readme.org][hs_hass-gt]]   | Home Assistant control: lights, scripts and the desk amplifiers, through =hass-cli=. |
+| [[file:dmgSpoons/hs_url-gt/readme.org][hs_url-gt]]    | Routes every link opened on the system, by a table of patterns or by handing it to Emacs =browse-url=. |
 
 * Naming
 

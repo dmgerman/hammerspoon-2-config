@@ -1,0 +1,6 @@
+{
+    "name": "hs_url-gt",
+    "author": "Daniel German <dmg@turingmachine.org>",
+    "version": "1.0.0",
+    "description": "Routes URLs opened elsewhere on the system, either by a table of patterns or by handing them to Emacs browse-url."
+}
