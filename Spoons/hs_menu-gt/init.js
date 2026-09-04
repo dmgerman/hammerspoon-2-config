@@ -38,7 +38,8 @@ const config = {
     taskTimeout: 4,
     // How often the encoded file is looked for while the encoding runs.
     taskPollInterval: 0.05,
-    // Offered to buttons that declare no `key`, home row first.
+    // Offered to buttons that declare no `key`, home row first. Lower case only: a capital
+    // is an address a button asks for, not one handed out.
     alphabet: "asdfghjklqwertyuiopzxcvbnm",
     // The browser a `url` button opens in, as a bundle ID. Null uses the system default.
     // A button overrides it with `urlBundle`.
@@ -651,16 +652,21 @@ function clearDiskCache() {
  * @returns {string[]} One letter per button, positionally, or null where none is left.
  */
 function assignLetters(buttons) {
+    // Case is part of the address, so `a` and `A` are two letters and a declared key keeps
+    // the case it was written in.
     const taken = new Set()
     for (const button of buttons) {
-        if (button.key) taken.add(String(button.key).toLowerCase())
+        if (button.key) taken.add(String(button.key))
     }
 
+    // The pool is lower case throughout: a capital is an address a button asks for by
+    // name, never one handed out here, so which letter a button answers to does not change
+    // case as the menu around it grows.
     const pool = Array.from(config.alphabet).filter((c) => !taken.has(c))
     let next = 0
 
     return buttons.map((button) => {
-        if (button.key) return String(button.key).toLowerCase()
+        if (button.key) return String(button.key)
         return next < pool.length ? pool[next++] : null
     })
 }
@@ -990,6 +996,14 @@ function openSession(menu, presenter, options) {
         return session
     }
 
+    /**
+     * Whether a button has something to do on a hold, as `index` within the current page.
+     *
+     * A presenter offering a second way to reach that action asks here, so that what
+     * counts as having one is decided in a single place.
+     */
+    session.hasAlt = (index) => Boolean(page[index]) && hasLongAction(page[index])
+
     function hasLongAction(button) {
         return Boolean(button.altCommand || button.altFn || button.app)
     }
@@ -1138,9 +1152,20 @@ function screenPresenter() {
 
             // A letter is bound with both handlers, so a hold is distinguishable from a
             // tap exactly as it is on the Stream Deck.
+            //
+            // The letter is an address, and its case is part of it: `a` and `A` are two
+            // buttons, reached without and with shift. Ctrl reaches whatever a hold
+            // reaches, so ctrl-a and ctrl-shift-a act on those same two buttons. Ctrl is
+            // bound only where there is a hold action, leaving the chord free otherwise.
             letters.forEach((letter, index) => {
                 if (!letter) return
-                bind([], letter, () => session.down(index), () => session.up(index))
+                const address = letter !== letter.toLowerCase() ? ["shift"] : []
+                const key = letter.toLowerCase()
+
+                bind(address, key, () => session.down(index), () => session.up(index))
+                if (session.hasAlt(index)) {
+                    bind(["ctrl", ...address], key, () => session.activate(index, "long"), null)
+                }
             })
             for (const key of s.cancelKeys) bind([], key, () => session.close(), null)
             for (const key of s.backKeys) {

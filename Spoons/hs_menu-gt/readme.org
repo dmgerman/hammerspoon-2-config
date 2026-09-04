@@ -181,6 +181,27 @@ or a long press, so a hold behaves the same way on either.
 A hold fires as soon as =config.holdSeconds= elapses, while the button is still down, as
 the Hammerspoon 1 Spoon did. The release that follows is discarded.
 
+** Reaching a button from the keyboard
+
+A letter addresses a button, and its case is part of the address: =a= and =A= are two
+different buttons. Holding a letter reaches the button's hold action, and so does =ctrl=
+with the same letter, which is quicker and does not wait for =holdSeconds=.
+
+| Chord          | Reaches                                    |
+|----------------+--------------------------------------------|
+| =a=            | Press of the button lettered =a=           |
+| =A=            | Press of the button lettered =A=           |
+| =ctrl-a=       | Hold action of the button lettered =a=     |
+| =ctrl-shift-a= | Hold action of the button lettered =A=     |
+
+=ctrl= is bound only for a button that has a hold action, so the chord is otherwise free.
+This adds no action a Stream Deck cannot reach: it is the same action a hold runs.
+
+A button declares a capital the way it declares any letter, with =key: "A"=. Letters handed
+out automatically are always lower case, so the letter a button answers to never changes
+case as the menu around it grows. Digits work as letters do, without a capital form:
+=ctrl-0= reaches the hold action of the button lettered =0=.
+
 * The on-screen menu
 
 #+begin_src js   :exports both

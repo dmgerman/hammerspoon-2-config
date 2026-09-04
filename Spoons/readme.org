@@ -16,6 +16,7 @@ Spoons written for one person's machine are in =../dmgSpoons/= instead.
 | [[file:hs_countdown-gt/][hs_countdown-gt]]     | Countdown timer with a screen-edge progress bar, menu bar item, periodic warnings and an end-of-time alert.     |
 | [[file:hs_time-gt/][hs_time-gt]]               | A large clock floating above everything, shown briefly on demand or until dismissed.                           |
 | [[file:hs_emacs-gt/][hs_emacs-gt]]             | Runs elisp through =emacsclient=, forwards keys into Emacs, and displays what Emacs returns. The elisp itself is defined by the configuration, so those commands are in =init.js=. |
+| [[file:hs_appleMusic-gt/][hs_appleMusic-gt]]   | Apple Music: playback, volume, what is playing, and a curated album list. Plays albums held only in the streaming catalogue, which AppleScript cannot reach. |
 
 Three of them depend on another: =hs_menu-gt= and =hs_streamdeck-gt= both need
 =hs_interactive-gt=, and =hs_streamdeck-gt= needs =hs_menu-gt=.
