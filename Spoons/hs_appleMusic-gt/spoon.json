@@ -1,0 +1,6 @@
+{
+    "name": "hs_appleMusic-gt",
+    "author": "Daniel German <dmg@turingmachine.org>",
+    "version": "1.0.0",
+    "description": "Controls Apple Music: playback, volume, track information, and playing albums from a curated list, including albums held only in the Apple Music catalogue."
+}

@@ -1,0 +1,160 @@
+* hs_appleMusic-gt
+
+Controls Apple Music: playback, volume, what is playing, and a curated list of albums to
+play from.
+
+This is a port of the Hammerspoon 1 /hs_music/ spoon to Hammerspoon 2 and JavaScript.
+
+* Simple usage
+
+#+begin_src js   :exports both
+const music = hs.loadSpoon("hs_appleMusic-gt");
+
+music.config.albumListPath = hs.appinfo.configDir + "/albums.txt";
+music.start();
+
+music.togglePlayPause();
+music.showCurrentTrack();
+music.playRandomAlbum();
+#+end_src
+
+* Playing an album that is not in your library
+
+Apple Music's scripting interface reaches only what is in the library. A library that
+streams holds almost nothing, so an album from the list cannot simply be played.
+
+Instead the album is looked up in the iTunes Search API, which returns its identifier; the
+album's page is opened with a =music:= URL; and the /Play/ button on that page is pressed
+once it has rendered. The album is chosen by identifier, so a plain album is not replaced
+by its deluxe or anniversary edition.
+
+The lookup is skipped when the list entry is already a URL. See /The album list/.
+
+** playAlbum(band, album)
+
+Look an album up and play it. Returns at once: the search, the page and the button press
+all happen afterwards.
+
+#+begin_src js   :exports both
+music.playAlbum("Radiohead", "OK Computer");
+#+end_src
+
+If the search returns exactly one album whose artist /and/ name match the request, that one
+plays. Otherwise an alert names what is being played instead, and the first result is used,
+so a doubtful match is visible rather than silent.
+
+** resolveAlbum(band, album)
+
+The lookup on its own, for checking an entry before adding it. Resolves to
+=({name, artist, url})= or null.
+
+* The album list
+
+One album per line, in either of two forms. Everything from a =#= to the end of the line is
+a comment.
+
+#+begin_src text
+# A band and an album, looked up when played
+U2|Achtung Baby
+Beatles|Abbey Road          # a comment about this one
+
+# A URL, played without a lookup. The comment names it in the chooser.
+https://music.apple.com/ca/album/kind-of-blue/1441584607  # Miles Davis — Kind of Blue
+music://music.apple.com/ca/album/spirit-of-eden/1440888016
+#+end_src
+
+A URL entry is exact and needs no network lookup, so it can never resolve to the wrong
+edition. Its comment is the name shown in the chooser; without one the name comes from the
+URL itself, which reads passably but not well. Both =https:= and =music:= are accepted.
+
+Blank lines, comment lines, and lines that are neither a URL nor contain a =|= are skipped.
+
+** readAlbums([path])
+
+The parsed list, as =({kind: "url", url, label})= and =({kind: "name", band, album})=
+entries in file order.
+
+** playRandomAlbum([path]) / chooseAlbum([path])
+
+Play one at random, or show a chooser sorted by name. A URL entry sorts by its label and a
+named one by its band.
+
+** addCurrentAlbum([path])
+
+Append the album now playing as =Band|Album=, unless a named entry already matches it. A
+URL entry for the same album is not recognised as a duplicate, since it holds no artist or
+album name.
+
+* Playback
+
+| Method                  | Does                                                        |
+|-------------------------+-------------------------------------------------------------|
+| =togglePlayPause()=     | Play or pause.                                              |
+| =play()= / =stop()=     | Start, or stop. Playing after a stop restarts the album.    |
+| =nextTrack()=           | Skip a track.                                               |
+| =previousTrack()=       | Go back a track.                                            |
+| =nextAlbum()=           | Skip forward until the album changes.                       |
+| =previousAlbum()=       | Skip back to the previous album, and to its first track.    |
+| =playerState()=         | ="playing"=, ="paused"=, ="stopped"= or ="not running"=.    |
+| =isPlaying()=           | True while playing.                                         |
+
+Music has no "next album", so those two skip a track at a time until the album name
+changes, up to =config.maxAlbumSkipAttempts=. Each skip is given =config.albumSkipInterval=
+to reach Music and be reflected back, on a timer rather than in a loop, so nothing else
+stops meanwhile.
+
+* What is playing
+
+=currentTrack()= returns =({name, artist, album})= or null. =getCurrentTrack()= formats it
+with =config.trackFormat=; =getCurrentArtist()= and =getCurrentAlbum()= return one field.
+
+=showCurrentTrack()= displays it and copies the same text to the pasteboard.
+
+* Volume
+
+Apple Music's own volume, 0 to 100, separate from the system's.
+
+| Method               | Does                                                           |
+|----------------------+----------------------------------------------------------------|
+| =getVolume()=        | The volume, or null when Music is not running.                 |
+| =showVolume()=       | The same, displayed as well.                                   |
+| =setVolume(level)=   | Set it. Values outside 0 to 100 are clamped.                   |
+| =adjustVolume(d)=    | Change it by =d=, which may be negative, and show the result.  |
+
+* Auto-play
+
+Starts a random album from the list whenever Music reports =stopped=. A paused Music is
+left alone: pausing is a decision, stopping is the end of an album.
+
+=startAutoPlay()=, =stopAutoPlay()=, =toggleAutoPlay()= and =isAutoPlayEnabled()=.
+=startAutoPlay()= checks at once rather than waiting out the first interval.
+
+* Configuration
+
+| Setting                  | Default                          | Meaning                                        |
+|--------------------------+----------------------------------+------------------------------------------------|
+| =albumListPath=          | =configDir + "/albums.txt"=      | The album list.                                |
+| =storefront=             | ="ca"=                           | Which Apple Music storefront is searched. A wrong one finds nothing. |
+| =trackFormat=            | ="{name} - {artist} [{album}]"=  | Placeholders =({name})=, =({artist})=, =({album})=. |
+| =alertDuration=          | =3=                              | Seconds a message stays on screen.             |
+| =maxAlbumSkipAttempts=   | =20=                             | Tracks to skip before giving up on an album change. |
+| =albumSkipInterval=      | =0.3=                            | Seconds between skips.                         |
+| =autoPlayInterval=       | =30=                             | Seconds between auto-play checks.              |
+| =playButtonTitle=        | ="Play"=                         | The button pressed on an album page.           |
+| =playButtonPollInterval= | =0.4=                            | Seconds between looks for it.                  |
+| =playButtonTimeout=      | =10=                             | Seconds before giving up on it.                |
+| =searchLimit=            | =25=                             | Search results considered before matching.     |
+
+* Notes
+
+- *Nothing may block the main thread.* Opening the album page runs =/usr/bin/open= as a
+  subprocess. AppleScript's =open location= would do the same thing, but it blocks until
+  the URL is handed over, and it runs inside the search request's callback, which
+  JavaScriptCore executes on the main thread. Blocking there stops every timer and hotkey
+  and does not clear on its own.
+- *The storefront must match yours.* =config.storefront= is a country code, and the search
+  returns nothing for an album not sold in that store.
+- *Pressing Play depends on Music's interface.* The album page carries one button titled
+  =Play=; it is waited for, since the page takes a moment to render. A future version of
+  Music could rename it, in which case =config.playButtonTitle= is where to say so.
+- *The library is not searched.* Even an album you own is played from its Apple Music page.
