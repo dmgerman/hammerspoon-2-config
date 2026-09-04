@@ -270,6 +270,34 @@ const chromeMenu = [
 //
 // The order follows largeMenu in dmg-streamdeck.lua.
 
+// Apple Music. The letters are the ones the Hammerspoon 1 menu used, and the four that
+// were shift-variants there are capitals here: b/B for track and album back, n/N forward,
+// u/U for a coarse and a fine volume rise, d/D for the fall.
+const musicMenu = [
+    { label: "Play/Pause", icon: "symbol:playpause.fill", key: "p", command: "appleMusic-play-pause" },
+    { label: "Prev track", icon: "symbol:backward.fill", key: "b", command: "appleMusic-previous-track" },
+    { label: "Next track", icon: "symbol:forward.fill", key: "n", command: "appleMusic-next-track" },
+    { label: "Prev album", icon: "symbol:backward.end.fill", key: "B", command: "appleMusic-previous-album" },
+    { label: "Next album", icon: "symbol:forward.end.fill", key: "N", command: "appleMusic-next-album" },
+    { label: "Now playing", icon: "symbol:info.circle", key: "i", command: "appleMusic-now-playing" },
+
+    { label: "Volume", icon: "symbol:speaker.wave.2", key: "v", command: "appleMusic-volume" },
+    { label: "Vol +20", icon: "symbol:speaker.plus.fill", key: "u", command: "appleMusic-adjust-volume", args: [20] },
+    { label: "Vol −20", icon: "symbol:speaker.minus.fill", key: "d", command: "appleMusic-adjust-volume", args: [-20] },
+    { label: "Vol +5", icon: "symbol:speaker.plus", key: "U", command: "appleMusic-adjust-volume", args: [5] },
+    { label: "Vol −5", icon: "symbol:speaker.minus", key: "D", command: "appleMusic-adjust-volume", args: [-5] },
+
+    { label: "Random album", icon: "symbol:shuffle", key: "r", command: "appleMusic-random-album" },
+    { label: "Add current", icon: "symbol:plus.circle", key: "a", command: "appleMusic-add-current-album" },
+    { label: "Auto-play", icon: "symbol:infinity", key: "t", command: "appleMusic-toggle-auto-play" },
+
+    // These two are the exceptions to `stays`, which keeps their own `dismiss`. The
+    // chooser needs the menu out of the way before it takes the keyboard, and going to
+    // Music means going there rather than staying in the menu.
+    { label: "Choose album", icon: "symbol:list.bullet", key: "c", command: "appleMusic-choose-album", dismiss: true },
+    { label: "Music app", key: "m", app: "com.apple.Music", dismiss: false }
+].map(stays)
+
 const rootMenu = [
     { label: "Windows", icon: "windows.jpg", key: "w", children: windowMenu },
 
@@ -312,7 +340,9 @@ const rootMenu = [
     todo("Play/pause", "playpause.png", "a media key; HS2 has no system key event"),
     todo("Video", "video.png", "the annoy window helpers"),
 
-    { label: "Music", app: "com.apple.Music", key: "u" },
+    // Music's own icon, as when this button launched the application: a submenu button
+    // cannot use `app`, which would open it instead of the submenu.
+    { label: "Music", icon: "bundle:com.apple.Music", key: "u", children: musicMenu },
     { label: "kitty", app: "net.kovidgoyal.kitty", key: "k" },
     { label: "Emacs", app: "org.gnu.Emacs", key: "e" },
 
@@ -335,5 +365,6 @@ module.exports = {
     teachingMenu,
     emacsMenu,
     chromeMenu,
+    musicMenu,
     applicationsMenu
 }

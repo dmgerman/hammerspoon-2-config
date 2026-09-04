@@ -39,6 +39,7 @@ Each has a readme of its own.
 | [[file:Spoons/hs_countdown-gt/readme.org][hs_countdown-gt]]    | Countdown timer with a screen-edge progress bar, menu bar item, periodic warnings and an end-of-time alert.                                        |
 | [[file:Spoons/hs_time-gt/readme.org][hs_time-gt]]         | A large clock floating above everything, shown briefly on demand or until dismissed.                                                               |
 | [[file:Spoons/hs_emacs-gt/readme.org][hs_emacs-gt]]        | Runs elisp through =emacsclient=, forwards keys into Emacs, and displays what Emacs returns.                                                         |
+| [[file:Spoons/hs_appleMusic-gt/readme.org][hs_appleMusic-gt]]   | Apple Music: playback, volume, what is playing, and a curated album list, including albums held only in the streaming catalogue. |
 
 ** For my machine: to specific to be used unchanged
 

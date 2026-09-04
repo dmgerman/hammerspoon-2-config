@@ -203,6 +203,49 @@ interactive.use("hs_emacs-gt", {
     }
 });
 
+interactive.use("hs_appleMusic-gt", {
+    commands: (interactive, music) => {
+        const command = (name, doc, fn) => interactive.define({ name: name, doc: doc, fn: fn });
+
+        command("appleMusic-play-pause", "Play or pause Apple Music.", () => music.togglePlayPause());
+        command("appleMusic-next-track", "Skip to the next track.", () => music.nextTrack());
+        command("appleMusic-previous-track", "Go back to the previous track.", () => music.previousTrack());
+        command("appleMusic-next-album", "Skip forward to the next album.", () => music.nextAlbum());
+        command("appleMusic-previous-album", "Skip back to the previous album.", () => music.previousAlbum());
+        command("appleMusic-now-playing", "Show the track playing, and copy it.", () => music.showCurrentTrack());
+        command("appleMusic-volume", "Show Apple Music's volume.", () => music.showVolume());
+        command("appleMusic-focus", "Bring Apple Music forward.", () => music.focus());
+        command("appleMusic-random-album", "Play a random album from the list.", () => music.playRandomAlbum());
+        command("appleMusic-choose-album", "Choose an album from the list and play it.", () => music.chooseAlbum());
+        command("appleMusic-add-current-album", "Add the album playing to the list.", () => music.addCurrentAlbum());
+        command("appleMusic-toggle-auto-play", "Turn auto-play on or off.", () => music.toggleAutoPlay());
+
+        interactive.define({
+            name: "appleMusic-adjust-volume",
+            doc: "Change Apple Music's volume by an amount, which may be negative.",
+            interactive: [{ name: "delta", reader: interactive.readers.number.prompted, default: 10 }],
+            fn: (delta) => music.adjustVolume(delta)
+        });
+
+        interactive.define({
+            name: "appleMusic-set-volume",
+            doc: "Set Apple Music's volume, 0 to 100.",
+            interactive: [{ name: "level", reader: interactive.readers.number.prompted, default: 50 }],
+            fn: (level) => music.setVolume(level)
+        });
+
+        interactive.define({
+            name: "appleMusic-play-album",
+            doc: "Play an album, given the band and the album.",
+            interactive: [
+                { name: "band", reader: interactive.readers.string.prompted },
+                { name: "album", reader: interactive.readers.string.prompted }
+            ],
+            fn: (band, album) => music.playAlbum(band, album)
+        });
+    }
+});
+
 // Ported from dmg-url.lua. Loaded after hs_emacs-gt, which it reaches through hs.spoons
 // for the "emacs" route and for add-video. Its start() claims http and https, so loading
 // it is what puts Hammerspoon 2 in charge of links; url-restore-default-browser gives
