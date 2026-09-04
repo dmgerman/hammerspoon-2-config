@@ -46,7 +46,8 @@ Every field is optional, though a button with none of them is an empty square.
 | =urlBundle=      | Bundle ID of the browser to open =url= in.                         |
 | =fn=             | A function, for an action not worth naming. =(context, button)=.   |
 | =altFn=          | The same, for a long press.                                        |
-| =dismiss=        | Whether acting closes the menu. Defaults to true.                  |
+| =navigate=       | Where the press leaves you: ="stay"=, ="parent"= or ="root"=.      |
+| =keepOpen=       | Whether a menu that can hide stays displayed. Defaults to false.   |
 | =background=     | Background colour of the button, as a hex string.                  |
 | =labelColor=     | Colour of the label.                                               |
 | =image=          | A ready-made =HSImage=, used as it stands.                         |
@@ -83,13 +84,49 @@ supply reads them through its own readers, from the snapshot taken at the press.
 a reader which prompts will open a dialog, and =hs.ui.textPrompt= blocks Hammerspoon while
 it is displayed.
 
-** dismiss
+** After a press: navigate and keepOpen
 
-By default a button closes the menu once it has acted, which suits a menu displayed on
-demand. =dismiss: false= leaves it displayed, for a button pressed several times in a row.
-A submenu never dismisses.
+Two questions follow a press, and only one of them is about the device.
 
-On a Stream Deck, which is always displayed, dismissing returns to the root menu.
+*** navigate
+
+Where the press leaves you. Every presenter answers this, because every one has a menu
+stack.
+
+| =navigate=  | After acting                                            |
+|-------------+---------------------------------------------------------|
+| ="parent"=  | Back to the menu this one was opened from. The default. |
+| ="stay"=    | Stays in this menu.                                     |
+| ="root"=    | All the way back to the root menu.                      |
+
+*** keepOpen
+
+Whether the menu remains displayed. Only a presenter that /can/ hide answers this: a Stream
+Deck is always displaying something, so =keepOpen= means nothing to it. Defaults to false,
+which suits a menu displayed on demand; =true= is for a button pressed several times in a
+row.
+
+#+begin_src js   :exports both
+// Adjusted repeatedly: stay here, stay visible.
+{ label: "Vol +5", command: "music-volume-up", navigate: "stay", keepOpen: true }
+
+// Opens a chooser, which takes the keyboard: the on-screen menu must close. That is all
+// it should do — staying put leaves a Stream Deck where it was, and the on-screen menu
+// reopens here rather than at the root.
+{ label: "Choose album", command: "album-choose", navigate: "stay" }
+#+end_src
+
+Keeping the two apart is what lets one button suit both devices, and it is why the fields
+are named after the questions rather than after a device. A presenter added later answers
+=navigate= like any other, and =keepOpen= only if it can hide.
+
+A submenu button ignores both: opening the submenu is where it leaves you.
+
+*** Older spellings
+
+=dismiss=, =screen= and =deck= still work. =dismiss: false= means =navigate: "stay"= with
+=keepOpen: true=; =screen= held what =keepOpen= now holds, and =deck= what =navigate= now
+holds. Prefer the new pair.
 
 * Buttons that draw themselves
 

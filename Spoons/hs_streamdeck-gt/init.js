@@ -209,6 +209,10 @@ function deckPresenter(record) {
         // Keys are painted one at a time, so images may arrive after the layout does.
         progressive: true,
 
+        // A deck is always displaying something, so it cannot hide and `keepOpen` does not
+        // apply to it. Only `navigate` does.
+        canHide: false,
+
         present: function (session, buttons) {
             const layout = new Array(device.keyCount + 1).fill(null)
             let key = 1

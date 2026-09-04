@@ -907,6 +907,26 @@ function openSession(menu, presenter, options) {
         return session
     }
 
+    /** The menus open right now, outermost first. Pass to `restore` to come back here. */
+    session.path = () => stack.map((entry) => ({ ...entry }))
+
+    /**
+     * Open at a path taken from `path()`, so a menu can be reopened where it was left.
+     *
+     * The path's root must be the menu this session was opened with. One belonging to
+     * another menu is ignored rather than grafted onto an unrelated stack.
+     */
+    session.restore = (path) => {
+        if (!Array.isArray(path) || !path.length) return session
+        if (path[0].menu !== stack[0].menu) return session
+
+        stack.length = 0
+        for (const entry of path) stack.push({ ...entry })
+        cancelHolds()
+        render()
+        return session
+    }
+
     /** Return to the root menu. */
     session.popToRoot = () => {
         if (!session.canPop()) return session
@@ -1050,11 +1070,38 @@ function openSession(menu, presenter, options) {
         }
 
         if (!acted) return
+        finish(button)
+    }
 
-        // `dismiss` closes the menu after acting, which suits a menu displayed on demand.
-        // A presenter that is always displayed, such as a Stream Deck, treats closing as
-        // a return to the root.
-        if (button.dismiss !== false) session.close()
+    // Two questions follow a press, and only one of them is about the device.
+    //
+    // `navigate` says where you are left, which every presenter has to answer because every
+    // one has a menu stack. `keepOpen` says whether the menu remains displayed, which only
+    // a presenter that can hide has to answer: a Stream Deck is always displaying
+    // something, so there is nothing for it to keep open or close.
+    function finish(button) {
+        const where = navigationFor(button)
+        if (where === "parent" && session.canPop()) session.pop()
+        else if (where === "root" && session.canPop()) session.popToRoot()
+
+        if (presenter.canHide && !staysOpen(button)) session.close()
+    }
+
+    /** Where the press leaves the stack: "stay", "parent" or "root". */
+    function navigationFor(button) {
+        if (button.navigate) return button.navigate
+        // Older spellings, kept working. `deck` held this same question.
+        if (button.deck) return button.deck
+        if (button.dismiss === false || button.screen === "stay") return "stay"
+        return "parent"
+    }
+
+    /** Whether a presenter that can hide should stay displayed. */
+    function staysOpen(button) {
+        if (button.keepOpen !== undefined) return Boolean(button.keepOpen)
+        // Older spellings. `screen` held this same question, and `dismiss` held both.
+        if (button.screen) return button.screen === "stay"
+        return button.dismiss === false
     }
 
     render()
@@ -1093,6 +1140,9 @@ function screenPresenter() {
     return {
         // hs.ui windows cannot be altered after they are shown.
         progressive: false,
+
+        // This presenter can hide, so a button's `keepOpen` applies to it.
+        canHide: true,
 
         present: function (session, buttons) {
             releaseKeys()
@@ -1183,6 +1233,8 @@ function screenPresenter() {
 // MARK: - Public API
 
 let screenSession = null
+// Where the on-screen menu was when it was last hidden, so it reopens there.
+let screenPath = null
 
 /**
  * Display a menu on screen, driven by the keyboard.
@@ -1196,15 +1248,30 @@ let screenSession = null
 function showOnScreen(menu, options) {
     hideScreen()
     screenSession = openSession(menu, screenPresenter(), options)
+
+    // Reopen where the menu was last left. A Stream Deck keeps its place because being
+    // displayed is its whole state; the on-screen menu was starting over at the root only
+    // because hiding it destroyed the session. Dismissing to do something else and pressing
+    // the key again now comes back to the same submenu. A path belonging to another root
+    // menu is refused by restore(), so showing a different menu starts at its own root.
+    if (screenPath) screenSession.restore(screenPath)
     return screenSession
 }
 
 /** Hide the on-screen menu, if one is displayed. */
 function hideScreen() {
     if (screenSession) {
+        // Read before closing: the position outlives the session that held it.
+        screenPath = screenSession.path()
         screenSession.close()
         screenSession = null
     }
+    return module.exports
+}
+
+/** Forget where the on-screen menu was, so the next one opens at its root. */
+function resetScreenPosition() {
+    screenPath = null
     return module.exports
 }
 
@@ -1234,6 +1301,7 @@ module.exports = {
     showOnScreen,
     hideScreen,
     toggleOnScreen,
+    resetScreenPosition,
     isShowingOnScreen,
     // For other presenters, such as hs_streamdeck-gt.
     openSession,

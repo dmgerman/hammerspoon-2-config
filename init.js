@@ -382,6 +382,11 @@ interactive.use("hs_menu-gt", {
             doc: "Dismiss the on-screen menu.",
             fn: () => menu.hideScreen()
         });
+    },
+
+    // The same chord shows the menu and dismisses it, since menu-show toggles.
+    keys: {
+        "cmd-ctrl-alt z": "menu-show"
     }
 });
 
@@ -523,6 +528,18 @@ interactive.define({
     name: "paste",
     doc: "Send cmd-v to the focused application.",
     fn: () => hs.eventtap.keyStroke(["cmd"], "v")
+});
+
+// Starting the screensaver locks the screen because this machine's screen-lock delay is
+// immediate (`sysadminctl -screenLock status`); with a delay set it would only blank the
+// screen. Hammerspoon 2 has no hs.caffeinate, and macOS 26 no longer ships the CGSession
+// binary the older recipes used.
+interactive.define({
+    name: "screen-lock",
+    doc: "Lock the screen.",
+    fn: () => hs.task.shell("/usr/bin/open -a ScreenSaverEngine").catch((e) => {
+        console.error(`[screen-lock] failed: ${e && e.stderr ? e.stderr : e}`);
+    })
 });
 
 interactive.define({

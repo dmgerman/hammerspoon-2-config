@@ -19,14 +19,14 @@ function tab(label, target, icon, key) {
 }
 
 /**
- * Keep the menu displayed after this button acts.
+ * Leave the menu where it is after this button acts, on either device.
  *
  * For a menu whose buttons are used several times in a row — placing a window, adjusting a
- * light — where returning to the root each time would mean navigating back for every
- * press. Map it over a menu. A button that sets `dismiss` itself keeps its own value.
+ * light — where going away each time would mean navigating back for every press. Map it
+ * over a menu. A button that answers `navigate` or `keepOpen` itself keeps its own answer.
  */
 function stays(button) {
-    return { dismiss: false, ...button }
+    return { navigate: "stay", keepOpen: true, ...button }
 }
 
 /**
@@ -43,7 +43,8 @@ function todo(label, icon, needs) {
     return {
         label: label,
         icon: icon,
-        dismiss: false,
+        navigate: "stay",
+        keepOpen: true,
         fn: () => hs.ui.alert(`${label}\nnot ported yet — needs ${needs}`).duration(3).show()
     }
 }
@@ -116,7 +117,8 @@ function pad(n) {
 const clockButton = {
     label: "Clock",
     key: "0",
-    dismiss: false,
+    navigate: "stay",
+    keepOpen: true,
     command: "time-show",
     updateInterval: 10,
     stateProvider: () => {
@@ -134,7 +136,8 @@ const clockButton = {
 const audioOutButton = {
     label: "Audio out",
     key: "9",
-    dismiss: false,
+    navigate: "stay",
+    keepOpen: true,
     updateInterval: 15,
     stateProvider: () => {
         const device = hs.audiodevice.defaultOutputDevice()
@@ -157,7 +160,8 @@ function weatherButton(label, file, target, key) {
         key: key,
         command: "chrome-focus-url",
         args: [target],
-        dismiss: false,
+        navigate: "stay",
+        keepOpen: true,
         updateInterval: 900,
         stateProvider: () => {
             const attributes = hs.fs.attributes(file)
@@ -291,11 +295,15 @@ const musicMenu = [
     { label: "Add current", icon: "symbol:plus.circle", key: "a", command: "appleMusic-add-current-album" },
     { label: "Auto-play", icon: "symbol:infinity", key: "t", command: "appleMusic-toggle-auto-play" },
 
-    // These two are the exceptions to `stays`, which keeps their own `dismiss`. The
-    // chooser needs the menu out of the way before it takes the keyboard, and going to
-    // Music means going there rather than staying in the menu.
-    { label: "Choose album", icon: "symbol:list.bullet", key: "c", command: "appleMusic-choose-album", dismiss: true },
-    { label: "Music app", key: "m", app: "com.apple.Music", dismiss: false },
+    // The exception to `stays`, and the case that separated the two questions: the chooser
+    // takes the keyboard, so the on-screen menu has to close — but closing is all it should
+    // do. Staying put means a Stream Deck, which cannot close anything, is left where it
+    // was, and the on-screen menu reopens here rather than at the root.
+    {
+        label: "Choose album", icon: "symbol:list.bullet", key: "c",
+        command: "appleMusic-choose-album", navigate: "stay", keepOpen: false
+    },
+    { label: "Music app", key: "m", app: "com.apple.Music", navigate: "stay", keepOpen: true },
 
     // The same menu the root holds, reached from here as well: the amplifiers and the Teac
     // are part of playing music, so switching them on should not mean going back first.
@@ -304,6 +312,10 @@ const musicMenu = [
 ].map(stays)
 
 const rootMenu = [
+    // Capital L: lower case l is the URL handler, and a deliberate action is no worse for
+    // needing shift.
+    { label: "Lock", icon: "symbol:lock.fill", key: "L", command: "screen-lock" },
+
     { label: "Windows", icon: "windows.jpg", key: "w", children: windowMenu },
 
     weatherToday,
@@ -338,8 +350,8 @@ const rootMenu = [
     { label: "Chrome", icon: "chrome.png", key: "r", children: chromeMenu },
 
     // Chooses how opened links are routed, or hands http and https back to another
-    // application. The chooser it shows needs the menu dismissed first, which is the
-    // default.
+    // application. The chooser it shows needs the on-screen menu out of the way first,
+    // which is what `screen` defaults to.
     { label: "url H", icon: "symbol:link", key: "l", command: "url-route-switch" },
 
     todo("Play/pause", "playpause.png", "a media key; HS2 has no system key event"),
