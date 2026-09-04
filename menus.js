@@ -117,7 +117,7 @@ const clockButton = {
     label: "Clock",
     key: "0",
     dismiss: false,
-    command: "clock-show",
+    command: "time-show",
     updateInterval: 10,
     stateProvider: () => {
         const now = new Date()
@@ -303,6 +303,12 @@ const rootMenu = [
     todo("Next fullscreen", "nextFullscreen.png", "the dmgWin window helpers"),
     todo("Isolate", "isolate.png", "the annoy window helpers"),
     { label: "Chrome", icon: "chrome.png", key: "r", children: chromeMenu },
+
+    // Chooses how opened links are routed, or hands http and https back to another
+    // application. The chooser it shows needs the menu dismissed first, which is the
+    // default.
+    { label: "url H", icon: "symbol:link", key: "l", command: "url-route-switch" },
+
     todo("Play/pause", "playpause.png", "a media key; HS2 has no system key event"),
     todo("Video", "video.png", "the annoy window helpers"),
 

@@ -84,7 +84,7 @@ window parameter, and the lambda is executed with this parameter.
 
 | Field         | Meaning                                                          |
 |---------------+------------------------------------------------------------------|
-| =name=        | The command name. Hyphenated, like =countdown-start=.            |
+| =name=        | The command name. Hyphenated, like =countdown-start=. See /Naming a command that belongs to a Spoon/ below. |
 | =doc=         | One line, shown in the chooser and by =describeKey=.             |
 | =fn=          | The implementation. Receives the arguments.                      |
 | =interactive= | How to obtain each argument. Omit for a command that takes none. |
@@ -99,6 +99,30 @@ interactive.define({
     fn:   () => hs.spoons["hs_countdown-gt"].cancel()
 })
 #+end_src
+
+** Naming a command that belongs to a Spoon
+
+A command defined for a Spoon takes that Spoon's name as its prefix, with =hs_= and =-gt=
+removed:
+
+| Spoon               | Prefix       | For example              |
+|---------------------+--------------+--------------------------|
+| =hs_countdown-gt=   | =countdown-= | =countdown-start-until=  |
+| =hs_time-gt=        | =time-=      | =time-show=              |
+| =hs_url-gt=         | =url-=       | =url-route-switch=       |
+
+Commands are invoked by name and are listed together in one chooser, where nothing else
+records which Spoon a command came from. The prefix is what makes that visible, and it
+keeps two Spoons from choosing the same name for different operations. Name the command
+after the Spoon it drives even when another word describes the operation better: =time-show=
+rather than =clock-show=, because the Spoon is =hs_time-gt=.
+
+The rule covers commands a configuration defines for a Spoon, which is nearly all of them.
+Two kinds fall outside it. A command that drives no Spoon — one implemented in =init.js=
+itself — has no Spoon to take a prefix from. And this Spoon's own built-in commands are
+named =commands-= and =spoons-list= rather than =interactive-=, which predates the rule and
+is left alone because renaming them would break the key bindings of every configuration
+that uses them.
 
 ** Interactive arguments
 
@@ -453,8 +477,10 @@ that.
 | =commands-list-bindings= | Logs every binding and the command it runs.   |
 | =spoons-list=            | Logs the outcome of every =use()= call.       |
 
-The names begin with =commands-= rather than with the Spoon's name, because they describe
-the operation rather than its source.
+These names are an exception to the prefix rule described under /Naming a command that
+belongs to a Spoon/: by it they would begin with =interactive-=. They predate the rule, and
+are left as they are because renaming them would break the key bindings of every
+configuration that uses them. A command you define yourself should follow the rule.
 
 * Notes
 

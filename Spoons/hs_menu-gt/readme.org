@@ -16,7 +16,7 @@ const menu = hs.loadSpoon("hs_menu-gt")
 
 menu.showOnScreen([
     { label: "Emacs",  app: "org.gnu.Emacs", key: "e" },
-    { label: "Clock",  command: "clock-show" },
+    { label: "Clock",  command: "time-show" },
     { label: "Buses",  icon: "bus2.png", children: busMenu }
 ])
 #+end_src

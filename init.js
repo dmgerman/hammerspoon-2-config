@@ -69,7 +69,7 @@ interactive.use("hs_time-gt", {
     // Carried over from dmg_load_spoon_hs_time() in ~/.hammerspoon/dmg-functions.lua.
     // width was 1000 there to fit this format; "full" spans the screen instead, so it
     // cannot be truncated. In v1 this was on alt-t:
-    //     keys: { "alt t": "clock-show" }
+    //     keys: { "alt t": "time-show" }
     config: {
         format: "Every second counts:\n%a %d %b %X",
         textSize: 75,
@@ -78,25 +78,25 @@ interactive.use("hs_time-gt", {
     },
     commands: (interactive, clock) => {
         interactive.define({
-            name: "clock-show",
+            name: "time-show",
             doc: "Show the clock for a few seconds.",
             fn: () => clock.toggleShow()
         });
 
         interactive.define({
-            name: "clock-show-persistent",
+            name: "time-show-persistent",
             doc: "Show the clock until it is dismissed with Escape.",
             fn: () => clock.toggleShowPersistent()
         });
 
         interactive.define({
-            name: "clock-hide",
+            name: "time-hide",
             doc: "Hide the clock.",
             fn: () => clock.hide()
         });
 
         interactive.define({
-            name: "clock-set-format",
+            name: "time-set-format",
             doc: "Change the clock's time format, in strftime terms such as %H:%M:%S.",
             interactive: [{ name: "format", reader: interactive.readers.string.prompted, default: "%H:%M" }],
             fn: (format) => {

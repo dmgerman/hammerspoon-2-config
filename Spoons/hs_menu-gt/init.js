@@ -10,7 +10,7 @@
 //     const menu = hs.loadSpoon("hs_menu-gt")
 //     menu.showOnScreen([
 //         { label: "Emacs", app: "org.gnu.Emacs", key: "e" },
-//         { label: "Clock", command: "clock-show" }
+//         { label: "Clock", command: "time-show" }
 //     ])
 //
 // A button's action is a command defined by hs_interactive-gt, named rather than written
