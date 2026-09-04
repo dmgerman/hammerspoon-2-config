@@ -295,7 +295,12 @@ const musicMenu = [
     // chooser needs the menu out of the way before it takes the keyboard, and going to
     // Music means going there rather than staying in the menu.
     { label: "Choose album", icon: "symbol:list.bullet", key: "c", command: "appleMusic-choose-album", dismiss: true },
-    { label: "Music app", key: "m", app: "com.apple.Music", dismiss: false }
+    { label: "Music app", key: "m", app: "com.apple.Music", dismiss: false },
+
+    // The same menu the root holds, reached from here as well: the amplifiers and the Teac
+    // are part of playing music, so switching them on should not mean going back first.
+    // One array, referenced twice, so the two stay identical.
+    { label: "HASS", icon: "hass.png", key: "h", children: hassMenu }
 ].map(stays)
 
 const rootMenu = [
