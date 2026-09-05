@@ -283,8 +283,19 @@ Settings are on =menu.config=, and through =use()= in =init.js=.
 | =taskPollInterval= | 0.05                       | How often the encoding's output is checked. |
 
 =config.screen= holds the on-screen presenter's settings: =tile=, =spacing=, =padding=,
-=background=, =letterSize=, =letterColor=, =level=, =cancelKeys=, =backKeys=, and
-=columnsFor(count)=, which returns the number of columns to lay the buttons out in.
+=background=, =letterSize=, =letterColor=, =level=, =showDelay=, =cancelKeys=, =backKeys=,
+and =columnsFor(count)=, which returns the number of columns to lay the buttons out in.
+
+=showDelay= is how long a page's letters answer before its window is drawn, in seconds,
+and defaults to 0, which draws it at once. The letters are bound as soon as the page is
+presented, so with a delay set, a press within it acts and no window is ever drawn:
+someone who knows a menu by heart does not see it, and someone who hesitates does. Each
+page is timed separately, so descending into a submenu quickly draws nothing either.
+
+The delay is counted from the moment the page is presented, which for this presenter is
+after every button image has been drawn. Those are cached on disk, so it is the same
+moment in practice, except on the first display of a menu after the configuration is
+reloaded.
 
 * How buttons are drawn
 

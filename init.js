@@ -481,6 +481,12 @@ interactive.use("hs_hass-gt", {
 });
 
 interactive.use("hs_menu-gt", {
+    // The letters answer immediately; the window is only drawn when half a second has
+    // passed without one being pressed. Most presses are from memory and never need it.
+    after: (menu) => {
+        menu.config.screen.showDelay = 0.5;
+    },
+
     commands: (interactive, menu) => {
         interactive.define({
             name: "menu-show",

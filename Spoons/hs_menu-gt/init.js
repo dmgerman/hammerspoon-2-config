@@ -66,6 +66,10 @@ const config = {
         letterSize: 18,
         letterColor: "#FFD479",
         level: "floating",
+        // How long a page's letters answer before the window is drawn. The keys are bound
+        // as soon as the page is presented, so a press within this time acts and no window
+        // ever appears; someone who knows the menu never sees it. Zero draws at once.
+        showDelay: 0,
         // Dismisses the menu. Escape is always bound.
         cancelKeys: ["escape"],
         // Returns to the parent menu.
@@ -1113,12 +1117,20 @@ function openSession(menu, presenter, options) {
 // hs.ui cannot change a window's contents once it is built, so every navigation destroys
 // the window and builds a new one. The menu is driven from the keyboard: each button
 // carries a letter, bound only while the menu is displayed.
+//
+// The keys and the window are separate: the letters answer from the moment a page is
+// presented, and the window is drawn `config.screen.showDelay` seconds later. A press
+// before then navigates or closes, which cancels the pending draw, so the menu is only
+// displayed when it is needed as a reminder of what the letters are.
 
 function screenPresenter() {
     let win = null
     let hotkeys = []
-    // Binds the current page's keys. Set by present(), called again after a prompt.
+    // Binds the current page's keys. Set by present(), called again after a prompt. Also
+    // says whether a page is displayed, since `win` is null while the draw is pending.
     let takeKeys = null
+    // The pending draw, when the window has not been built yet.
+    let showTimer = null
     // Whether a prompt has the keyboard. Held across pages: a menu redraws itself while a
     // chooser is up — a self-drawing button on its timer is enough — and the new page must
     // not take back the keys the prompt is using.
@@ -1132,6 +1144,10 @@ function screenPresenter() {
     }
 
     function destroyWindow() {
+        if (showTimer) {
+            showTimer.stop()
+            showTimer = null
+        }
         if (!win) return
         win.destroy()
         win = null
@@ -1156,55 +1172,6 @@ function screenPresenter() {
 
             const s = config.screen
             const letters = session.letters()
-            const count = buttons.length
-            const columns = Math.max(1, s.columnsFor(count))
-            const rows = Math.ceil(count / columns)
-
-            // Each cell is the tile with its letter beneath it.
-            const cellHeight = s.tile + s.letterSize + 6
-            const width = columns * s.tile + (columns - 1) * s.spacing + s.padding * 2
-            const height = rows * cellHeight + (rows - 1) * s.spacing + s.padding * 2
-
-            // Centring is symmetric, so it holds whichever corner the origin is in.
-            const screen = hs.screen.primary().fullFrame
-            win = hs.ui.window({
-                x: screen.x + (screen.w - width) / 2,
-                y: screen.y + (screen.h - height) / 2,
-                w: width,
-                h: height
-            })
-                .titled(false)
-                .level(s.level)
-                .backgroundColor(s.background)
-
-            win.vstack().spacing(s.spacing).padding(s.padding)
-            for (let row = 0; row < rows; row++) {
-                win.hstack().spacing(s.spacing)
-                for (let column = 0; column < columns; column++) {
-                    const index = row * columns + column
-                    if (index >= count) break
-
-                    win.vstack().spacing(2)
-                    if (buttons[index].image) {
-                        win.image(buttons[index].image)
-                            .resizable()
-                            .aspectRatio("fit")
-                            .frame({ w: s.tile, h: s.tile })
-                    } else {
-                        win.rectangle()
-                            .fill(config.background)
-                            .cornerRadius(8)
-                            .frame({ w: s.tile, h: s.tile })
-                    }
-                    win.text(letters[index] ? letters[index] : " ")
-                        .font(HSFont.customSize(config.font, s.letterSize))
-                        .foregroundColor(s.letterColor)
-                    win.end()
-                }
-                win.end()
-            }
-            win.end()
-            win.show()
 
             // A letter is bound with both handlers, so a hold is distinguishable from a
             // tap exactly as it is on the Stream Deck.
@@ -1232,7 +1199,72 @@ function screenPresenter() {
                     bind([], key, () => { if (session.canPop()) session.pop() }, null)
                 }
             }
+            // Bound before the window is drawn, so the letters answer during the delay.
             if (!suspended) takeKeys()
+
+            const draw = () => {
+                const count = buttons.length
+                const columns = Math.max(1, s.columnsFor(count))
+                const rows = Math.ceil(count / columns)
+
+                // Each cell is the tile with its letter beneath it.
+                const cellHeight = s.tile + s.letterSize + 6
+                const width = columns * s.tile + (columns - 1) * s.spacing + s.padding * 2
+                const height = rows * cellHeight + (rows - 1) * s.spacing + s.padding * 2
+
+                // Centring is symmetric, so it holds whichever corner the origin is in.
+                const screen = hs.screen.primary().fullFrame
+                win = hs.ui.window({
+                    x: screen.x + (screen.w - width) / 2,
+                    y: screen.y + (screen.h - height) / 2,
+                    w: width,
+                    h: height
+                })
+                    .titled(false)
+                    .level(s.level)
+                    .backgroundColor(s.background)
+
+                win.vstack().spacing(s.spacing).padding(s.padding)
+                for (let row = 0; row < rows; row++) {
+                    win.hstack().spacing(s.spacing)
+                    for (let column = 0; column < columns; column++) {
+                        const index = row * columns + column
+                        if (index >= count) break
+
+                        win.vstack().spacing(2)
+                        if (buttons[index].image) {
+                            win.image(buttons[index].image)
+                                .resizable()
+                                .aspectRatio("fit")
+                                .frame({ w: s.tile, h: s.tile })
+                        } else {
+                            win.rectangle()
+                                .fill(config.background)
+                                .cornerRadius(8)
+                                .frame({ w: s.tile, h: s.tile })
+                        }
+                        win.text(letters[index] ? letters[index] : " ")
+                            .font(HSFont.customSize(config.font, s.letterSize))
+                            .foregroundColor(s.letterColor)
+                        win.end()
+                    }
+                    win.end()
+                }
+                win.end()
+                win.show()
+            }
+
+            // A press before the timer fires navigates or closes, and both destroy the
+            // window, which stops the timer: the page is then never drawn.
+            const delay = Number(s.showDelay) || 0
+            if (delay > 0) {
+                showTimer = hs.timer.doAfter(delay, () => {
+                    showTimer = null
+                    draw()
+                })
+            } else {
+                draw()
+            }
         },
 
         // A chooser or a text prompt has the keyboard, and a hotkey outranks it: the menu
@@ -1243,9 +1275,11 @@ function screenPresenter() {
             releaseKeys()
         },
 
+        // `takeKeys` rather than `win`: a page whose window is still pending is displayed
+        // in every sense that matters here, and must take its keys back.
         resumeKeys: function () {
             suspended = false
-            if (win && takeKeys && !hotkeys.length) takeKeys()
+            if (takeKeys && !hotkeys.length) takeKeys()
         },
 
         close: function () {

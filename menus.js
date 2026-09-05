@@ -15,7 +15,8 @@ function url(label, target, icon) {
  * is. Chrome is brought forward either way.
  */
 function tab(label, target, icon, key) {
-    return { label: label, icon: icon, key: key, command: "chrome-focus-url", args: [target] }
+    return { label: label, icon: icon, url: target }
+//    return { label: label, icon: icon, key: key, command: "chrome-focus-url", args: [target] }
 }
 
 /**
@@ -203,11 +204,11 @@ const windowMenu = [
     { label: "Undo", icon: "symbol:arrow.uturn.backward", key: "[", command: "window-undo" },
     { label: "Redo", icon: "symbol:arrow.uturn.forward", key: "]", command: "window-redo" },
 
-    { label: "Maximize", icon: "symbol:arrow.up.left.and.arrow.down.right", key: "m", command: "window-maximize" },
-    { label: "Left half", icon: "symbol:rectangle.lefthalf.filled", key: "h", command: "window-left-half" },
-    { label: "Right half", icon: "symbol:rectangle.righthalf.filled", key: "l", command: "window-right-half" },
+    { label: "Maximize", icon: "symbol:arrow.up.left.and.arrow.down.right", key: "m", command: "window-maximize", keepOpen: false},
+    { label: "Left half", icon: "symbol:rectangle.lefthalf.filled", key: "h", command: "window-left-half", keepOpen: false},
+    { label: "Right half", icon: "symbol:rectangle.righthalf.filled", key: "l", command: "window-right-half", keepOpen: false },
     { label: "Centre", icon: "symbol:rectangle.center.inset.filled", key: "c", command: "window-center" },
-    { label: "Fullscreen", icon: "symbol:arrow.up.left.and.down.right.magnifyingglass", key: "f", command: "window-toggle-fullscreen" },
+    { label: "Fullscreen", icon: "symbol:arrow.up.left.and.down.right.magnifyingglass", key: "f", command: "window-toggle-fullscreen", keepOpen: false},
     { label: "Minimize", icon: "symbol:arrow.down.right.and.arrow.up.left", key: "n", command: "window-minimize" },
 
     { label: "Vert max", icon: "symbol:arrow.up.and.down", key: "V", command: "window-vertical-maximize" },
@@ -362,6 +363,8 @@ const musicMenu = [
         command: "appleMusic-choose-album", navigate: "stay", keepOpen: false
     },
     { label: "Music app", key: "m", app: "com.apple.Music", navigate: "stay", keepOpen: true },
+
+    { label: "Amps", icon: "audioPower.png", key: "w", command: "hass-desk-amps-toggle" },
 
     // The same menu the root holds, reached from here as well: the amplifiers and the Teac
     // are part of playing music, so switching them on should not mean going back first.
