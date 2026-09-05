@@ -1,0 +1,178 @@
+* hs_clipboard-gt
+
+A history of what has been copied, offered back through a chooser.
+
+This is a port to Hammerspoon 2 and JavaScript of /ClipboardTool/ (Alfred Schilken, MIT),
+itself derived from /TextClipboardHistory/ and from code by VFS and asmagill, together
+with the password detection that was added to the local copy of it.
+
+Every string that reaches the pasteboard is prepended to the history, duplicates are
+collapsed, and the list is capped. Selecting an entry copies it back and, if
+paste-on-select is enabled, types =⌘V= into the window that had focus.
+
+* Simple usage
+
+#+begin_src js   :exports both
+const clipboard = hs.loadSpoon("hs_clipboard-gt")
+clipboard.start()
+
+hs.hotkey.bind(hyper, "v", () => clipboard.historyShow(), null)
+hs.hotkey.bind(hyperShift, "v", () => clipboard.historyToggle(), null)
+#+end_src
+
+Those two chords are the ones the Hammerspoon 1 configuration used: =⌘⌥⌃V= to open the
+history and =⌘⌥⌃⇧V= to open or close it.
+
+A =📋= item appears in the menubar; clicking it opens the same chooser.
+
+* The chooser
+
+Typing filters the list. Below the entries are two control rows:
+
+| 《Clear Clipboard History》         | empties the history and the pasteboard |
+| 《Enable/Disable Paste-on-select》  | whether selecting an entry also types =⌘V= |
+
+Right-clicking an entry opens a menu that acts on that row:
+
+| Paste all up to here, tab separated | types every entry from that row up to the newest, oldest first, separated by tabs |
+| Paste all up to here, one per line  | the same, separated by newlines |
+| Delete entry                        | |
+| Move entry to top                   | |
+| Move entry up                       | |
+| Move entry down                     | |
+| Invert order above                  | reverses the order of everything from that row up to the newest entry |
+
+* Passwords
+
+An entry that looks like a password is shown as =[hidden - 16 chars]=, is kept for the
+session so that it can still be pasted, and is never written to disk. While the chooser is
+open, =⌘R= reveals the selected entry and =⇧⌘R= reveals every masked one; both are
+toggles, and closing the chooser masks everything again.
+
+Detection runs in three steps, and an entry is masked only if it clears all of them.
+
+1. /Allowlist/. Shapes that are never masked however random they look: UUIDs, ULIDs, hex
+   hashes of 32, 40 or 64 characters, padded Base64, numbers, ISO dates, IPv4 and IPv6
+   addresses, anything containing =://= or =/=, bare filenames, and anything with more
+   than =passwordMaxNewlines= newlines in it.
+2. /Structure/. At least =passwordMinLength= characters, no whitespace, fewer than 70%
+   digits, fewer than 70% hexadecimal characters, and at least two of lowercase,
+   uppercase, digits and symbols.
+3. /Entropy/. Shannon entropy of at least =passwordEntropyThreshold= bits per character.
+
+Setting =passwordsHide= to =false= turns all of this off: nothing is masked and everything
+is persisted.
+
+* Methods
+
+** start(), stop()
+
+=start()= reads the history from disk, scrubs any password-like entries left in it, builds
+the chooser, registers the pasteboard watcher and adds the menubar item. =stop()= undoes
+all of it. The history on disk is left alone.
+
+** historyShow(), historyHide(), historyToggle()
+
+Open the chooser, close it, or do whichever applies. =historyShow()= records the window
+that currently has focus, so that pasting returns to it.
+
+** historyClear()
+
+Empty the history and the pasteboard.
+
+** historyLastDelete()
+
+Remove the newest entry, for when something was copied that should not have been.
+
+** historyEntries()
+
+The history as an array of strings, newest first. Passwords are included unmasked; this is
+for the console and for commands, not for display.
+
+** entryDelete(row), entryMoveToTop(row), entryMoveUp(row), entryMoveDown(row)
+
+Act on one row, counting from 0 at the newest entry. These are what the context menu
+calls.
+
+** entriesInvert(row)
+
+Reverse the order of the entries from =row= up to the newest one.
+
+** entriesPaste(row, delimiter)
+
+Type out every entry from =row= up to the newest, oldest first, each followed by
+=delimiter=. The chooser is closed and focus returned first, so the text arrives in the
+window underneath.
+
+** pasteOnSelectToggle(), pasteOnSelectEnabled()
+
+Whether selecting an entry also types =⌘V=. The setting is persisted with the history.
+
+** passwordRevealCurrent(), passwordsRevealToggle()
+
+What =⌘R= and =⇧⌘R= call. They do nothing unless the chooser is open.
+
+** passwordLike(text)
+
+Whether a string would be masked. Useful for tuning the three thresholds.
+
+* Configuration
+
+Set these before calling =start()=.
+
+| Setting                    | Default                  |                                                                       |
+|----------------------------+--------------------------+-----------------------------------------------------------------------|
+| =watchInterval=            | =0.8=                    | seconds between pasteboard samples                                    |
+| =historySize=              | =100=                    | entries kept                                                          |
+| =maxEntrySize=             | =4990=                   | characters kept of one entry                                          |
+| =displayMaxLength=         | =200=                    | characters of an entry shown in a chooser row                         |
+| =deduplicate=              | =true=                   | whether a repeat replaces the earlier copy                            |
+| =copiedAlert=              | =true=                   | whether copying announces itself on screen                            |
+| =alertDuration=            | =1=                      | seconds that announcement stays up                                    |
+| =honorIgnoredIdentifiers=  | =true=                   | whether =ignoredIdentifiers= is consulted                             |
+| =ignoredIdentifiers=       | seven UTIs               | pasteboard types not to store, from [[http://nspasteboard.org][nspasteboard.org]]                     |
+| =passwordsHide=            | =true=                   | mask password-like entries and keep them off disk                     |
+| =passwordEntropyThreshold= | =3.5=                    | bits per character                                                    |
+| =passwordMinLength=        | =8=                      |                                                                       |
+| =passwordMaxNewlines=      | =1=                      |                                                                       |
+| =revealCurrentKey=         | =⌘R=                     | =​{mods, key}=, active only while the chooser is open                  |
+| =revealAllKey=             | =⇧⌘R=                    | likewise                                                              |
+| =pasteDelay=               | =0.2=                    | seconds waited after the chooser closes before typing                 |
+| =menubarShow=              | =true=                   |                                                                       |
+| =menubarTitle=             | =📋=                     |                                                                       |
+| =historyFile=              | =logs/clipboard.json=    |                                                                       |
+
+=watchInterval= is a property of the pasteboard watcher shared by the whole application,
+so the last module to set it decides the interval for everybody.
+
+* Files
+
+=logs/clipboard.json= holds the setting and the entries, newest first:
+
+#+begin_example
+{
+  "pasteOnSelect": false,
+  "items": [
+    { "type": "text", "content": "second entry, plain text" },
+    { "type": "text", "content": "hello world one" }
+  ]
+}
+#+end_example
+
+It is rewritten whenever the history changes, and once at =start()= so that anything
+password-like left in it is removed even if nothing is copied afterwards.
+
+* Differences from the Hammerspoon 1 Spoon
+
+- Changes arrive through =hs.pasteboard.addWatcher= rather than a timer of the Spoon's
+  own.
+- The history is a JSON file under =logs/=, not an entry in the application defaults.
+- Images are not stored. The v1 Spoon kept them URL-encoded in the same list.
+- There is no =hs.dialog=, so an entry longer than =maxEntrySize= is truncated when it is
+  stored — at the last blank line that fits, and failing that at the limit. The v1 Spoon
+  asked, and offered a toggle for asking; both are gone.
+- Filtering matches the text shown in the row, which is the first =displayMaxLength=
+  characters, so a match further into a long entry does not bring it up. A masked entry
+  matches nothing until it is revealed.
+- The control rows are filtered out along with everything else while a query is typed.
+- The context menu is in English. The v1 Spoon's was in German.

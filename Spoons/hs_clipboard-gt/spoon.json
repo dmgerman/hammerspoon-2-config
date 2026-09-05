@@ -1,0 +1,6 @@
+{
+    "name": "hs_clipboard-gt",
+    "author": "Daniel German <dmg@turingmachine.org>",
+    "version": "1.0.0",
+    "description": "A history of copied text, offered back through a chooser, with password-like entries masked and kept out of storage."
+}
