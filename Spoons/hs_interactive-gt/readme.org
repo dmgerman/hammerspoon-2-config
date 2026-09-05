@@ -190,6 +190,38 @@ Each is reached through the Spoon object, as =interactive.readers.window= and so
 Rows in the window chooser read =Application — Title=, so typing either finds the
 window.
 
+*** Narrowing what a reader offers
+
+A reader is given the whole parameter, so a parameter may carry options for it. Offered by
+=readers.screen=:
+
+| Option              | Default | Effect                                                    |
+|---------------------+---------+-----------------------------------------------------------|
+| =includeCurrent=    | true    | false leaves out the screen the command started on.       |
+| =includeFullscreen= | true    | false leaves out screens showing a fullscreen window.     |
+
+With neither, every screen is offered. A command that exists to move a window elsewhere
+wants both:
+
+#+begin_src js   :exports both
+interactive.define({
+    name: "window-move-to-screen",
+    doc:  "Move a window to a chosen screen.",
+    interactive: [
+        { name: "window", reader: interactive.readers.window.auto },
+        { name: "screen", reader: interactive.readers.screen.prompted,
+          includeCurrent: false, includeFullscreen: false }
+    ],
+    fn: (win, screen) => { /* ... */ }
+})
+#+end_src
+
+When nothing is left to choose from, the reader says so and the command is cancelled rather
+than showing an empty chooser.
+
+Hammerspoon 2 has no =hs.spaces=, so a screen counts as fullscreen when a window on it
+reports =isFullscreen=. Version 1 asked the spaces API for the space type instead.
+
 #+begin_src js   :exports both
 reader: interactive.readers.window.auto      // the focused window, or prompt if none
 reader: interactive.readers.window.prompted  // always prompt

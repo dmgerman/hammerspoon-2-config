@@ -219,16 +219,50 @@ const readers = {
     screen: {
         implicit: (context, parameter, snap) => snap.screen,
         auto: (context, parameter, snap) => snap.screen || readers.screen.prompted(context, parameter, snap),
-        prompted: (context, parameter) => pick({
-            placeholder: "Screen",
-            context: context,
-            optional: parameter.optional,
-            choices: hs.screen.all().map((s) => ({
-                text: s.name,
-                subText: `${s.frame.w}×${s.frame.h}`,
-                value: s
-            }))
-        })
+
+        /**
+         * Choose a screen. The parameter may narrow what is offered:
+         *
+         *   includeCurrent     false leaves out the screen the command started on, for a
+         *                      command whose whole purpose is to move somewhere else.
+         *   includeFullscreen  false leaves out screens showing a fullscreen window.
+         */
+        prompted: (context, parameter, snap) => {
+            const current = snap ? snap.screen : null
+            const wantCurrent = parameter.includeCurrent !== false
+            const wantFullscreen = parameter.includeFullscreen !== false
+
+            // Hammerspoon 1 asked hs.spaces for the space type. Hammerspoon 2 has no
+            // spaces module, so a screen counts as fullscreen when a window on it is.
+            const fullscreen = new Set()
+            if (!wantFullscreen) {
+                for (const window of hs.window.allWindows()) {
+                    if (window.isFullscreen && window.screen) fullscreen.add(window.screen.id)
+                }
+            }
+
+            const screens = hs.screen.all().filter((s) => {
+                if (!wantCurrent && current && s.id === current.id) return false
+                if (!wantFullscreen && fullscreen.has(s.id)) return false
+                return true
+            })
+
+            if (!screens.length) {
+                hs.ui.alert("No other screen to move to").duration(2).show()
+                return CANCEL
+            }
+
+            return pick({
+                placeholder: "Screen",
+                context: context,
+                optional: parameter.optional,
+                choices: screens.map((s) => ({
+                    text: s.name,
+                    subText: `${s.frame.w}×${s.frame.h}`,
+                    value: s
+                }))
+            })
+        }
     },
 
     number: {
