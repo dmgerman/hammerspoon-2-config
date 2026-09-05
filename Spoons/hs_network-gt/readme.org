@@ -1,0 +1,261 @@
+* hs_network-gt
+
+Traffic accounting per network, with threshold alerts, and an on-screen banner naming the
+network currently in use.
+
+This collects into one Spoon two pieces of a Hammerspoon 1 configuration: /hs_network/,
+which counted bytes per network and alerted on thresholds, and the =network_*= functions
+of /hs_annoyances/, which announced the current network every few minutes. Both are ported
+to Hammerspoon 2 and JavaScript.
+
+Traffic is counted from the moment of connection. The menubar carries the session total,
+cumulative per-network totals go to =logs/network.json=, and connect, disconnect and alert
+events are appended to =logs/network.log=.
+
+* Simple usage
+
+#+begin_src js   :exports both
+const network = hs.loadSpoon("hs_network-gt")
+
+// Networks whose name is not worth announcing — home, office, and so on.
+network.config.ignoredNetworks = ["mylittledmgnetwork8-5", "SEL-11"]
+
+network.start()
+#+end_src
+
+Every two minutes the name of the current network appears on screen for two seconds,
+unless the network is in =ignoredNetworks=. A connected VPN is named whether or not the
+network itself is ignored, so leaving a VPN running is visible.
+
+Every fifteen seconds the interface byte counters are sampled, and the menubar item shows
+what this session has consumed:
+
+#+begin_example
+↓1.2GB ↑87.4MB
+#+end_example
+
+Clicking it opens a menu with the session and cumulative figures for the current network,
+the alert settings, and the toggles described below.
+
+* Methods
+
+** networkName()
+
+The name of the current network, or =null= when no interface is active. Returns a promise:
+the name is read through a Shortcut (see /Reading the network name/ below).
+
+#+begin_src js   :exports both
+const network = hs.spoons["hs_network-gt"]
+network.networkName().then((name) => console.log(name))
+#+end_src
+
+The name is the SSID when one can be read, and =iface:en0= when it cannot — a wired
+connection, for instance. That string is what the counters and the alert settings are keyed
+by, so a wired connection accumulates under its interface name.
+
+** networkNameShow(always)
+
+Announce the current network on screen, and resolve to the text shown, or to =null= when
+nothing was shown. This is what the timer calls.
+
+Pass =true= to name the network whatever =ignoredNetworks= says. The menu item /Show
+network name/ does this.
+
+** networkNameHide()
+
+Remove the banner. Calling this while nothing is shown has no effect.
+
+** networkMute(name) and networkUnmute(name)
+
+Suppress, or allow, alerts for one network. Traffic is still counted while muted. The
+setting persists across restarts.
+
+#+begin_src js   :exports both
+network.networkMute("CoffeeShop")
+#+end_src
+
+** thresholdsSet(name, options)
+
+Set the alert thresholds for a network, replacing any it already had.
+
+#+begin_src js   :exports both
+network.thresholdsSet("Tethered", {
+    delta: 100 * 1024 ** 2,                 // alert every 100 MiB consumed
+    absolute: [512 * 1024 ** 2, 1024 ** 3]  // and once at 512 MiB, once at 1 GiB
+})
+#+end_src
+
+=delta= alerts each time that many bytes have been consumed within a session. Each entry in
+=absolute= alerts once per session, when the session total first passes it. Either may be
+omitted.
+
+Thresholds measure from the moment they are set: bytes already consumed this session do not
+trigger an alert, so raising a cap does not immediately alert about the past.
+
+The setting persists across restarts. A network that has never been configured is given
+=config.defaultDelta= on its first connection; a network configured with no thresholds at
+all keeps that, and is not given the default again.
+
+** alertsPause(), alertsResume(), alertsToggle(), alertsPaused()
+
+Silence every alert, or allow alerts again. Counting and the menubar continue; the menubar
+title is prefixed with =🔕= while paused. A network muted with =networkMute()= stays muted
+after =alertsResume()=.
+
+** trackingPause(), trackingResume(), trackingToggle(), trackingPaused()
+
+Freeze the counters. The menubar stays, showing the last figures behind a =⏸=, and no
+alerts fire. Bytes that flow during the pause are not added retroactively when counting
+resumes.
+
+Both pause flags persist across restarts, so a Spoon started while paused stays paused.
+
+** sessionReset()
+
+Zero the session counters and alert state for the current network. Cumulative totals are
+untouched.
+
+** cumulativeReset(name)
+
+Zero the cumulative total for a network, or, given no name, for every network. Alert
+settings for the network are kept.
+
+** start() and stop()
+
+=start()= creates the menubar item, starts the poll and banner timers and the Wi-Fi
+watcher, and takes a first sample immediately. =stop()= reverses all of it; the state on
+disk is kept.
+
+* Configuration
+
+Settings are properties of =config=. The timing settings are read when =start()= runs, the
+rest at each use.
+
+| Setting             | Default                    | Meaning                                            |
+|---------------------+----------------------------+----------------------------------------------------|
+| =ignoredNetworks=   | =[]=                       | Networks whose name is not announced.              |
+| =nameShortcut=      | ="dmg-ssid"=               | Shortcut run to read the network name. =null= to disable. |
+| =vpnServices=       | =[]=                       | VPN services that may be announced. =[]= accepts any. |
+| =pollSeconds=       | =15=                       | Seconds between traffic samples.                   |
+| =bannerInterval=    | =120=                      | Seconds between announcements. =0= for none.       |
+| =bannerDuration=    | =2=                        | Seconds the announcement stays on screen.          |
+| =bannerWidth=       | =500=                      | Width of the announcement, in points.              |
+| =bannerHeight=      | =230=                      | Height of the announcement, in points.             |
+| =bannerFont=        | ="Impact"=                 | Any font installed on the system.                  |
+| =bannerTextSize=    | =60=                       | Point size.                                        |
+| =bannerTextColor=   | ="#FF3342"=                | Hex colour.                                        |
+| =bannerLevel=       | ="floating"=               | Stacking: ="floating"=, ="status"=, ="screenSaver"=, ="popUpMenu"=. |
+| =alertDuration=     | =5=                        | Seconds a threshold alert stays on screen.         |
+| =defaultDelta=      | =10 * 1024 ** 2=           | Delta given to a network on its first connection.  |
+| =stateFile=         | =logs/network.json=        | Cumulative totals and settings.                    |
+| =eventFile=         | =logs/network.log=         | Event log.                                         |
+
+Both files are under =hs.appinfo.configDir=, and the directory is created on first use.
+
+=ignoredNetworks= ships empty, so every network is announced until the list is filled in.
+
+* The menu
+
+The menubar title is the session total, prefixed with =⏸= while tracking is paused or =🔕=
+while alerts are, and reading =net: --= when no connection has been detected yet.
+
+The menu holds, for the current network: its name, the session and cumulative totals, a
+description of its alert settings, submenus setting the delta and a session cap from a few
+presets, a toggle for switching Wi-Fi off when the cap is reached, a toggle muting alerts
+for it, /Reset session/, and /Show network name/. Below a separator are the global pause
+toggles and the cumulative total of every network seen, with a =🔕= beside the muted ones.
+
+/Disable Wi-Fi when cap reached/ switches Wi-Fi off once an =absolute= threshold is
+crossed. It fires at most once per session, and only on a Wi-Fi interface.
+
+* Files
+
+** logs/network.json
+
+Cumulative totals and settings, rewritten at each sample that saw traffic:
+
+#+begin_src js   :exports both
+{
+  "ssids": {
+    "mylittledmgnetwork8-5": {
+      "in": 34359738368,
+      "out": 2147483648,
+      "last_seen": "2026-09-04T18:22:07Z",
+      "thresholds": { "delta": 10485760, "absolute": [] }
+    }
+  },
+  "alerts_paused": false,
+  "tracking_paused": false
+}
+#+end_src
+
+The key names are the v1 Spoon's, so an existing =~/.hammerspoon/logs/network.json= can be
+copied over to carry its history forward. =ssids= is keyed by network name, which is an
+SSID only when one could be read.
+
+** logs/network.log
+
+One tab-separated line per event: timestamp, network, event, session total in bytes, and
+the delta the event concerns.
+
+#+begin_example
+2026-09-04T18:04:11Z	mylittledmgnetwork8-5	connect	0	0
+2026-09-04T18:39:52Z	mylittledmgnetwork8-5	alert_delta	11534336	10485760
+2026-09-04T19:02:30Z	mylittledmgnetwork8-5	disconnect	48234496	48234496
+#+end_example
+
+Events are =connect=, =disconnect=, =alert_absolute=, =alert_delta= and =wifi_disabled=.
+The file is only appended to.
+
+* Reading the network name
+
+=hs.wifi.currentNetwork()= returns nothing on recent macOS unless Location Services has
+authorized the caller. The way around it is a Shortcut that reports the network name, run
+by =config.nameShortcut=; =hs.wifi.currentNetwork()= is tried when the Shortcut returns
+nothing, and the interface name is used when that also fails.
+
+The stock /Get current Wi-Fi network/ action, followed by /Get name of/, is enough to build
+such a Shortcut. Set =config.nameShortcut= to its name, or to =null= if
+=hs.wifi.currentNetwork()= works on your system.
+
+* VPN detection
+
+A VPN is detected from =scutil --nc list=, which names every configured service and its
+state, so no service name has to be known in advance. The name announced is the one shown
+in Network settings. Setting =config.vpnServices= restricts announcements to the named
+services; empty accepts any connected one.
+
+* Notes
+
+- *What is counted.* The byte counts come from the kernel by way of =netstat -ibn=, for the
+  physical interface carrying the default route. They are physical-layer figures: bytes
+  inside a VPN tunnel are counted, headers and broadcast traffic included.
+- *Which interface.* The active Wi-Fi interface, or the interface carrying the default
+  route. Tunnel interfaces (=utun=, =ppp=, =ipsec=) are rejected, because their counters
+  measure traffic that is also counted on the physical interface underneath.
+- *Counter resets.* A counter that moves backwards means the interface was reset, not
+  negative traffic; the difference is discarded rather than subtracted.
+- *A session ends* when the interface or the network name changes, which the Wi-Fi watcher
+  and the poll both detect. Bytes consumed between the last sample and the change are
+  counted against the network that was current at the last sample.
+- *Sleep.* Bytes that flow while the machine is asleep are attributed to the sample
+  following the wake, since the counters are only read when a sample runs.
+
+* Differences from the Hammerspoon 1 spoons
+
+- Function names put the subject first: =networkMute= rather than =blacklist=,
+  =alertsPause= rather than =pauseAlerts=, =cumulativeReset= rather than =resetCumulative=.
+- The list of networks not to announce was hardcoded in /hs_annoyances/'s =network_tick()=;
+  it is =config.ignoredNetworks= here.
+- VPN detection was a single hardcoded service name checked with =networksetup
+  -showpppoestatus=; it is now any service =scutil= reports as connected, optionally
+  restricted by =config.vpnServices=.
+- The network name came from an external shell script; it now comes from a Shortcut.
+- Every reading is asynchronous. Hammerspoon 2 has no =hs.execute=, so =netstat=, =route=
+  and =scutil= run under =hs.task=. A sample that is still in flight when the timer next
+  fires is left to finish; the cycle is skipped rather than overlapped, which would
+  double-count.
+- The banner is an =hs.ui= window rather than an =hs.canvas=, as in /hs_time-gt/. It is
+  rebuilt at each showing, because Hammerspoon 2 windows take their frame when they are
+  created.
+- Alerts are =hs.ui.alert=; Hammerspoon 2 has no =hs.alert=.

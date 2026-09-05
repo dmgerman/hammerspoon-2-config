@@ -1,0 +1,6 @@
+{
+    "name": "hs_network-gt",
+    "author": "Daniel German <dmg@turingmachine.org>",
+    "version": "1.0.0",
+    "description": "Per-network traffic accounting with threshold alerts, and an on-screen banner naming the current network."
+}
