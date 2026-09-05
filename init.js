@@ -107,6 +107,80 @@ interactive.use("hs_time-gt", {
     }
 });
 
+// Collects what ~/.hammerspoon did in hs_network.spoon and the network_* functions of
+// hs_annoyances.spoon. config.ignoredNetworks names the networks whose name is not worth
+// announcing — home and the office; it is left empty until the announcements have been
+// watched for a while.
+interactive.use("hs_network-gt", {
+    commands: (interactive, network) => {
+        // Every threshold is per network, and the one to act on is the one in use. Reading
+        // its name means running a Shortcut, so these commands return that promise.
+        const forCurrentNetwork = (fn) => () =>
+            network.networkName().then((name) => name ? fn(name) : "no network");
+
+        interactive.define({
+            name: "network-show-name",
+            doc: "Show the name of the current network, whether or not it is ignored.",
+            fn: () => network.networkNameShow(true)
+        });
+
+        interactive.define({
+            name: "network-mute",
+            doc: "Stop alerting about traffic on the current network. Its traffic is still counted.",
+            fn: forCurrentNetwork((name) => network.networkMute(name))
+        });
+
+        interactive.define({
+            name: "network-unmute",
+            doc: "Alert about traffic on the current network again.",
+            fn: forCurrentNetwork((name) => network.networkUnmute(name))
+        });
+
+        interactive.define({
+            name: "network-set-delta",
+            doc: "Alert every this many MB consumed on the current network, replacing its other thresholds. 0 stops the alerts.",
+            interactive: [{ name: "megabytes", reader: interactive.readers.number.prompted, default: 100 }],
+            fn: (megabytes) => network.networkName().then((name) => name
+                ? network.thresholdsSet(name, { delta: megabytes > 0 ? megabytes * 1024 ** 2 : null })
+                : "no network")
+        });
+
+        interactive.define({
+            name: "network-set-cap",
+            doc: "Alert once when this many MB have been consumed on the current network this session, replacing its other thresholds. 0 removes the cap.",
+            interactive: [{ name: "megabytes", reader: interactive.readers.number.prompted, default: 1024 }],
+            fn: (megabytes) => network.networkName().then((name) => name
+                ? network.thresholdsSet(name, { absolute: megabytes > 0 ? [megabytes * 1024 ** 2] : [] })
+                : "no network")
+        });
+
+        interactive.define({
+            name: "network-alerts-pause-or-resume",
+            doc: "Silence every traffic alert, or allow them again. Counting continues either way.",
+            fn: () => network.alertsToggle()
+        });
+
+        interactive.define({
+            name: "network-tracking-pause-or-resume",
+            doc: "Freeze the traffic counters, or start counting again.",
+            fn: () => network.trackingToggle()
+        });
+
+        interactive.define({
+            name: "network-session-reset",
+            doc: "Zero the counters for this connection. Cumulative totals are kept.",
+            fn: () => network.sessionReset()
+        });
+
+        interactive.define({
+            name: "network-cumulative-reset",
+            doc: "Zero the cumulative total for a network, or for every network when left blank.",
+            interactive: [{ name: "network", reader: interactive.readers.string.prompted, default: "" }],
+            fn: (name) => network.cumulativeReset(name === "" ? null : name)
+        });
+    }
+});
+
 // Menus are defined once and displayed on any device: on screen by hs_menu-gt, and on the
 // Stream Deck by hs_streamdeck-gt. Editing menus.js takes effect on the next reload.
 const menus = require(hs.appinfo.configDir + "/menus.js");
@@ -399,128 +473,128 @@ interactive.use("hs_streamdeck-gt", {
     }
 });
 
-// Window commands. Not a Spoon, so they are defined directly.
-//
-// The helpers in hs.window.js — maximize, tiling, grid — exist but raise a TypeError when
-// called, so the frame is set directly. See ai/features-missing.org.
-//
-// place() takes a grid and a cell within it, which covers halves, thirds and quadrants:
-// place(win, {cols: 3}, {col: 1}) is the middle third.
-const place = (win, grid, cell) => {
-    if (!win) return false;
+// Every window operation lives in the Spoon, so that its undo history has one place
+// through which all of them pass. A command here is a name and a docstring over it.
+interactive.use("hs_window-gt", {
+    commands: (interactive, win) => {
+        // Most take the focused window, prompting only when there is none.
+        const onWindow = (name, doc, fn) => interactive.define({
+            name: name,
+            doc: doc,
+            interactive: [{ name: "window", reader: interactive.readers.window.auto }],
+            fn: fn
+        });
 
-    const screen = win.screen.frame;
-    const cols = grid.cols === undefined ? 1 : grid.cols;
-    const rows = grid.rows === undefined ? 1 : grid.rows;
-    const col = cell.col === undefined ? 0 : cell.col;
-    const row = cell.row === undefined ? 0 : cell.row;
-    const colSpan = cell.colSpan === undefined ? 1 : cell.colSpan;
-    const rowSpan = cell.rowSpan === undefined ? 1 : cell.rowSpan;
+        onWindow("window-maximize", "Fill the screen with a window.", (w) => win.maximize(w));
+        onWindow("window-left-half", "Move a window to the left half of its screen.", (w) => win.leftHalf(w));
+        onWindow("window-right-half", "Move a window to the right half of its screen.", (w) => win.rightHalf(w));
+        onWindow("window-top-half", "Move a window to the top half of its screen.", (w) => win.topHalf(w));
+        onWindow("window-bottom-half", "Move a window to the bottom half of its screen.", (w) => win.bottomHalf(w));
+        onWindow("window-left-third", "Move a window to the left third of its screen.", (w) => win.leftThird(w));
+        onWindow("window-center-third", "Move a window to the middle third of its screen.", (w) => win.centerThird(w));
+        onWindow("window-right-third", "Move a window to the right third of its screen.", (w) => win.rightThird(w));
+        onWindow("window-left-two-thirds", "Move a window to the left two thirds of its screen.", (w) => win.leftTwoThirds(w));
+        onWindow("window-right-two-thirds", "Move a window to the right two thirds of its screen.", (w) => win.rightTwoThirds(w));
+        onWindow("window-top-left", "Move a window to the top left quarter of its screen.", (w) => win.topLeft(w));
+        onWindow("window-top-right", "Move a window to the top right quarter of its screen.", (w) => win.topRight(w));
+        onWindow("window-bottom-left", "Move a window to the bottom left quarter of its screen.", (w) => win.bottomLeft(w));
+        onWindow("window-bottom-right", "Move a window to the bottom right quarter of its screen.", (w) => win.bottomRight(w));
+        onWindow("window-center", "Centre a window on its screen, keeping its size.", (w) => win.center(w));
 
-    const cellWidth = screen.w / cols;
-    const cellHeight = screen.h / rows;
+        onWindow("window-vertical-maximize", "Fill the screen's height, keeping the width.", (w) => win.verticalMaximize(w));
+        onWindow("window-horizontal-maximize", "Fill the screen's width, keeping the height.", (w) => win.horizontalMaximize(w));
+        onWindow("window-half-height", "Halve a window's height, keeping the top edge.", (w) => win.halfHeight(w));
+        onWindow("window-half-width", "Halve a window's width, keeping the left edge.", (w) => win.halfWidth(w));
 
-    win.frame = new HSRect(
-        screen.x + col * cellWidth,
-        screen.y + row * cellHeight,
-        colSpan * cellWidth,
-        rowSpan * cellHeight
-    );
-    return true;
-};
+        onWindow("window-move-left", "Move a window left by its own width.", (w) => win.moveByOwnSize("left", w));
+        onWindow("window-move-right", "Move a window right by its own width.", (w) => win.moveByOwnSize("right", w));
+        onWindow("window-move-up", "Move a window up by its own height.", (w) => win.moveByOwnSize("up", w));
+        onWindow("window-move-down", "Move a window down by its own height.", (w) => win.moveByOwnSize("down", w));
 
-interactive.define({
-    name: "window-maximize",
-    doc: "Fill the screen with a window.",
-    interactive: [{ name: "window", reader: interactive.readers.window.auto }],
-    fn: (win) => place(win, {}, {})
-});
+        onWindow("window-next-screen", "Move a window to the next screen.", (w) => win.moveToScreen("next", w));
+        onWindow("window-previous-screen", "Move a window to the previous screen.", (w) => win.moveToScreen("previous", w));
+        onWindow("window-swap", "Swap a window's position with the window behind it.", (w) => win.swapWithPrevious(w));
+        onWindow("window-send-to-back", "Put a window behind all the others.", (w) => win.sendToBack(w));
+        onWindow("window-center-mouse", "Put the pointer in the middle of a window.", (w) => win.centerMouse(w));
+        onWindow("window-info", "Show the application, title, screen and frame of a window.", (w) => win.info(w));
 
-interactive.define({
-    name: "window-left-half",
-    doc: "Move a window to the left half of its screen.",
-    interactive: [{ name: "window", reader: interactive.readers.window.auto }],
-    fn: (win) => place(win, { cols: 2 }, { col: 0 })
-});
+        onWindow("window-toggle-fullscreen", "Enter or leave fullscreen for a window.", (w) => w.toggleFullscreen());
+        onWindow("window-minimize", "Minimize a window.", (w) => w.minimize());
 
-interactive.define({
-    name: "window-right-half",
-    doc: "Move a window to the right half of its screen.",
-    interactive: [{ name: "window", reader: interactive.readers.window.auto }],
-    fn: (win) => place(win, { cols: 2 }, { col: 1 })
-});
+        interactive.define({
+            name: "window-undo",
+            doc: "Put a window back where it was. Again to go further back.",
+            fn: () => win.undo()
+        });
 
-// Thirds, quadrants and the remaining halves. These are what hs.window.tiling and
-// hs.window.grid would provide if they worked.
-const windowPlacements = [
-    ["window-top-half", "Move a window to the top half of its screen.", { rows: 2 }, { row: 0 }],
-    ["window-bottom-half", "Move a window to the bottom half of its screen.", { rows: 2 }, { row: 1 }],
-    ["window-left-third", "Move a window to the left third of its screen.", { cols: 3 }, { col: 0 }],
-    ["window-center-third", "Move a window to the middle third of its screen.", { cols: 3 }, { col: 1 }],
-    ["window-right-third", "Move a window to the right third of its screen.", { cols: 3 }, { col: 2 }],
-    ["window-left-two-thirds", "Move a window to the left two thirds of its screen.", { cols: 3 }, { col: 0, colSpan: 2 }],
-    ["window-right-two-thirds", "Move a window to the right two thirds of its screen.", { cols: 3 }, { col: 1, colSpan: 2 }],
-    ["window-top-left", "Move a window to the top left quarter of its screen.", { cols: 2, rows: 2 }, { col: 0, row: 0 }],
-    ["window-top-right", "Move a window to the top right quarter of its screen.", { cols: 2, rows: 2 }, { col: 1, row: 0 }],
-    ["window-bottom-left", "Move a window to the bottom left quarter of its screen.", { cols: 2, rows: 2 }, { col: 0, row: 1 }],
-    ["window-bottom-right", "Move a window to the bottom right quarter of its screen.", { cols: 2, rows: 2 }, { col: 1, row: 1 }]
-];
+        interactive.define({
+            name: "window-redo",
+            doc: "Cancel a run of window-undo.",
+            fn: () => win.redo()
+        });
 
-for (const [name, doc, grid, cell] of windowPlacements) {
-    interactive.define({
-        name: name,
-        doc: doc,
-        interactive: [{ name: "window", reader: interactive.readers.window.auto }],
-        fn: (win) => place(win, grid, cell)
-    });
-}
+        interactive.define({
+            name: "window-previous",
+            doc: "Focus the window that had focus before this one.",
+            fn: () => win.previousWindow()
+        });
 
-interactive.define({
-    name: "window-center",
-    doc: "Centre a window on its screen, keeping its size.",
-    interactive: [{ name: "window", reader: interactive.readers.window.auto }],
-    fn: (win) => win.centerOnScreen()
-});
+        interactive.define({
+            name: "window-center-mouse-next",
+            doc: "Put the pointer in the middle of the next window.",
+            fn: () => win.centerMouseNext()
+        });
 
-interactive.define({
-    name: "window-toggle-fullscreen",
-    doc: "Enter or leave fullscreen for a window.",
-    interactive: [{ name: "window", reader: interactive.readers.window.auto }],
-    fn: (win) => win.toggleFullscreen()
-});
+        interactive.define({
+            name: "window-toggle-isolation",
+            doc: "Dim everything except the focused window, or stop dimming.",
+            fn: () => win.toggleIsolation()
+        });
 
-interactive.define({
-    name: "window-minimize",
-    doc: "Minimize a window.",
-    interactive: [{ name: "window", reader: interactive.readers.window.auto }],
-    fn: (win) => win.minimize()
-});
+        interactive.define({
+            name: "window-fraction-width",
+            doc: "Set a window's width to a fraction of the screen: 2 is half, 3 a third.",
+            interactive: [
+                { name: "denominator", reader: interactive.readers.number.prompted, default: 2 },
+                { name: "window", reader: interactive.readers.window.auto }
+            ],
+            fn: (denominator, w) => win.fractionWidth(denominator, w)
+        });
 
-interactive.define({
-    name: "window-focus",
-    doc: "Choose a window by title and focus it.",
-    interactive: [{ name: "window", reader: interactive.readers.window.prompted }],
-    fn: (win) => win.focus()
-});
+        interactive.define({
+            name: "window-focus",
+            doc: "Choose a window by title and focus it.",
+            interactive: [{ name: "window", reader: interactive.readers.window.prompted }],
+            fn: (w) => w.focus()
+        });
 
-interactive.define({
-    name: "window-move-to-screen",
-    doc: "Move a window to a chosen screen, keeping its relative position and size.",
-    interactive: [
-        { name: "window", reader: interactive.readers.window.auto },
-        { name: "screen", reader: interactive.readers.screen.prompted }
-    ],
-    fn: (win, screen) => {
-        const from = win.screen.frame;
-        const to = screen.frame;
-        const f = win.frame;
-        win.frame = new HSRect(
-            to.x + ((f.x - from.x) / from.w) * to.w,
-            to.y + ((f.y - from.y) / from.h) * to.h,
-            Math.min(f.w * (to.w / from.w), to.w),
-            Math.min(f.h * (to.h / from.h), to.h)
-        );
-        return true;
+        interactive.define({
+            name: "window-move-to-screen",
+            doc: "Move a window to a chosen screen, keeping its relative position and size.",
+            interactive: [
+                { name: "window", reader: interactive.readers.window.auto },
+                // Moving to the screen it is already on is not a move, and a screen showing
+                // a fullscreen window has no room for it.
+                {
+                    name: "screen",
+                    reader: interactive.readers.screen.prompted,
+                    includeCurrent: false,
+                    includeFullscreen: false
+                }
+            ],
+            fn: (w, screen) => {
+                const from = w.screen.frame;
+                const to = screen.frame;
+                const f = w.frame;
+                w.frame = new HSRect(
+                    to.x + ((f.x - from.x) / from.w) * to.w,
+                    to.y + ((f.y - from.y) / from.h) * to.h,
+                    Math.min(f.w * (to.w / from.w), to.w),
+                    Math.min(f.h * (to.h / from.h), to.h)
+                );
+                return true;
+            }
+        });
     }
 });
 
@@ -542,18 +616,6 @@ interactive.define({
     })
 });
 
-interactive.define({
-    name: "window-info",
-    doc: "Show the title, application, screen and frame of a window.",
-    interactive: [{ name: "window", reader: interactive.readers.window.auto }],
-    fn: (win) => {
-        const f = win.frame;
-        const text = `${interactive.describe(win)}\n${win.screen.name}  ${f.w}×${f.h} at ${f.x},${f.y}`;
-        hs.ui.alert(text).duration(4).show();
-        console.log("[window-info] " + text.replace("\n", " · "));
-        return text;
-    }
-});
 
 // Only the chooser gets a key while Hammerspoon 1 is still running: its hotkeys are
 // registered system-wide and the two would fight over any chord bound in both.

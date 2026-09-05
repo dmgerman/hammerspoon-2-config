@@ -194,19 +194,58 @@ const weatherTomorrow = weatherButton(
 // The commands are defined in init.js. The Hammerspoon 1 menu also had thirds, quadrants
 // and top and bottom halves, which need commands that do not exist yet.
 
+// Both menus merged: everything the Hammerspoon 2 menu had, plus everything the version 1
+// menu had that it lacked. Where the two used the same letter for different things, the
+// Hammerspoon 2 meaning keeps the lower case and the version 1 one takes the capital —
+// i is Info and I is Isolation, s is To screen and S is Swap. The four that were shift
+// variants in version 1 are capitals here too, which is the same gesture.
 const windowMenu = [
+    { label: "Undo", icon: "symbol:arrow.uturn.backward", key: "[", command: "window-undo" },
+    { label: "Redo", icon: "symbol:arrow.uturn.forward", key: "]", command: "window-redo" },
+
     { label: "Maximize", icon: "symbol:arrow.up.left.and.arrow.down.right", key: "m", command: "window-maximize" },
     { label: "Left half", icon: "symbol:rectangle.lefthalf.filled", key: "h", command: "window-left-half" },
     { label: "Right half", icon: "symbol:rectangle.righthalf.filled", key: "l", command: "window-right-half" },
     { label: "Centre", icon: "symbol:rectangle.center.inset.filled", key: "c", command: "window-center" },
     { label: "Fullscreen", icon: "symbol:arrow.up.left.and.down.right.magnifyingglass", key: "f", command: "window-toggle-fullscreen" },
     { label: "Minimize", icon: "symbol:arrow.down.right.and.arrow.up.left", key: "n", command: "window-minimize" },
+
+    { label: "Vert max", icon: "symbol:arrow.up.and.down", key: "V", command: "window-vertical-maximize" },
+    { label: "Horiz max", icon: "symbol:arrow.left.and.right", key: "H", command: "window-horizontal-maximize" },
+    { label: "Half height", icon: "symbol:rectangle.tophalf.filled", key: "-", command: "window-half-height" },
+    { label: "Half width", icon: "symbol:rectangle.lefthalf.filled", key: "W", command: "window-half-width" },
+
+    { label: "Move left", icon: "symbol:arrow.left", key: "left", command: "window-move-left" },
+    { label: "Move right", icon: "symbol:arrow.right", key: "right", command: "window-move-right" },
+    { label: "Move up", icon: "symbol:arrow.up", key: "up", command: "window-move-up" },
+    { label: "Move down", icon: "symbol:arrow.down", key: "down", command: "window-move-down" },
+
     { label: "To screen", icon: "symbol:display.2", key: "s", command: "window-move-to-screen" },
+    { label: "Next screen", icon: "symbol:rectangle.on.rectangle", key: "space", command: "window-next-screen" },
+    { label: "Prev screen", icon: "symbol:rectangle.on.rectangle", key: "B", command: "window-previous-screen" },
+
+    { label: "Swap", icon: "symbol:arrow.left.arrow.right", key: "S", command: "window-swap" },
+    { label: "To back", icon: "symbol:square.on.square", key: "0", command: "window-send-to-back" },
+    { label: "Prev window", icon: "symbol:arrow.uturn.left", key: "p", command: "window-previous" },
+
+    { label: "Isolate", icon: "symbol:moon.fill", key: "I", command: "window-toggle-isolation" },
     { label: "Info", icon: "symbol:info.circle", key: "i", command: "window-info" },
+    { label: "Centre mouse", icon: "symbol:cursorarrow", key: "M", command: "window-center-mouse" },
+    { label: "Mouse next", icon: "symbol:cursorarrow.motionlines", key: "N", command: "window-center-mouse-next" },
+
     { label: "Thirds", icon: "symbol:square.split.1x2", key: "3", children: () => thirdsMenu },
     { label: "Quadrants", icon: "symbol:square.split.2x2", key: "4", children: () => quadrantsMenu },
-    todo("Undo", "undo.jpg", "a window position history")
+    { label: "Widths", icon: "symbol:ruler", key: "5", children: () => widthsMenu }
 ].map(stays)
+
+// The version 1 menu had these as 2 through 8 in its own row. One command with an argument
+// rather than seven commands, so the menu carries the number.
+const widthsMenu = [2, 3, 4, 5, 6, 7, 8].map((n) => stays({
+    label: `1/${n} width`,
+    key: String(n),
+    command: "window-fraction-width",
+    args: [n]
+}))
 
 // Reached through a function above, since they are declared after the menu holding them.
 const thirdsMenu = [
@@ -379,6 +418,7 @@ module.exports = {
     windowMenu,
     thirdsMenu,
     quadrantsMenu,
+    widthsMenu,
     teachingMenu,
     emacsMenu,
     chromeMenu,
