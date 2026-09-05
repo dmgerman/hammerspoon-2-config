@@ -59,6 +59,55 @@ let useCount = 0
 // JavaScriptCore collects the object and the callback never fires.
 let activeChooser = null
 
+// MARK: - Prompt observers
+//
+// A prompt takes the keyboard, so whatever else is bound to it has to stand down for as
+// long as one is up. The on-screen menu binds a hotkey per button, arrow keys among them,
+// and a hotkey outranks the chooser's own key handling: without this the arrows would move
+// windows while a chooser waits for one to be chosen.
+//
+// Counted rather than a flag, since a command that reads two parameters shows one chooser
+// after another. Observers hear about the first opening and the last closing.
+const promptObservers = new Set()
+let promptDepth = 0
+
+/**
+ * Be told when a prompt appears and when the last one goes away.
+ *
+ * @param {function} fn Called with true when a prompt opens, false when none is left.
+ * @returns {function} Call it to stop being told.
+ */
+function onPromptChange(fn) {
+    promptObservers.add(fn)
+    return () => promptObservers.delete(fn)
+}
+
+/** Whether a prompt is on screen. */
+function promptIsOpen() {
+    return promptDepth > 0
+}
+
+function promptOpened() {
+    promptDepth += 1
+    if (promptDepth === 1) notifyPrompt(true)
+}
+
+function promptClosed() {
+    if (promptDepth === 0) return
+    promptDepth -= 1
+    if (promptDepth === 0) notifyPrompt(false)
+}
+
+function notifyPrompt(open) {
+    for (const observer of promptObservers) {
+        try {
+            observer(open)
+        } catch (e) {
+            console.error(`[hs_interactive-gt] a prompt observer failed: ${e.message}`)
+        }
+    }
+}
+
 // MARK: - Describing values
 //
 // Every bridged Hammerspoon type carries `typeName` and a `toString()` of the form
@@ -112,14 +161,20 @@ function ask(options) {
     const labels = options.optional ? ["OK", "Skip", "Cancel"] : ["OK", "Cancel"]
     let result = { action: "cancel", text: "" }
 
-    hs.ui.textPrompt(options.message)
-        .informativeText(options.context || "")
-        .defaultText(options.defaultText === undefined ? "" : String(options.defaultText))
-        .buttons(labels)
-        .onButton((index, text) => {
-            result = { action: (labels[index] || "Cancel").toLowerCase(), text: text }
-        })
-        .show()
+    promptOpened()
+    try {
+        hs.ui.textPrompt(options.message)
+            .informativeText(options.context || "")
+            .defaultText(options.defaultText === undefined ? "" : String(options.defaultText))
+            .buttons(labels)
+            .onButton((index, text) => {
+                result = { action: (labels[index] || "Cancel").toLowerCase(), text: text }
+            })
+            .show()
+    } finally {
+        // show() is modal, so the prompt is gone by the time it returns.
+        promptClosed()
+    }
 
     return result
 }
@@ -142,11 +197,13 @@ function pick(options) {
         chooser.setChoices(rows)
         chooser.onSelect = (item) => {
             activeChooser = null
+            promptClosed()
             if (!item) resolve(CANCEL)
             else if (item.skip) resolve(SKIP)
             else resolve(item.value)
         }
         activeChooser = chooser
+        promptOpened()
         chooser.show()
     })
 }
@@ -183,22 +240,42 @@ const readers = {
     window: {
         implicit: (context, parameter, snap) => snap.window,
         auto: (context, parameter, snap) => snap.window || readers.window.prompted(context, parameter, snap),
-        prompted: (context, parameter) => pick({
-            placeholder: "Window",
-            context: context,
-            optional: parameter.optional,
-            // The application name is in `text` as well as `subText`: a window is often
-            // easier to name by its application than by its title, and typing matches
-            // `text` whatever the chooser's searchSubText setting happens to be.
-            choices: hs.window.orderedWindows().map((w) => {
-                const app = w.application ? w.application.title : "?"
-                return {
-                    text: `${app} — ${w.title || "(untitled)"}`,
-                    subText: `${app}${w.screen ? " · " + w.screen.name : ""}`,
-                    value: w
-                }
+
+        /**
+         * Choose a window. The parameter may narrow what is offered:
+         *
+         *   includeCurrent  false leaves out the window the command started on, for a
+         *                   command that acts on this window and a second one.
+         */
+        prompted: (context, parameter, snap) => {
+            const current = snap ? snap.window : null
+            const wantCurrent = parameter.includeCurrent !== false
+
+            const windows = hs.window.orderedWindows().filter(
+                (w) => wantCurrent || !current || w.id !== current.id)
+
+            if (!windows.length) {
+                hs.ui.alert("No other window to choose").duration(2).show()
+                return CANCEL
+            }
+
+            return pick({
+                placeholder: "Window",
+                context: context,
+                optional: parameter.optional,
+                // The application name is in `text` as well as `subText`: a window is often
+                // easier to name by its application than by its title, and typing matches
+                // `text` whatever the chooser's searchSubText setting happens to be.
+                choices: windows.map((w) => {
+                    const app = w.application ? w.application.title : "?"
+                    return {
+                        text: `${app} — ${w.title || "(untitled)"}`,
+                        subText: `${app}${w.screen ? " · " + w.screen.name : ""}`,
+                        value: w
+                    }
+                })
             })
-        })
+        }
     },
 
     application: {
@@ -537,9 +614,16 @@ function execute() {
     })))
     chooser.onSelect = (item) => {
         activeChooser = null
-        if (item) callInteractively(item.text, { snapshot: snap })
+        try {
+            // Before this chooser is counted out, so that a command which prompts in turn
+            // keeps the count above zero and observers see one prompt throughout.
+            if (item) callInteractively(item.text, { snapshot: snap })
+        } finally {
+            promptClosed()
+        }
     }
     activeChooser = chooser
+    promptOpened()
     chooser.show()
 }
 
@@ -887,6 +971,13 @@ function stop() {
     for (const binding of keymap.values()) binding.hotkey.destroy()
     keymap.clear()
     activeChooser = null
+
+    // Whoever was listening is going away with this layer, and a prompt cannot survive it.
+    if (promptDepth > 0) {
+        promptDepth = 0
+        notifyPrompt(false)
+    }
+    promptObservers.clear()
     return module.exports
 }
 
@@ -906,6 +997,8 @@ module.exports = {
     call,
     callInteractively,
     execute,
+    onPromptChange,
+    promptIsOpen,
     parseChord,
     setKey,
     setKeys,

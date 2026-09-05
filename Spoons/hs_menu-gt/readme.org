@@ -321,11 +321,20 @@ a menu on one of them and returns the session.
 | =progressive=              | True if the display can be changed after it is shown.          |
 | =present(session, buttons)= | Display a page. Called on every navigation.                   |
 | =setImage(index, image)=   | Set one button's image. Progressive presenters only.           |
+| =suspendKeys()=            | Give up the keyboard. Optional; see below.                     |
+| =resumeKeys()=             | Take it back.                                                  |
 | =close()=                  | The menu was dismissed.                                        |
 
 A progressive presenter is given the page at once and each image as it is drawn. One that
 cannot change what it displays — an =hs.ui= window cannot — is given the page only when
 every image is ready, with each button's =image= already set.
+
+A presenter that reads the keyboard implements =suspendKeys= and =resumeKeys=. They are
+called when a command run from a button puts a prompt on screen, since a chooser's own key
+handling is outranked by a hotkey: without them the on-screen menu would answer the arrow
+keys meant for the chooser. Suspension is a state, not one release — a menu redraws itself
+while a prompt is up, and =present= must not take the keys back until =resumeKeys=. A
+presenter with no keyboard of its own, such as a Stream Deck, leaves both out.
 
 The session offers =down(index)=, =up(index)=, =activate(index, kind)=, =push(button)=,
 =pop()=, =popToRoot()=, =refresh()=, =close()=, =canPop()=, =buttons()=, =letters()=,

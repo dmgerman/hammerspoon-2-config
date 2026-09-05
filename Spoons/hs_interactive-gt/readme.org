@@ -312,6 +312,29 @@ interactive.callInteractively("window-move-to-screen", { args: [win] })
 Displays the chooser listing every command with its docstring. The =commands-execute=
 command calls it; bind a key to that command.
 
+** onPromptChange(fn)
+
+Calls =fn(true)= when a prompt appears and =fn(false)= when the last one goes away, and
+returns a function that cancels the subscription. =promptIsOpen()= answers the same
+question at any moment.
+
+A prompt takes the keyboard, so anything else bound to it has to stand down while one is
+up. =hs_menu-gt= subscribes for that reason: the on-screen menu binds a hotkey per button,
+arrow keys among them, and a hotkey outranks a chooser's own key handling, so without this
+the arrows would move windows while a chooser waits for one to be chosen.
+
+Commands that read two parameters show one chooser after another. Prompts are counted, so
+=fn= hears about the first one opening and the last one closing, not each in turn.
+
+#+begin_src js   :exports both
+const stop = interactive.onPromptChange((open) => {
+    if (open) releaseKeys()
+    else takeKeys()
+})
+
+stop()                                    // no longer interested
+#+end_src
+
 * Command order
 
 The chooser lists commands in one of two orders, selected by configuration:

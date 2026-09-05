@@ -495,6 +495,12 @@ interactive.use("hs_menu-gt", {
         });
 
         interactive.define({
+            name: "menu-show-windows",
+            doc: "Show the window menu on screen.",
+            fn: () => menu.toggleOnScreen(menus.windowMenu, { name: "Windows" })
+        });
+
+        interactive.define({
             name: "menu-hide",
             doc: "Dismiss the on-screen menu.",
             fn: () => menu.hideScreen()
@@ -503,7 +509,8 @@ interactive.use("hs_menu-gt", {
 
     // The same chord shows the menu and dismisses it, since menu-show toggles.
     keys: {
-        "cmd-ctrl-alt z": "menu-show"
+        "cmd-ctrl-alt z": "menu-show",
+        "alt w": "menu-show-windows"
     }
 });
 
@@ -556,13 +563,35 @@ interactive.use("hs_window-gt", {
 
         onWindow("window-next-screen", "Move a window to the next screen.", (w) => win.moveToScreen("next", w));
         onWindow("window-previous-screen", "Move a window to the previous screen.", (w) => win.moveToScreen("previous", w));
-        onWindow("window-swap", "Swap a window's position with the window behind it.", (w) => win.swapWithPrevious(w));
+        onWindow("window-swap-behind", "Swap a window's position with the window behind it.", (w) => win.swapWithPrevious(w));
         onWindow("window-send-to-back", "Put a window behind all the others.", (w) => win.sendToBack(w));
         onWindow("window-center-mouse", "Put the pointer in the middle of a window.", (w) => win.centerMouse(w));
         onWindow("window-info", "Show the application, title, screen and frame of a window.", (w) => win.info(w));
 
         onWindow("window-toggle-fullscreen", "Enter or leave fullscreen for a window.", (w) => w.toggleFullscreen());
         onWindow("window-minimize", "Minimize a window.", (w) => w.minimize());
+
+        // Two windows at a time. The second is always asked for, and the window the command
+        // started on is left out of the choices, since neither operation means anything
+        // with one window named twice.
+        const onTwoWindows = (name, doc, fn) => interactive.define({
+            name: name,
+            doc: doc,
+            interactive: [
+                { name: "window", reader: interactive.readers.window.auto },
+                {
+                    name: "other",
+                    reader: interactive.readers.window.prompted,
+                    includeCurrent: false
+                }
+            ],
+            fn: fn
+        });
+
+        onTwoWindows("window-tile-with", "Put a chosen window on the left half of this window's screen, and this one on the right.",
+            (w, other) => win.tileWith(other, w));
+        onTwoWindows("window-swap-with", "Exchange this window's position and size with a chosen window's.",
+            (w, other) => win.swapWithWindow(other, w));
 
         interactive.define({
             name: "window-undo",

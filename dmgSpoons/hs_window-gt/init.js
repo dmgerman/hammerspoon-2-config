@@ -564,36 +564,135 @@ function setFrameOnScreen(win, rect) {
     // arrives at the smaller display's dimensions.
     win.frame = copyFrame(rect)
 
+    // A window that was already on the target screen is not clamped, so it has the size now
+    // and there is nothing to correct.
+    if (sizeApplied(win, rect)) return
+
     // Apply the size again once the window is on the target screen. The application only
     // accepts the larger size after it has handled the move on its own run loop, which it
     // cannot do while this function runs, so reapplying here in a loop changes nothing and
     // the attempts are scheduled instead. Each one reads the size back and stops once it
     // matches.
-    resize(win.id, rect, config.resizeAttempts)
+    resize(win, rect, config.resizeAttempts)
 }
 
-/** Reapply a size until the application accepts it, or the attempts run out. */
-function resize(id, rect, attempts) {
+/** Whether a window has the size of a rectangle, to the nearest point. */
+function sizeApplied(win, rect) {
+    const size = win.size
+    return Math.abs(size.w - rect.w) < 1 && Math.abs(size.h - rect.h) < 1
+}
+
+/**
+ * Reapply a size until the application accepts it, or the attempts run out.
+ *
+ * The window is held rather than looked up by id on each attempt: hs.window.allWindows()
+ * takes a fifth of a second, and an HSWindow still reports its frame and takes a new size
+ * long after it was obtained. Only properties set on one are lost, and none are set here.
+ */
+function resize(win, rect, attempts) {
     if (attempts <= 0) return
     hs.timer.doAfter(config.resizeDelay, () => {
-        const win = hs.window.allWindows().find((w) => w.id === id)
-        if (!win) return
+        try {
+            // The advice recorded where the window was put before these corrections ran.
+            // Bring that up to date, or the next move reads the difference as one made by
+            // hand.
+            const entry = history.get(win.id)
+            if (entry) entry.applied = copyFrame(win.frame)
 
-        // The advice recorded where the window was put before these corrections ran. Bring
-        // that up to date, or the next move reads the difference as one made by hand.
-        const entry = history.get(id)
-        if (entry) entry.applied = copyFrame(win.frame)
-
-        const size = win.size
-        if (Math.abs(size.w - rect.w) < 1 && Math.abs(size.h - rect.h) < 1) return
-        win.size = new HSSize(rect.w, rect.h)
-        resize(id, rect, attempts - 1)
+            if (sizeApplied(win, rect)) return
+            win.size = new HSSize(rect.w, rect.h)
+        } catch (e) {
+            // The window closed between attempts. Nothing left to correct.
+            return
+        }
+        resize(win, rect, attempts - 1)
     })
 }
 
 // MARK: - Windows among themselves
 
-/** Swap this window's frame with the one behind it. */
+/**
+ * Whether two windows can be moved around one another.
+ *
+ * macOS does not treat a fullscreen window as a window with a frame. It refuses to move
+ * one, and a window sent to a screen a fullscreen window occupies is taken into that
+ * window's space, after which it is not listed by hs.window.allWindows() nor by its own
+ * application. Neither is worth working around, so both are refused here.
+ *
+ * @param {HSWindow[]} windows  The windows taking part.
+ * @param {object[]} destinations  The screens windows are arriving on.
+ */
+function movable(windows, destinations) {
+    if (windows.some((w) => w.isFullscreen)) {
+        alert("A fullscreen window cannot be moved")
+        return false
+    }
+
+    // fullscreenScreenIds() enumerates every window, which takes a fifth of a second. Nothing
+    // is arriving on a screen when the windows stay where they are, so skip it in that case.
+    if (!destinations.length) return true
+
+    const occupied = fullscreenScreenIds()
+    if (destinations.some((s) => s && occupied.has(s.id))) {
+        alert("That screen is showing a fullscreen window")
+        return false
+    }
+    return true
+}
+
+/**
+ * Put two windows side by side on this window's screen: the other one on the left half,
+ * this one on the right.
+ *
+ * Hammerspoon 1 opened a chooser of the other windows from inside this function. Here the
+ * other window is a parameter, and the command asks for it, so the Spoon does no prompting.
+ */
+function tileWith(other, win) {
+    const window = win || focused()
+    if (!window || !other) return false
+    if (other.id === window.id) {
+        alert("A window cannot be tiled with itself")
+        return false
+    }
+    // The other window arrives on this window's screen, unless it is already there.
+    const crossing = window.screen && other.screen && window.screen.id !== other.screen.id
+    if (!movable([window, other], crossing ? [window.screen] : [])) return false
+
+    // Both halves are of this window's screen, so the other window may be crossing to it.
+    const screen = window.screen.frame
+    setFrameOnScreen(other, new HSRect(screen.x, screen.y, screen.w / 2, screen.h))
+    place(window, { cols: 2 }, { col: 1 })
+
+    // Choosing the other window took focus away from this one; give it back.
+    window.focus()
+    return true
+}
+
+/** Exchange two windows' positions and sizes, across screens as well as within one. */
+function swapWithWindow(other, win) {
+    const window = win || focused()
+    if (!window || !other) return false
+    if (other.id === window.id) {
+        alert("A window cannot be swapped with itself")
+        return false
+    }
+    // Each window arrives on the other's screen, unless they share one.
+    const crossing = window.screen && other.screen && window.screen.id !== other.screen.id
+    if (!movable([window, other], crossing ? [window.screen, other.screen] : [])) return false
+
+    const mine = copyFrame(window.frame)
+    const theirs = copyFrame(other.frame)
+
+    // Either window may be crossing to the other's screen, where a single frame assignment
+    // is clamped to the screen it is leaving.
+    setFrameOnScreen(window, theirs)
+    setFrameOnScreen(other, mine)
+
+    window.focus()
+    return true
+}
+
+/** Swap this window's position and size with the window behind it. */
 function swapWithPrevious(win) {
     const window = win || focused()
     if (!window) return false
@@ -603,12 +702,7 @@ function swapWithPrevious(win) {
         alert("No other window")
         return false
     }
-
-    const mine = window.frame
-    const theirs = other.frame
-    window.frame = theirs
-    other.frame = mine
-    return true
+    return swapWithWindow(other, window)
 }
 
 /** Focus the window that had focus before this one. */
@@ -886,6 +980,8 @@ module.exports = {
     fullscreenScreenIds,
     screenHasFullscreenWindow,
     // Windows among themselves.
+    tileWith,
+    swapWithWindow,
     swapWithPrevious,
     previousWindow,
     sendToBack,

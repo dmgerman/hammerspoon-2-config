@@ -224,7 +224,11 @@ const windowMenu = [
     { label: "Next screen", icon: "symbol:rectangle.on.rectangle", key: "space", command: "window-next-screen" },
     { label: "Prev screen", icon: "symbol:rectangle.on.rectangle", key: "B", command: "window-previous-screen" },
 
-    { label: "Swap", icon: "symbol:arrow.left.arrow.right", key: "S", command: "window-swap" },
+    { label: "Swap behind", icon: "symbol:arrow.left.arrow.right", key: "S", command: "window-swap-behind" },
+    // Both ask for the second window. The menu stays drawn, as everything here does, but
+    // gives up the keyboard until the chooser is answered.
+    { label: "Swap with", icon: "symbol:arrow.triangle.swap", key: "x", command: "window-swap-with" },
+    { label: "Tile with", icon: "symbol:rectangle.split.2x1", key: "t", command: "window-tile-with" },
     { label: "To back", icon: "symbol:square.on.square", key: "0", command: "window-send-to-back" },
     { label: "Prev window", icon: "symbol:arrow.uturn.left", key: "p", command: "window-previous" },
 

@@ -1117,6 +1117,12 @@ function openSession(menu, presenter, options) {
 function screenPresenter() {
     let win = null
     let hotkeys = []
+    // Binds the current page's keys. Set by present(), called again after a prompt.
+    let takeKeys = null
+    // Whether a prompt has the keyboard. Held across pages: a menu redraws itself while a
+    // chooser is up — a self-drawing button on its timer is enough — and the new page must
+    // not take back the keys the prompt is using.
+    let suspended = false
 
     function releaseKeys() {
         for (const hotkey of hotkeys) {
@@ -1207,24 +1213,45 @@ function screenPresenter() {
             // buttons, reached without and with shift. Ctrl reaches whatever a hold
             // reaches, so ctrl-a and ctrl-shift-a act on those same two buttons. Ctrl is
             // bound only where there is a hold action, leaving the chord free otherwise.
-            letters.forEach((letter, index) => {
-                if (!letter) return
-                const address = letter !== letter.toLowerCase() ? ["shift"] : []
-                const key = letter.toLowerCase()
+            //
+            // Kept as a function so the keys can be given up while a prompt is on screen
+            // and taken again afterwards, from the page that is still displayed.
+            takeKeys = () => {
+                letters.forEach((letter, index) => {
+                    if (!letter) return
+                    const address = letter !== letter.toLowerCase() ? ["shift"] : []
+                    const key = letter.toLowerCase()
 
-                bind(address, key, () => session.down(index), () => session.up(index))
-                if (session.hasAlt(index)) {
-                    bind(["ctrl", ...address], key, () => session.activate(index, "long"), null)
+                    bind(address, key, () => session.down(index), () => session.up(index))
+                    if (session.hasAlt(index)) {
+                        bind(["ctrl", ...address], key, () => session.activate(index, "long"), null)
+                    }
+                })
+                for (const key of s.cancelKeys) bind([], key, () => session.close(), null)
+                for (const key of s.backKeys) {
+                    bind([], key, () => { if (session.canPop()) session.pop() }, null)
                 }
-            })
-            for (const key of s.cancelKeys) bind([], key, () => session.close(), null)
-            for (const key of s.backKeys) {
-                bind([], key, () => { if (session.canPop()) session.pop() }, null)
             }
+            if (!suspended) takeKeys()
+        },
+
+        // A chooser or a text prompt has the keyboard, and a hotkey outranks it: the menu
+        // would answer the arrow keys meant for the chooser. So the menu stays drawn, as a
+        // reminder of where you are, but stops listening until the prompt is gone.
+        suspendKeys: function () {
+            suspended = true
+            releaseKeys()
+        },
+
+        resumeKeys: function () {
+            suspended = false
+            if (win && takeKeys && !hotkeys.length) takeKeys()
         },
 
         close: function () {
             releaseKeys()
+            takeKeys = null
+            suspended = false
             destroyWindow()
         }
     }
@@ -1235,6 +1262,10 @@ function screenPresenter() {
 let screenSession = null
 // Where the on-screen menu was when it was last hidden, so it reopens there.
 let screenPath = null
+// The presenter drawing it, kept so its keys can be suspended while a prompt is up.
+let screenKeys = null
+// Undoes the subscription to hs_interactive-gt's prompts. Null when not subscribed.
+let unwatchPrompts = null
 
 /**
  * Display a menu on screen, driven by the keyboard.
@@ -1247,7 +1278,15 @@ let screenPath = null
  */
 function showOnScreen(menu, options) {
     hideScreen()
-    screenSession = openSession(menu, screenPresenter(), options)
+    watchPrompts()
+
+    const presenter = screenPresenter()
+    screenKeys = presenter
+    screenSession = openSession(menu, presenter, options)
+
+    // A menu opened from inside a prompt — the M-x chooser runs a command that shows one —
+    // must not take the keys the prompt is using.
+    if (promptIsOpen()) presenter.suspendKeys()
 
     // Reopen where the menu was last left. A Stream Deck keeps its place because being
     // displayed is its whole state; the on-screen menu was starting over at the root only
@@ -1266,7 +1305,34 @@ function hideScreen() {
         screenSession.close()
         screenSession = null
     }
+    screenKeys = null
     return module.exports
+}
+
+/**
+ * Give up the menu's keys while hs_interactive-gt has a prompt on screen, and take them
+ * again when it goes away. See the presenter's suspendKeys for why.
+ *
+ * Subscribed on the first menu rather than at start(), since hs_interactive-gt loads this
+ * Spoon and is not finished being set up when start() runs.
+ */
+function watchPrompts() {
+    if (unwatchPrompts) return
+
+    const spoon = interactive()
+    if (!spoon || !spoon.onPromptChange) return
+
+    unwatchPrompts = spoon.onPromptChange((open) => {
+        if (!screenKeys) return
+        if (open) screenKeys.suspendKeys()
+        else screenKeys.resumeKeys()
+    })
+}
+
+/** Whether hs_interactive-gt has a prompt on screen. */
+function promptIsOpen() {
+    const spoon = interactive()
+    return Boolean(spoon && spoon.promptIsOpen && spoon.promptIsOpen())
 }
 
 /** Forget where the on-screen menu was, so the next one opens at its root. */
@@ -1292,6 +1358,10 @@ function start() {
 
 function stop() {
     hideScreen()
+    if (unwatchPrompts) {
+        unwatchPrompts()
+        unwatchPrompts = null
+    }
     return module.exports
 }
 
