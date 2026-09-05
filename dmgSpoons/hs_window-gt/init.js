@@ -31,6 +31,17 @@ const config = {
     isolationColor: "#000000",
     isolationOpacity: 0.85,
 
+    // The ring drawn around the pointer after it is moved, so it can be found again. Its
+    // size is the diameter, in pixels, and its width the thickness of the line.
+    //
+    // hs.ui windows cannot ignore mouse events, so a click inside the ring lands on it
+    // rather than on the window beneath. mouseHighlightSeconds is therefore also how long
+    // that square is unclickable, and is the reason it is short.
+    mouseHighlightColor: "#FF0000",
+    mouseHighlightSize: 60,
+    mouseHighlightWidth: 4,
+    mouseHighlightSeconds: 0.5,
+
     // Seconds between sweeps for records of windows that have closed.
     forgetInterval: 120,
 
@@ -60,6 +71,11 @@ let recording = true
 
 // Isolation overlays, one per screen.
 let isolationWindows = []
+
+// The ring drawn around the pointer, and the timer that takes it away. One at a time: a
+// second move removes the first ring before drawing its own.
+let highlightWindow = null
+let highlightTimer = null
 
 // Held: a timer with no reference left is collected before it fires.
 let forgetTimer = null
@@ -741,24 +757,105 @@ function sendToBack(win) {
 }
 
 // MARK: - The mouse
+//
+// hs.mouse.setAbsolutePosition takes two numbers, not a point. Its coordinates are the
+// ones window frames are in — the origin at the top left of the primary screen, y
+// increasing downwards — so a frame's centre can be passed as it stands.
 
-/** Put the pointer in the middle of a window. */
-function centerMouse(win) {
-    const window = win || focused()
-    if (!window) return false
-    const frame = window.frame
-    hs.mouse.setAbsolutePosition({ x: frame.x + frame.w / 2, y: frame.y + frame.h / 2 })
+/** Take away the ring around the pointer, if one is displayed. */
+function mouseHighlightClear() {
+    if (highlightTimer) {
+        highlightTimer.stop()
+        highlightTimer = null
+    }
+    if (highlightWindow) {
+        highlightWindow.destroy()
+        highlightWindow = null
+    }
+}
+
+/**
+ * Draw a ring around a point for `config.mouseHighlightSeconds`.
+ *
+ * The pointer has just jumped across the desktop, and the eye has not followed it; the
+ * ring says where it landed.
+ *
+ * A stroke and no fill: UICircle draws the fill instead of the stroke when both are given,
+ * so a filled circle cannot be a ring. The window is a stroke-width larger than the circle,
+ * since the line is centred on the circle's edge and half of it would otherwise be clipped.
+ *
+ * As with the isolation overlays, an hs.ui window cannot ignore mouse events, so while the
+ * ring is displayed a click inside its square lands on the ring rather than on the window
+ * underneath. This is why it is measured in fractions of a second.
+ *
+ * @param {number} x Centre, in screen coordinates.
+ * @param {number} y Centre, in screen coordinates.
+ */
+function mouseHighlight(x, y) {
+    mouseHighlightClear()
+
+    const diameter = config.mouseHighlightSize
+    const width = config.mouseHighlightWidth
+    const box = diameter + width
+    const rect = toUIRect({ x: x - box / 2, y: y - box / 2, w: box, h: box })
+
+    highlightWindow = hs.ui.window({ x: rect.x, y: rect.y, w: rect.w, h: rect.h })
+        .titled(false)
+        .level("status")
+        .backgroundColor("#00000000")
+        .hstack()
+        .spacing(0)
+    highlightWindow.circle()
+        .stroke(HSColor.hex(config.mouseHighlightColor))
+        .strokeWidth(width)
+        .frame({ w: diameter, h: diameter })
+    highlightWindow.end()
+    highlightWindow.show()
+
+    highlightTimer = hs.timer.doAfter(config.mouseHighlightSeconds, () => {
+        highlightTimer = null
+        mouseHighlightClear()
+    })
+}
+
+/** Put the pointer at a point in screen coordinates, and ring it. */
+function mouseMoveTo(x, y) {
+    hs.mouse.setAbsolutePosition(x, y)
+    mouseHighlight(x, y)
     return true
 }
 
+/** Put the pointer in the middle of a window. */
+function mouseWindowCenter(win) {
+    const window = win || focused()
+    if (!window) return false
+    const frame = window.frame
+    return mouseMoveTo(frame.x + frame.w / 2, frame.y + frame.h / 2)
+}
+
 /** Put the pointer in the middle of the next window in order. */
-function centerMouseNext() {
+function mouseWindowCenterNext() {
     const ordered = hs.window.orderedWindows()
     if (ordered.length < 2) {
         alert("No other window")
         return false
     }
-    return centerMouse(ordered[1])
+    return mouseWindowCenter(ordered[1])
+}
+
+/**
+ * Put the pointer in the middle of a screen.
+ *
+ * The focused window's screen, since that is the one being worked on, and the primary
+ * screen when nothing is focused. fullFrame rather than frame: the middle of the display
+ * itself, not of the area left over by the menu bar and the Dock.
+ */
+function mouseScreenCenter(screen) {
+    const window = focused()
+    const target = screen || (window && window.screen) || hs.screen.primary()
+    if (!target) return false
+    const frame = target.fullFrame
+    return mouseMoveTo(frame.x + frame.w / 2, frame.y + frame.h / 2)
 }
 
 // MARK: - Isolation
@@ -931,6 +1028,7 @@ function start() {
 function stop() {
     removeAdvice()
     stopIsolation()
+    mouseHighlightClear()
     if (forgetTimer) {
         forgetTimer.stop()
         forgetTimer = null
@@ -986,8 +1084,11 @@ module.exports = {
     previousWindow,
     sendToBack,
     // The mouse.
-    centerMouse,
-    centerMouseNext,
+    mouseWindowCenter,
+    mouseWindowCenterNext,
+    mouseScreenCenter,
+    mouseMoveTo,
+    mouseHighlight,
     // Isolation.
     toggleIsolation,
     startIsolation,

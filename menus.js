@@ -235,8 +235,9 @@ const windowMenu = [
 
     { label: "Isolate", icon: "symbol:moon.fill", key: "I", command: "window-toggle-isolation" },
     { label: "Info", icon: "symbol:info.circle", key: "i", command: "window-info" },
-    { label: "Centre mouse", icon: "symbol:cursorarrow", key: "M", command: "window-center-mouse" },
-    { label: "Mouse next", icon: "symbol:cursorarrow.motionlines", key: "N", command: "window-center-mouse-next" },
+    { label: "Centre mouse", icon: "symbol:cursorarrow", key: "M", command: "mouse-window-center" },
+    { label: "Mouse next", icon: "symbol:cursorarrow.motionlines", key: "N", command: "mouse-window-center-next" },
+    { label: "Mouse screen", icon: "symbol:cursorarrow.rays", key: "C", command: "mouse-screen-center" },
 
     { label: "Thirds", icon: "symbol:square.split.1x2", key: "3", children: () => thirdsMenu },
     { label: "Quadrants", icon: "symbol:square.split.2x2", key: "4", children: () => quadrantsMenu },

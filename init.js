@@ -507,6 +507,12 @@ interactive.use("hs_menu-gt", {
         });
 
         interactive.define({
+            name: "menu-show-music",
+            doc: "Show the music menu on screen.",
+            fn: () => menu.toggleOnScreen(menus.musicMenu, { name: "Music" })
+        });
+
+        interactive.define({
             name: "menu-hide",
             doc: "Dismiss the on-screen menu.",
             fn: () => menu.hideScreen()
@@ -516,6 +522,7 @@ interactive.use("hs_menu-gt", {
     // The same chord shows the menu and dismisses it, since menu-show toggles.
     keys: {
         "cmd-ctrl-alt z": "menu-show",
+        "cmd-ctrl-alt m": "menu-show-music",
         "alt w": "menu-show-windows"
     }
 });
@@ -571,7 +578,7 @@ interactive.use("hs_window-gt", {
         onWindow("window-previous-screen", "Move a window to the previous screen.", (w) => win.moveToScreen("previous", w));
         onWindow("window-swap-behind", "Swap a window's position with the window behind it.", (w) => win.swapWithPrevious(w));
         onWindow("window-send-to-back", "Put a window behind all the others.", (w) => win.sendToBack(w));
-        onWindow("window-center-mouse", "Put the pointer in the middle of a window.", (w) => win.centerMouse(w));
+        onWindow("mouse-window-center", "Put the pointer in the middle of a window.", (w) => win.mouseWindowCenter(w));
         onWindow("window-info", "Show the application, title, screen and frame of a window.", (w) => win.info(w));
 
         onWindow("window-toggle-fullscreen", "Enter or leave fullscreen for a window.", (w) => w.toggleFullscreen());
@@ -618,9 +625,15 @@ interactive.use("hs_window-gt", {
         });
 
         interactive.define({
-            name: "window-center-mouse-next",
+            name: "mouse-window-center-next",
             doc: "Put the pointer in the middle of the next window.",
-            fn: () => win.centerMouseNext()
+            fn: () => win.mouseWindowCenterNext()
+        });
+
+        interactive.define({
+            name: "mouse-screen-center",
+            doc: "Put the pointer in the middle of the focused window's screen.",
+            fn: () => win.mouseScreenCenter()
         });
 
         interactive.define({
