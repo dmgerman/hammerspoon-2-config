@@ -13,6 +13,7 @@ Spoons written for one person's machine are in =../dmgSpoons/= instead.
 | [[file:hs_interactive-gt/][hs_interactive-gt]] | Named commands with interactive argument readers, key bindings by command name, and an M-x style command chooser. Also loads every other Spoon, through =use()=. |
 | [[file:hs_menu-gt/][hs_menu-gt]]               | Hierarchical menus of named commands, independent of the device that displays them, with a keyboard-driven on-screen presenter. |
 | [[file:hs_streamdeck-gt/][hs_streamdeck-gt]]   | Displays =hs_menu-gt= menus on Elgato Stream Deck hardware.                                                     |
+| [[file:hs_window-gt/][hs_window-gt]]           | Window placement in a grid, resizing, movement between screens, swapping windows, pointer positioning, and a winner-mode style undo history. |
 | [[file:hs_countdown-gt/][hs_countdown-gt]]     | Countdown timer with a screen-edge progress bar, menu bar item, periodic warnings and an end-of-time alert.     |
 | [[file:hs_time-gt/][hs_time-gt]]               | A large clock floating above everything, shown briefly on demand or until dismissed.                           |
 | [[file:hs_emacs-gt/][hs_emacs-gt]]             | Runs elisp through =emacsclient=, forwards keys into Emacs, and displays what Emacs returns. The elisp itself is defined by the configuration, so those commands are in =init.js=. |
