@@ -309,6 +309,21 @@ const chromeMenu = [
     tab("Teams", "http://teams.microsoft.com/", "teams.png", "t")
 ]
 
+// MARK: - Clipboard
+//
+// The history itself is a chooser, so the button that opens it closes the on-screen menu
+// first, as Choose album does. The rest change the history in place and leave the menu up.
+
+const clipboardMenu = [
+    {
+        label: "History", icon: "symbol:list.bullet", key: "v",
+        command: "clipboard-show", navigate: "stay", keepOpen: false
+    },
+    stays({ label: "Paste-on-select", icon: "symbol:arrow.down.doc", key: "s", command: "clipboard-paste-on-select-toggle" }),
+    stays({ label: "Drop last", icon: "symbol:delete.left", key: "d", command: "clipboard-delete-last" }),
+    stays({ label: "Clear all", icon: "symbol:trash", key: "c", command: "clipboard-clear" })
+]
+
 // MARK: - Root
 //
 // The order follows largeMenu in dmg-streamdeck.lua.
@@ -408,6 +423,9 @@ const rootMenu = [
     todo("Whisper", "whisper.png", "the whisper dictation Spoon"),
     { label: "Paste", icon: "symbol:doc.on.clipboard", key: "v", command: "paste" },
 
+    // Capital V, since v sends cmd-v: the same letter for the same subject.
+    { label: "Clipboard", icon: "symbol:list.clipboard", key: "V", children: clipboardMenu },
+
     clockButton
 ]
 
@@ -422,6 +440,7 @@ module.exports = {
     teachingMenu,
     emacsMenu,
     chromeMenu,
+    clipboardMenu,
     musicMenu,
     applicationsMenu
 }

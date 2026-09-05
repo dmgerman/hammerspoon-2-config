@@ -181,6 +181,49 @@ interactive.use("hs_network-gt", {
     }
 });
 
+// A port of ClipboardTool.spoon, loaded in ~/.hammerspoon by dmg_load_clipboard(). The
+// two chords are the ones it bound there. Everything the chooser offers is also a
+// command, so the history can be managed without opening it.
+interactive.use("hs_clipboard-gt", {
+    commands: (interactive, clipboard) => {
+        interactive.define({
+            name: "clipboard-show",
+            doc: "Open the clipboard history.",
+            fn: () => clipboard.historyShow()
+        });
+
+        interactive.define({
+            name: "clipboard-toggle",
+            doc: "Open the clipboard history, or close it when it is already open.",
+            fn: () => clipboard.historyToggle()
+        });
+
+        interactive.define({
+            name: "clipboard-clear",
+            doc: "Empty the clipboard history and the pasteboard.",
+            fn: () => clipboard.historyClear()
+        });
+
+        interactive.define({
+            name: "clipboard-delete-last",
+            doc: "Drop the newest entry, for when something was copied that should not have been.",
+            fn: () => clipboard.historyLastDelete()
+        });
+
+        interactive.define({
+            name: "clipboard-paste-on-select-toggle",
+            doc: "Whether selecting an entry also types cmd-V into the window underneath.",
+            fn: () => clipboard.pasteOnSelectToggle()
+        });
+    },
+
+    // v1 had these on show_clipboard and toggle_clipboard.
+    keys: {
+        "cmd-ctrl-alt v": "clipboard-show",
+        "cmd-ctrl-alt-shift v": "clipboard-toggle"
+    }
+});
+
 // Menus are defined once and displayed on any device: on screen by hs_menu-gt, and on the
 // Stream Deck by hs_streamdeck-gt. Editing menus.js takes effect on the next reload.
 const menus = require(hs.appinfo.configDir + "/menus.js");
