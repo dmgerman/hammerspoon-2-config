@@ -343,7 +343,7 @@ const musicMenu = [
     { label: "Next track", icon: "symbol:forward.fill", key: "n", command: "appleMusic-next-track" },
     { label: "Prev album", icon: "symbol:backward.end.fill", key: "B", command: "appleMusic-previous-album" },
     { label: "Next album", icon: "symbol:forward.end.fill", key: "N", command: "appleMusic-next-album" },
-    { label: "Now playing", icon: "symbol:info.circle", key: "i", command: "appleMusic-now-playing" },
+    { label: "Now playing", icon: "symbol:info.circle", key: "i", command: "appleMusic-now-playing", keepOpen: false },
 
     { label: "Volume", icon: "symbol:speaker.wave.2", key: "v", command: "appleMusic-volume" },
     { label: "Vol +20", icon: "symbol:speaker.plus.fill", key: "u", command: "appleMusic-adjust-volume", args: [20] },
@@ -351,9 +351,9 @@ const musicMenu = [
     { label: "Vol +5", icon: "symbol:speaker.plus", key: "U", command: "appleMusic-adjust-volume", args: [5] },
     { label: "Vol −5", icon: "symbol:speaker.minus", key: "D", command: "appleMusic-adjust-volume", args: [-5] },
 
-    { label: "Random album", icon: "symbol:shuffle", key: "r", command: "appleMusic-random-album" },
+    { label: "Random album", icon: "symbol:shuffle", key: "r", command: "appleMusic-random-album", keepOpen: false },
     { label: "Add current", icon: "symbol:plus.circle", key: "a", command: "appleMusic-add-current-album" },
-    { label: "Auto-play", icon: "symbol:infinity", key: "t", command: "appleMusic-toggle-auto-play" },
+    { label: "Auto-play", icon: "symbol:infinity", key: "t", command: "appleMusic-toggle-auto-play", keepOpen: false },
 
     // The exception to `stays`, and the case that separated the two questions: the chooser
     // takes the keyboard, so the on-screen menu has to close — but closing is all it should
@@ -433,6 +433,14 @@ const rootMenu = [
 
     // Capital V, since v sends cmd-v: the same letter for the same subject.
     { label: "Clipboard", icon: "symbol:list.clipboard", key: "V", children: clipboardMenu },
+
+    // Hammerspoon 2 itself. Capital R, since lower case r is Chrome; the console keeps c,
+    // which nothing else in this menu uses.
+    // Neither carries an icon: nothing in icons/ stands for reloading or for this console,
+    // and an icon already used for something else would say the wrong thing. The labels are
+    // the buttons.
+    { label: "Reload HS2", key: "R", command: "hammerspoon-reload" },
+    { label: "HS2 Console", key: "c", command: "hammerspoon-console-toggle" },
 
     clockButton
 ]

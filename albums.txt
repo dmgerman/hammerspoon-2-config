@@ -142,7 +142,8 @@ https://music.apple.com/ca/album/they-want-my-soul/1589225354 # Spoon — They W
 https://music.apple.com/ca/album/led-zeppelin-iv-remastered/580708175 # Led Zeppelin — Led Zeppelin IV (Remastered)
 # Led Zeppelin|Led Zeppelin II (Remastered)
 https://music.apple.com/ca/album/led-zeppelin-ii-remastered/580708374 # Led Zeppelin — Led Zeppelin II (Remastered)
-St. Vincent|St. Vincent
+#St. Vincent|St. Vincent
+https://music.apple.com/ca/album/st-vincent/1445873566
 Queens of the Stone Age|...Like Clockwork
 # The Future Sound Of London|Lifeforms
 https://music.apple.com/ca/album/lifeforms/724588964 # The Future Sound Of London — Lifeforms

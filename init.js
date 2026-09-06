@@ -707,10 +707,40 @@ interactive.define({
     })
 });
 
+// Hammerspoon 2 itself.
+//
+// hs.openConsole() and hs.closeConsole() are one-way, and the application reports no
+// console state, so the toggle asks the window list instead: the console is Hammerspoon
+// 2's own window titled "Console". Reading it that way also stays right when the window
+// was opened or closed from the menu bar rather than from here.
+interactive.define({
+    name: "hammerspoon-reload",
+    doc: "Reload the Hammerspoon 2 configuration.",
+    fn: () => hs.reload()
+});
+
+interactive.define({
+    name: "hammerspoon-console-toggle",
+    doc: "Open the Hammerspoon 2 console, or close it when it is already open.",
+    fn: () => {
+        const app = hs.application.matchingBundleID("net.tenshu.Hammerspoon-2");
+        const open = app ? app.allWindows.some((w) => w.title === "Console") : false;
+        if (open) {
+            hs.closeConsole();
+        } else {
+            hs.openConsole();
+        }
+        return !open;
+    }
+});
 
 // Only the chooser gets a key while Hammerspoon 1 is still running: its hotkeys are
 // registered system-wide and the two would fight over any chord bound in both.
-interactive.setKeys({ "cmd-ctrl-alt x": "commands-execute" });
+interactive.setKeys({
+    "cmd-ctrl-alt x": "commands-execute",
+    "cmd-ctrl-alt r": "hammerspoon-reload",
+    "cmd-ctrl-alt c": "hammerspoon-console-toggle"
+});
 
 interactive.use.report();
 
@@ -722,9 +752,8 @@ console.log("Finished loading-------------------------");
 //     console.log("INIT.JS appWatcher eventHandler: " + eventName + " " + appObject.title);
 // }
 
-// hs.application.addWatcher("willLaunch", eventHandler);
-// hs.application.addWatcher("didLaunch", eventHandler);
-// hs.application.addWatcher("didTerminate", eventHandler);
+// The handler is called for every application event, so it does its own selecting.
+// hs.application.addWatcher(eventHandler);
 
 // const safari = hs.application.matchingBundleID("com.apple.Safari");
 // function handler(notification, element) {

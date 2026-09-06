@@ -68,13 +68,16 @@ win.close();
 ### Application Watchers
 
 ```javascript
+// One handler receives every application event; select the ones of interest in it.
+// addWatcher takes the handler alone — passing an event name as a first argument throws
+// "The provided handler must be a function".
 function eventHandler(eventName, appObject) {
+    if (eventName !== "didLaunch") return;
     console.log(`App ${appObject.title}: ${eventName}`);
 }
 
-hs.application.addWatcher("willLaunch", eventHandler);
-hs.application.addWatcher("didLaunch", eventHandler);
-hs.application.addWatcher("didTerminate", eventHandler);
+hs.application.addWatcher(eventHandler);
+hs.application.removeWatcher(eventHandler);
 ```
 
 ### Accessibility (AX) Watchers
