@@ -1013,14 +1013,18 @@ function start() {
     // For previousWindow(): each time the focused window changes, what was current becomes
     // previous. Driven by application activation, which is the closest event available —
     // moving between two windows of the same application is not seen.
+    //
+    // hs.application.addWatcher takes one handler and reports every event to it, so the
+    // event this one cares about is selected here rather than at registration.
     if (!focusWatcher) {
-        focusWatcher = () => {
+        focusWatcher = (event) => {
+            if (event !== "didActivate") return
             const window = hs.window.focusedWindow()
             if (!window || window.id === currentFocusedId) return
             previousFocusedId = currentFocusedId
             currentFocusedId = window.id
         }
-        hs.application.addWatcher("didActivate", focusWatcher)
+        hs.application.addWatcher(focusWatcher)
     }
     return module.exports
 }
@@ -1034,7 +1038,7 @@ function stop() {
         forgetTimer = null
     }
     if (focusWatcher) {
-        hs.application.removeWatcher("didActivate", focusWatcher)
+        hs.application.removeWatcher(focusWatcher)
         focusWatcher = null
     }
     return module.exports
