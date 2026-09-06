@@ -21,9 +21,15 @@ const config = {
     // Which Apple Music storefront to search. A wrong one finds nothing.
     storefront: "ca",
 
-    // Placeholders: {name}, {artist}, {album}.
+    // Placeholders: {name}, {artist}, {album}, {url}.
     trackFormat: "{name} - {artist} [{album}]",
+    // Used in place of trackFormat once the album's page has been found.
+    trackURLFormat: "{name} - {artist} [{album}]\n{url}",
     alertDuration: 3,
+
+    // How far the length the API reports may sit from the length Music reports before the
+    // two are taken to be different recordings. Seconds.
+    durationTolerance: 2,
 
     // nextAlbum and previousAlbum skip a track at a time until the album changes. The
     // limit stops a long playlist of single-track albums from skipping forever.
@@ -144,15 +150,20 @@ function previousTrack() {
 /**
  * The current track.
  *
- * @returns {?object} `{name, artist, album}`, or null when nothing is playing.
+ * The duration is read along with the names because it is what tells one release of a track
+ * from another when the album's page is looked up.
+ *
+ * @returns {?object} `{name, artist, album, duration}`, or null when nothing is playing.
+ *          `duration` is in seconds, and is null when Music does not report one.
  */
 function currentTrack() {
     if (!isRunning()) return null
-    // One call rather than three, so the three fields describe the same track even if it
-    // changes while they are read. Tab-separated: none of the three may contain a tab.
+    // One call rather than four, so the four fields describe the same track even if it
+    // changes while they are read. Tab-separated: none of the fields may contain a tab.
     const line = tellMusic(
         'try\n' +
-        'return (get name of current track) & "\\t" & (get artist of current track) & "\\t" & (get album of current track)\n' +
+        'return (get name of current track) & "\\t" & (get artist of current track) & "\\t" ' +
+        '& (get album of current track) & "\\t" & (get duration of current track)\n' +
         'on error\n' +
         'return ""\n' +
         'end try'
@@ -161,20 +172,43 @@ function currentTrack() {
 
     const parts = String(line).split("\t")
     if (parts.length < 3) return null
-    return { name: parts[0], artist: parts[1], album: parts[2] }
+    const duration = Number(parts[3])
+    return {
+        name: parts[0],
+        artist: parts[1],
+        album: parts[2],
+        duration: Number.isFinite(duration) ? duration : null
+    }
 }
 
-function formatTrack(track) {
-    return config.trackFormat
+/**
+ * A track as one line of text.
+ *
+ * @param {object} track From `currentTrack`.
+ * @param {?string} [url] The album's page. Given one, `config.trackURLFormat` is used.
+ */
+function formatTrack(track, url) {
+    const format = url ? config.trackURLFormat : config.trackFormat
+    return format
         .replace("{name}", track.name)
         .replace("{artist}", track.artist)
         .replace("{album}", track.album)
+        .replace("{url}", url || "")
 }
 
-/** The current track as `config.trackFormat` describes it, or null. */
+/**
+ * The current track as text, with the album's page appended once it is known.
+ *
+ * Asynchronous because the URL is not something Music holds: it has to be looked up. The
+ * promise resolves to `config.trackFormat` alone rather than rejecting when the lookup
+ * finds nothing, so a track outside the catalogue still describes itself.
+ *
+ * @returns {Promise<?string>} Null when nothing is playing.
+ */
 function getCurrentTrack() {
     const track = currentTrack()
-    return track ? formatTrack(track) : null
+    if (!track) return Promise.resolve(null)
+    return resolveAlbumURL(track).then((url) => formatTrack(track, url))
 }
 
 function getCurrentArtist() {
@@ -187,7 +221,13 @@ function getCurrentAlbum() {
     return track ? track.album : null
 }
 
-/** Show the current track, and copy the same text to the pasteboard, as version 1 did. */
+/**
+ * Show the current track, and copy the same text to the pasteboard, as version 1 did.
+ *
+ * Both happen once the album's URL has been looked up, so there is one alert rather than
+ * one for the names and another for the URL. A lookup that finds nothing, or fails, still
+ * shows the names: the promise resolves to null rather than rejecting.
+ */
 function showCurrentTrack() {
     if (!requireRunning()) return module.exports
     const track = currentTrack()
@@ -195,9 +235,17 @@ function showCurrentTrack() {
         alert("Nothing is playing")
         return module.exports
     }
-    const text = formatTrack(track)
-    hs.pasteboard.writeString(text)
-    alert(text)
+
+    resolveAlbumURL(track).then((url) => {
+        const text = formatTrack(track, url)
+        hs.pasteboard.writeString(text)
+        alert(text)
+    }).catch((e) => {
+        console.error(`[hs_appleMusic-gt] showing ${track.artist} — ${track.name} failed: ${e}`)
+        const text = formatTrack(track)
+        hs.pasteboard.writeString(text)
+        alert(text)
+    })
     return module.exports
 }
 
@@ -449,7 +497,13 @@ function chooseAlbum(path) {
     return module.exports
 }
 
-/** Append the album now playing to the list, unless it is already there. */
+/**
+ * Append the album now playing to the list, unless it is already there.
+ *
+ * Written as a URL where the album can be identified in the catalogue, because a URL names
+ * one album and a `Band|Album` line names whichever release a search happens to return. The
+ * name is kept as the line's comment, so the list stays readable.
+ */
 function addCurrentAlbum(path) {
     if (!requireRunning()) return module.exports
 
@@ -460,22 +514,131 @@ function addCurrentAlbum(path) {
     }
 
     const file = path || config.albumListPath
-    const already = readAlbums(file).some((entry) =>
-        entry.kind === "name" &&
-        entry.band.toLowerCase() === track.artist.toLowerCase() &&
-        entry.album.toLowerCase() === track.album.toLowerCase())
+    const name = `${track.artist} — ${track.album}`
 
-    if (already) {
-        alert(`Already listed: ${track.artist} — ${track.album}`)
-        return module.exports
-    }
+    resolveAlbumURL(track).then((url) => {
+        const albumID = url ? albumIDFromURL(url) : null
+        const already = readAlbums(file).some((entry) => entry.kind === "url"
+            ? albumID !== null && albumIDFromURL(entry.url) === albumID
+            : same(entry.band, track.artist) && same(entry.album, track.album))
 
-    hs.fs.append(file, `${track.artist}|${track.album}\n`)
-    alert(`Added: ${track.artist} — ${track.album}`)
+        if (already) {
+            alert(`Already listed: ${name}`)
+            return
+        }
+
+        hs.fs.append(file, url ? `${url} # ${name}\n` : `${track.artist}|${track.album}\n`)
+        alert(`Added: ${name}`)
+    }).catch((e) => {
+        console.error(`[hs_appleMusic-gt] adding ${name} failed: ${e}`)
+        alert(`Could not add ${name}`)
+    })
+
     return module.exports
 }
 
 // MARK: - Finding an album in the Apple Music catalogue
+
+/** Text compared the way the catalogue's spelling of it should be forgiven: not at all. */
+function same(a, b) {
+    return String(a).trim().toLowerCase() === String(b).trim().toLowerCase()
+}
+
+/** Ask the iTunes API for `path`, and return its results, or [] if the request failed. */
+function iTunesResults(path, description) {
+    return hs.http.get(`https://itunes.apple.com/${path}`).then((response) => {
+        if (!response || response.status !== 200) {
+            console.error(`[hs_appleMusic-gt] ${description}: HTTP ${response ? response.status : "no response"}`)
+            return []
+        }
+        try {
+            return JSON.parse(response.body).results || []
+        } catch (e) {
+            console.error(`[hs_appleMusic-gt] ${description}: unreadable response`)
+            return []
+        }
+    }).catch((e) => {
+        console.error(`[hs_appleMusic-gt] ${description} failed: ${e}`)
+        return []
+    })
+}
+
+/** The catalogue identifier an album URL ends in, or null. */
+function albumIDFromURL(url) {
+    const match = /\/album\/[^/?#]+\/(\d+)/.exec(String(url))
+    return match ? match[1] : null
+}
+
+/**
+ * The Apple Music page of the album a track belongs to.
+ *
+ * Music itself cannot answer this. Its scripting interface describes a track by its names,
+ * its length and its position, and holds no catalogue address for it; `URL track`'s address
+ * belongs to radio streams. So the track is searched for and identified by what Music does
+ * report.
+ *
+ * The track is searched for rather than the album, because a search for an album name
+ * returns that album beside its deluxe, anniversary and remastered editions with no way to
+ * tell which one is playing. A track carries a length, and a length separates a remaster
+ * from the release it remasters. Where the length still does not decide it, the album name
+ * does, and where neither does, nothing is returned: a wrong album URL would be written to
+ * the list and played from then on, which is worse than no URL at all.
+ *
+ * The album is then looked up by identifier, for its own page rather than the track's page
+ * within it. Both addresses reach the same album, but only the album's carries the album's
+ * name, and `labelFromURL` reads the name out of the address.
+ *
+ * @param {object} track From `currentTrack`.
+ * @returns {Promise<?string>} The album's URL, or null when it could not be identified.
+ */
+function resolveAlbumURL(track) {
+    if (!track || !track.name || !track.artist) return Promise.resolve(null)
+
+    const term = hs.http.encodeForQuery(`${track.artist} ${track.name}`)
+    const search = `search?term=${term}&entity=song&limit=${config.searchLimit}` +
+        `&country=${config.storefront}`
+
+    return iTunesResults(search, `searching for ${track.artist} — ${track.name}`).then((results) => {
+        const named = results.filter((r) => same(r.trackName, track.name) && same(r.artistName, track.artist))
+        if (!named.length) return null
+
+        const sameLength = (r) => track.duration !== null &&
+            Number.isFinite(r.trackTimeMillis) &&
+            Math.abs(r.trackTimeMillis / 1000 - track.duration) <= config.durationTolerance
+        const sameAlbum = (r) => same(r.collectionName, track.album)
+
+        // Both agreeing identifies the release. Either alone is taken only when it is the
+        // one candidate it points at, so that a guess is never made between two.
+        const byBoth = named.filter((r) => sameLength(r) && sameAlbum(r))
+        const byLength = named.filter(sameLength)
+        const byAlbum = named.filter(sameAlbum)
+
+        let chosen = null
+        if (byBoth.length) chosen = byBoth[0]
+        else if (byLength.length === 1) chosen = byLength[0]
+        else if (byAlbum.length === 1) chosen = byAlbum[0]
+
+        if (!chosen || !chosen.collectionId) return null
+
+        const lookup = `lookup?id=${chosen.collectionId}&entity=album&country=${config.storefront}`
+        return iTunesResults(lookup, `looking up album ${chosen.collectionId}`).then((albums) => {
+            const album = albums.find((a) => a.wrapperType === "collection" && a.collectionViewUrl)
+            // The trailing ?uo=4 is Apple's affiliate marker, and is of no use in the list.
+            return album ? String(album.collectionViewUrl).split("?")[0] : null
+        })
+    })
+}
+
+/**
+ * The Apple Music page of the album now playing.
+ *
+ * @returns {Promise<?string>} Null when nothing is playing, or when the album could not be
+ *          identified.
+ */
+function currentAlbumURL() {
+    const track = currentTrack()
+    return track ? resolveAlbumURL(track) : Promise.resolve(null)
+}
 
 /**
  * Ask the iTunes Search API which album this is.
@@ -513,7 +676,6 @@ function resolveAlbum(band, album) {
             return null
         }
 
-        const same = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase()
         const exact = results.filter((r) => same(r.collectionName, album) && same(r.artistName, band))
 
         let chosen
@@ -745,6 +907,8 @@ module.exports = {
     getCurrentArtist,
     getCurrentAlbum,
     showCurrentTrack,
+    currentAlbumURL,
+    resolveAlbumURL,
     // Volume.
     getVolume,
     showVolume,

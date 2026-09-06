@@ -81,9 +81,17 @@ named one by its band.
 
 ** addCurrentAlbum([path])
 
-Append the album now playing as =Band|Album=, unless a named entry already matches it. A
-URL entry for the same album is not recognised as a duplicate, since it holds no artist or
-album name.
+Append the album now playing, unless the list already holds it. Written as a URL line with
+the name as its comment where the album can be found in the catalogue, and as =Band|Album=
+where it cannot. A URL is preferred because it names one release: a =Band|Album= line is
+searched for again at play time, and the search may land on a deluxe or remastered edition
+instead.
+
+Appending happens once the URL has been looked up, so it is not immediate.
+
+A URL entry is recognised as a duplicate by the album identifier its address ends in, and a
+named entry by its artist and album. An album already listed as a URL is therefore not
+recognised when the lookup fails and the name is what would be written.
 
 * Playback
 
@@ -105,10 +113,36 @@ stops meanwhile.
 
 * What is playing
 
-=currentTrack()= returns =({name, artist, album})= or null. =getCurrentTrack()= formats it
-with =config.trackFormat=; =getCurrentArtist()= and =getCurrentAlbum()= return one field.
+=currentTrack()= returns =({name, artist, album, duration})= or null, where =duration= is in
+seconds. =getCurrentArtist()= and =getCurrentAlbum()= return one field.
 
-=showCurrentTrack()= displays it and copies the same text to the pasteboard.
+=getCurrentTrack()= returns a *promise* of the track as text, and =showCurrentTrack()=
+displays that text and copies it to the pasteboard. Both are asynchronous because the text
+carries the album's Apple Music page, and Music does not know it — see below. The promise
+resolves to =config.trackFormat= alone when the page cannot be found, and to
+=config.trackURLFormat= when it can; it does not reject.
+
+** The album's URL
+
+=currentAlbumURL()= returns a promise of the Apple Music page of the album now playing, or
+of null. =resolveAlbumURL(track)= does the same for any =currentTrack()=.
+
+Music cannot answer this. Its scripting interface describes a track by its names, its length
+and its position, and holds no catalogue address for it; the =address= of a =URL track=
+belongs to radio streams. So the track is searched for in the catalogue and identified by
+what Music does report.
+
+The *track* is searched for, not the album: a search for an album name returns that album
+beside its deluxe, anniversary and remastered editions, with nothing to say which is
+playing. A track carries a length, and a length tells a remaster from what it remasters.
+Where the length does not decide it, the album name does, and where neither does, nothing is
+returned — a wrong URL would be written to the list and played from then on, which is worse
+than no URL. =config.durationTolerance= is how far the two lengths may sit apart.
+
+Two requests: the song search, then a lookup of the album by identifier. The second is what
+gives the album's own address rather than the track's address within it. Both reach the same
+album, but only the album's carries the album's name, and the chooser reads its label out of
+the address.
 
 * Volume
 
@@ -135,7 +169,9 @@ left alone: pausing is a decision, stopping is the end of an album.
 |--------------------------+----------------------------------+------------------------------------------------|
 | =albumListPath=          | =configDir + "/albums.txt"=      | The album list.                                |
 | =storefront=             | ="ca"=                           | Which Apple Music storefront is searched. A wrong one finds nothing. |
-| =trackFormat=            | ="{name} - {artist} [{album}]"=  | Placeholders =({name})=, =({artist})=, =({album})=. |
+| =trackFormat=            | ="{name} - {artist} [{album}]"=  | Placeholders =({name})=, =({artist})=, =({album})=, =({url})=. |
+| =trackURLFormat=         | =trackFormat + "\n{url}"=        | Used in place of =trackFormat= once the album's page is known. |
+| =durationTolerance=      | =2=                              | Seconds two recordings' lengths may differ and still be the same one. |
 | =alertDuration=          | =3=                              | Seconds a message stays on screen.             |
 | =maxAlbumSkipAttempts=   | =20=                             | Tracks to skip before giving up on an album change. |
 | =albumSkipInterval=      | =0.3=                            | Seconds between skips.                         |
