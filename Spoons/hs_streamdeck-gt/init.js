@@ -48,6 +48,13 @@ const config = {
         icon: "symbol:power",
         background: "#202020"
     },
+    // Moves to the next page, wrapping at the last one. Occupies the key before the on/off
+    // key, and only in a menu with more buttons than keys. Its label carries the page it
+    // goes to, as "More 2/3". Set to null to truncate such a menu instead.
+    pageButton: {
+        label: "More",
+        background: "#202020"
+    },
     // Drawn on a key holding nothing.
     fillerColor: "#000000"
 }
@@ -187,9 +194,20 @@ function menuForDevice(device) {
 // on the first key of a submenu, and the on/off button on the last. The menu's buttons
 // fill what is left. `layout` maps each key of the device to what it holds, so a press
 // can be turned back into a position within the menu.
+//
+// A menu with more buttons than there are keys for is displayed a page at a time, and one
+// further key holds the page button. The session renders the whole menu once whatever the
+// page, so every image it sends is kept and a page turn repaints from what was already
+// drawn rather than asking for it again.
 
 function deckPresenter(record) {
     const device = record.device
+
+    // The menu being displayed, the images drawn for it so far by button index, and where
+    // in it the displayed page starts. All three are replaced at every present().
+    let buttons = []
+    let images = new Map()
+    let page = 0
 
     function paintKey(key, image) {
         try {
@@ -205,6 +223,94 @@ function deckPresenter(record) {
         })
     }
 
+    /** The first key the menu's own buttons may use, after the back key. */
+    function firstButtonKey(session) {
+        return session.canPop() && config.backButton ? 2 : 1
+    }
+
+    /** One past the last key they may use: the on/off key, or the end of the deck. */
+    function lastButtonKey() {
+        return config.toggleButton ? device.keyCount : device.keyCount + 1
+    }
+
+    /**
+     * How the menu divides into pages, for the keys this menu leaves free.
+     *
+     * `pageKey` is null when everything fits, or when paging is not possible — no page
+     * button configured, or a deck with no key to spare for one.
+     */
+    function paging(session) {
+        const capacity = lastButtonKey() - firstButtonKey(session)
+        if (buttons.length <= capacity || !config.pageButton || capacity < 2) {
+            return { perPage: capacity, pages: 1, pageKey: null }
+        }
+
+        const perPage = capacity - 1
+        return {
+            perPage: perPage,
+            pages: Math.ceil(buttons.length / perPage),
+            pageKey: lastButtonKey() - 1
+        }
+    }
+
+    // Draws the current page and records what each key holds. Called when the menu is
+    // presented and again at every page turn; the session is not involved in the latter.
+    function paint(session) {
+        const { perPage, pages, pageKey } = paging(session)
+        if (page >= pages) page = 0
+
+        const layout = new Array(device.keyCount + 1).fill(null)
+        let key = 1
+
+        if (session.canPop() && config.backButton) {
+            layout[key] = { kind: "back" }
+            paintChrome(key, config.backButton)
+            key += 1
+        }
+
+        const lastKey = lastButtonKey()
+        let index = page * perPage
+        const end = Math.min(buttons.length, index + perPage)
+        for (; key < lastKey && index < end; key++, index++) {
+            layout[key] = { kind: "button", index: index }
+            device.setButtonColor(key, HSColor.hex(buttons[index].background || "#101014"))
+            // Drawn before this page was displayed, if the session has got that far; the
+            // rest follow through setImage as they are drawn.
+            const image = images.get(index)
+            if (image) paintKey(key, image)
+        }
+
+        for (; key < lastKey; key++) {
+            if (key === pageKey) continue
+            layout[key] = null
+            device.setButtonColor(key, HSColor.hex(config.fillerColor))
+        }
+
+        if (pageKey) {
+            layout[pageKey] = { kind: "page" }
+            // The label names the page the key goes to rather than the one displayed, so it
+            // says what pressing it does.
+            paintChrome(pageKey, {
+                ...config.pageButton,
+                label: `${config.pageButton.label} ${((page + 1) % pages) + 1}/${pages}`
+            })
+        } else if (buttons.length > perPage) {
+            // Nowhere to put a page key, so say what is not displayed rather than drop it
+            // silently.
+            console.error(
+                `[hs_streamdeck-gt] ${buttons.length - perPage} of ${buttons.length} ` +
+                `buttons do not fit on ${device.deckType} and are not shown`
+            )
+        }
+
+        if (config.toggleButton) {
+            layout[device.keyCount] = { kind: "toggle" }
+            paintChrome(device.keyCount, config.toggleButton)
+        }
+
+        record.layout = layout
+    }
+
     return {
         // Keys are painted one at a time, so images may arrive after the layout does.
         progressive: true,
@@ -213,48 +319,24 @@ function deckPresenter(record) {
         // apply to it. Only `navigate` does.
         canHide: false,
 
-        present: function (session, buttons) {
-            const layout = new Array(device.keyCount + 1).fill(null)
-            let key = 1
-
-            if (session.canPop() && config.backButton) {
-                layout[key] = { kind: "back" }
-                paintChrome(key, config.backButton)
-                key += 1
-            }
-
-            const lastKey = config.toggleButton ? device.keyCount : device.keyCount + 1
-            let index = 0
-            for (; key < lastKey && index < buttons.length; key++, index++) {
-                layout[key] = { kind: "button", index: index }
-                // The image follows through setImage as each one is drawn.
-                device.setButtonColor(key, HSColor.hex(buttons[index].background || "#101014"))
-            }
-
-            if (index < buttons.length) {
-                // Scrolling is not implemented yet, so say what is not displayed rather
-                // than drop it silently.
-                console.error(
-                    `[hs_streamdeck-gt] ${buttons.length - index} of ${buttons.length} ` +
-                    `buttons do not fit on ${device.deckType} and are not shown`
-                )
-            }
-
-            for (; key < lastKey; key++) {
-                layout[key] = null
-                device.setButtonColor(key, HSColor.hex(config.fillerColor))
-            }
-
-            if (config.toggleButton) {
-                layout[device.keyCount] = { kind: "toggle" }
-                paintChrome(device.keyCount, config.toggleButton)
-            }
-
-            record.layout = layout
+        present: function (session, list) {
+            buttons = list
+            images = new Map()
+            page = 0
             record.session = session
+            // Held on the record, since a press is handled outside this closure.
+            record.turnPage = () => {
+                const { pages } = paging(session)
+                if (pages < 2) return
+                page = (page + 1) % pages
+                paint(session)
+            }
+            paint(session)
         },
 
         setImage: function (index, image) {
+            images.set(index, image)
+
             const layout = record.layout || []
             for (let key = 1; key < layout.length; key++) {
                 const slot = layout[key]
@@ -300,6 +382,8 @@ function attach(device) {
         device: device,
         session: null,
         layout: [],
+        // Set by the presenter while a menu is displayed; see deckPresenter.
+        turnPage: null,
         on: true,
         pressed: new Map(),
         reopenTimer: null,
@@ -386,6 +470,12 @@ function handlePress(record, key, isDown) {
     }
     if (slot.kind === "back") {
         if (latched.session) latched.session.pop()
+        return
+    }
+    // A page turn redraws from the images the session has already sent, so it is ignored
+    // once that session has been replaced: the images belong to the menu it drew.
+    if (slot.kind === "page") {
+        if (latched.session === record.session && record.turnPage) record.turnPage()
         return
     }
     // Reported to the session that was displayed at the press. A session replaced since

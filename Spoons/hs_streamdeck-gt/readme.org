@@ -45,17 +45,31 @@ hs.streamdeck.all().forEach((d) => console.log(d.deckType + " " + d.serialNumber
 
 The menu's own buttons never see these, and neither does any other presenter.
 
-| Key            | Holds                                                              |
-|----------------+--------------------------------------------------------------------|
-| First          | *Back*, in a submenu only. Returns to the parent menu.             |
-| Last           | *On/off*. Blanks the deck; press again to restore the root menu.   |
-| Any unused key | Filler, drawn in =config.fillerColor=.                             |
+| Key             | Holds                                                              |
+|-----------------+--------------------------------------------------------------------|
+| First           | *Back*, in a submenu only. Returns to the parent menu.             |
+| Second from last | *More*, in a menu longer than the keys available only. Next page. |
+| Last            | *On/off*. Blanks the deck; press again to restore the root menu.   |
+| Any unused key  | Filler, drawn in =config.fillerColor=.                             |
 
 While the deck is off, only the on/off key responds.
 
-A menu longer than the keys available is *truncated*, and how many buttons were left out
-is written to the console. Scrolling is not implemented; the Hammerspoon 1 Spoon put
-scroll arrows in the left column, and that has not been carried over.
+** Long menus
+
+A menu with more buttons than there are keys for is displayed a page at a time. The page
+key takes one further key, so a 32-key deck showing a submenu holds 29 buttons a page: one
+key for Back, one for More, one for on/off. Pressing More moves on a page and wraps at the
+last one, and its label names the page it goes to — "More 2/3".
+
+The menu is rendered once however many pages it has, so turning a page repaints images
+that have already been drawn and reaches neither the menu nor the buttons' providers. A
+button that draws itself keeps refreshing while it is on a page that is not displayed;
+what it draws is kept and appears when the page comes back.
+
+Set =config.pageButton= to null to truncate such a menu instead, as this Spoon did before
+paging existed: the buttons that do not fit are not displayed, and how many were left out
+is written to the console. That also happens on a deck too small to spare a key for the
+page button.
 
 * Presses
 
@@ -82,10 +96,12 @@ displayed and has nothing to be dismissed to.
 | =autoOffSeconds=         | 1800               | Blank the deck after this long unused.          |
 | =backButton=             | =back.png=, "Back" | A button specification. Null for no back key.   |
 | =toggleButton=           | =symbol:power=     | A button specification. Null for no on/off key. |
+| =pageButton=             | "More"             | A button specification. Null to truncate long menus. |
 | =fillerColor=            | =#000000=          | Colour drawn on keys holding nothing.           |
 
-=backButton= and =toggleButton= are ordinary hs_menu-gt button specifications, so they take
-=icon=, =label=, =background= and the rest.
+=backButton=, =toggleButton= and =pageButton= are ordinary hs_menu-gt button
+specifications, so they take =icon=, =label=, =background= and the rest. =pageButton='s
+label has the page numbers appended to it.
 
 ** Brightness
 
