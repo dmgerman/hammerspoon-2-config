@@ -53,12 +53,14 @@ const config = {
 
 // MARK: - State
 
-// Window id -> { ring, walk, applied, unmaximized, onScreen }
-//   ring         positions to walk back through, oldest first
-//   walk         how far back undo has walked, null when not walking
-//   applied      where we last put the window, for spotting a move we did not make
-//   unmaximized  size to go back to when maximize is pressed a second time
-//   onScreen     screen id -> the frame the window had when it last left that screen
+// Window id -> { ring, walk, applied, unmaximized, unmaximizedV, unmaximizedH, onScreen }
+//   ring          positions to walk back through, oldest first
+//   walk          how far back undo has walked, null when not walking
+//   applied       where we last put the window, for spotting a move we did not make
+//   unmaximized   size to go back to when maximize is pressed a second time
+//   unmaximizedV  size to go back to when verticalMaximize is pressed a second time
+//   unmaximizedH  size to go back to when horizontalMaximize is pressed a second time
+//   onScreen      screen id -> the frame the window had when it last left that screen
 //
 // Keyed by id, not held on the window: hs.window.focusedWindow() returns a new object
 // every call, so a property set on one is gone by the next lookup. The id is what persists.
@@ -109,7 +111,11 @@ function copyFrame(f) {
 function entryFor(win) {
     let entry = history.get(win.id)
     if (!entry) {
-        entry = { ring: [], walk: null, applied: null, unmaximized: null, onScreen: new Map() }
+        entry = {
+            ring: [], walk: null, applied: null,
+            unmaximized: null, unmaximizedV: null, unmaximizedH: null,
+            onScreen: new Map()
+        }
         history.set(win.id, entry)
     }
     return entry
@@ -390,22 +396,80 @@ function center(win) {
 
 // MARK: - Resizing in place
 
-/** Fill the screen's height, keeping width and horizontal position. */
-function verticalMaximize(win) {
+/** Whether a window already fills its screen's height. */
+function isVerticallyMaximized(win) {
     const window = win || focused()
     if (!window) return false
     const screen = window.screen.frame
     const frame = window.frame
+    return Math.abs(frame.y - screen.y) < 1 && Math.abs(frame.h - screen.h) < 1
+}
+
+/** Whether a window already fills its screen's width. */
+function isHorizontallyMaximized(win) {
+    const window = win || focused()
+    if (!window) return false
+    const screen = window.screen.frame
+    const frame = window.frame
+    return Math.abs(frame.x - screen.x) < 1 && Math.abs(frame.w - screen.w) < 1
+}
+
+/**
+ * Fill the screen's height, keeping width and horizontal position, or put the height back
+ * if it already fills it.
+ *
+ * Only the vertical pair is restored, so a horizontal move made while tall is kept. As with
+ * maximize(), a window that filled the height by some other means has nothing recorded and
+ * says so rather than guessing.
+ */
+function verticalMaximize(win) {
+    const window = win || focused()
+    if (!window) return false
+
+    const entry = entryFor(window)
+    const screen = window.screen.frame
+    const frame = window.frame
+
+    if (isVerticallyMaximized(window)) {
+        if (!entry.unmaximizedV) {
+            alert("No earlier height to go back to")
+            return false
+        }
+        window.frame = new HSRect(frame.x, entry.unmaximizedV.y, frame.w, entry.unmaximizedV.h)
+        entry.unmaximizedV = null
+        return true
+    }
+
+    entry.unmaximizedV = copyFrame(frame)
     window.frame = new HSRect(frame.x, screen.y, frame.w, screen.h)
     return true
 }
 
-/** Fill the screen's width, keeping height and vertical position. */
+/**
+ * Fill the screen's width, keeping height and vertical position, or put the width back
+ * if it already fills it.
+ *
+ * Only the horizontal pair is restored, so a vertical move made while wide is kept.
+ */
 function horizontalMaximize(win) {
     const window = win || focused()
     if (!window) return false
+
+    const entry = entryFor(window)
     const screen = window.screen.frame
     const frame = window.frame
+
+    if (isHorizontallyMaximized(window)) {
+        if (!entry.unmaximizedH) {
+            alert("No earlier width to go back to")
+            return false
+        }
+        window.frame = new HSRect(entry.unmaximizedH.x, frame.y, entry.unmaximizedH.w, frame.h)
+        entry.unmaximizedH = null
+        return true
+    }
+
+    entry.unmaximizedH = copyFrame(frame)
     window.frame = new HSRect(screen.x, frame.y, screen.w, frame.h)
     return true
 }
@@ -1053,6 +1117,8 @@ module.exports = {
     clearHistory,
     forgetClosedWindows,
     isMaximized,
+    isVerticallyMaximized,
+    isHorizontallyMaximized,
     // Grid placement.
     place,
     maximize,
