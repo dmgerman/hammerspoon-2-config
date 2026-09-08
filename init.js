@@ -68,8 +68,8 @@ interactive.use("hs_countdown-gt", {
 interactive.use("hs_time-gt", {
     // Carried over from dmg_load_spoon_hs_time() in ~/.hammerspoon/dmg-functions.lua.
     // width was 1000 there to fit this format; "full" spans the screen instead, so it
-    // cannot be truncated. In v1 this was on alt-t:
-    //     keys: { "alt t": "time-show" }
+    // cannot be truncated. alt-t shows it, as it did in version 1; the binding is with
+    // the others at the foot of this file.
     config: {
         format: "Every second counts:\n%a %d %b %X",
         textSize: 75,
@@ -734,12 +734,19 @@ interactive.define({
     }
 });
 
-// Only the chooser gets a key while Hammerspoon 1 is still running: its hotkeys are
-// registered system-wide and the two would fight over any chord bound in both.
+// Hotkeys are registered system-wide, so anything bound here would fight a chord that
+// Hammerspoon 1 binds while both are running. The three below are safe: version 1 takes
+// only alt-tab and alt-b of the bare Option chords, in all_windows and
+// first_window_per_app. Check dmg-functions.lua before adding another.
 interactive.setKeys({
     "cmd-ctrl-alt x": "commands-execute",
     "cmd-ctrl-alt r": "hammerspoon-reload",
-    "cmd-ctrl-alt c": "hammerspoon-console-toggle"
+    "cmd-ctrl-alt c": "hammerspoon-console-toggle",
+
+    "alt m": "window-maximize",
+    "alt v": "window-vertical-maximize",
+    // alt-t in the version 1 configuration too.
+    "alt t": "time-show"
 });
 
 interactive.use.report();
