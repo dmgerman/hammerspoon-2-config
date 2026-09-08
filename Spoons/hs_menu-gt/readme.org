@@ -40,14 +40,14 @@ Every field is optional, though a button with none of them is an empty square.
 | =args=           | Arguments passed to that command.                                  |
 | =altCommand=     | Name of the command a long press runs.                             |
 | =altArgs=        | Arguments passed to that command.                                  |
-| =children=       | A submenu: an array, or a function returning one.                  |
+| =children=       | A submenu. Anything a menu may be — see /Menus/.                    |
 | =app=            | Bundle ID. Short press brings it forward, long press hides it.     |
 | =url=            | Opened on press.                                                   |
 | =urlBundle=      | Bundle ID of the browser to open =url= in.                         |
 | =fn=             | A function, for an action not worth naming. =(context, button)=.   |
 | =altFn=          | The same, for a long press.                                        |
 | =navigate=       | Where the press leaves you: ="stay"=, ="parent"= or ="root"=.      |
-| =keepOpen=       | Whether a menu that can hide stays displayed. Defaults to false.   |
+| =keepOpen=       | Whether a menu that can hide stays displayed. See /Menus/.         |
 | =background=     | Background colour of the button, as a hex string.                  |
 | =labelColor=     | Colour of the label.                                               |
 | =image=          | A ready-made =HSImage=, used as it stands.                         |
@@ -57,6 +57,30 @@ Every field is optional, though a button with none of them is an empty square.
 
 An action is chosen in this order: =fn=, =command=, =app=, =url=. A short press on a button
 with =children= opens the submenu and ignores the rest.
+
+* Menus
+
+A menu is one of three things, and =children= accepts any of them:
+
+| Shape                     | For                                                      |
+|---------------------------+----------------------------------------------------------|
+| an array of buttons       | The usual menu.                                          |
+| a function returning one  | A menu computed when it is opened, not when defined.     |
+| =\{buttons, keepOpen\}=     | A menu with a default for its buttons. See /keepOpen/.   |
+
+#+begin_src js   :exports both
+const flat = [ { label: "One" }, { label: "Two" } ]
+
+const computed = () => hs.window.allWindows().map((w) => ({ label: w.title }))
+
+const withDefault = {
+    keepOpen: true,
+    buttons: [ { label: "Vol +" }, { label: "Vol −" } ]
+}
+#+end_src
+
+In the object form =buttons= may itself be a function, so a computed menu can carry a
+default too.
 
 ** Actions
 
@@ -121,6 +145,41 @@ are named after the questions rather than after a device. A presenter added late
 =navigate= like any other, and =keepOpen= only if it can hide.
 
 A submenu button ignores both: opening the submenu is where it leaves you.
+
+**** A menu-wide default
+
+A menu whose buttons mostly agree can answer =keepOpen= once, for all of them. Write the
+menu as an object rather than an array: =buttons= holds the menu, and =keepOpen= alongside
+it is the default.
+
+#+begin_src js   :exports both
+const windowMenu = {
+    // Placing a window is the whole errand, so a press closes the menu...
+    keepOpen: false,
+    buttons: [
+        { label: "Maximize", command: "window-maximize" },          // closes
+        { label: "Undo", command: "window-undo", keepOpen: true },  // ...except this one
+        { label: "Thirds", children: () => thirdsMenu }             // submenu: stays
+    ]
+}
+#+end_src
+
+The entry wins. A button is only given the menu's default when it says nothing about the
+question itself — in =keepOpen= or in either of the older spellings below — so a default
+never overrules a button that asked for something.
+
+Two things do not take the default:
+
+- *A button with a submenu.* Descending into a submenu is not the end of an errand, so it
+  stays open whatever the menu around it says. A short press never asks the question — it
+  descends — but a /hold/ on a submenu button runs its action, and that should not close
+  the menu either.
+- *A menu written as a plain array*, which has nowhere to carry a default. Nothing changes
+  for one, and =stays= remains the way to give every button the same answer.
+
+Note that =stays= writes =keepOpen: true= into every button it is mapped over, so a menu
+that uses it can never fall back to a menu-level default. Use =navigates= instead, which
+sets =navigate= and leaves =keepOpen= for the menu to answer.
 
 *** Older spellings
 
@@ -267,7 +326,7 @@ Settings are on =menu.config=, and through =use()= in =init.js=.
 | Setting            | Default                    | Meaning                                     |
 |--------------------+----------------------------+---------------------------------------------|
 | =iconDir=          | =<config>/icons=           | Where a relative icon name is looked up.    |
-| =cacheDir=         | =<config>/.cache/menu-gt=  | Rendered tiles and encoded icons.           |
+| =cacheDir=         | =<config>/.cache/menu-gt=  | Rendered tiles.                             |
 | =tileSize=         | 96                         | Edge of a button image, in pixels.          |
 | =holdSeconds=      | 0.5                        | A press this long is a long press.          |
 | =alphabet=         | home row first             | Letters offered to buttons without a =key=. |
@@ -277,10 +336,12 @@ Settings are on =menu.config=, and through =use()= in =init.js=.
 | =background=       | =#101014=                  | Button background.                          |
 | =labelColor=       | =#F0F0F0=                  | Label colour.                               |
 | =labelSize=        | 15                         | Largest label size. Long labels shrink.     |
-| =font=             | Helvetica                  | Label font.                                 |
+| =font=             | Helvetica                  | The presenter's letters. Not tile labels.   |
 | =symbolColor=      | =#FFFFFF=                  | Colour SF Symbols are drawn in.             |
-| =taskTimeout=      | 4                          | Seconds before an icon encoding is dropped. |
-| =taskPollInterval= | 0.05                       | How often the encoding's output is checked. |
+
+=font= reaches the letters the on-screen presenter draws beneath each button, and nothing
+else. A tile's own label is drawn by =hs.canvas=, which has no font-family attribute and
+always uses the system font.
 
 =config.screen= holds the on-screen presenter's settings: =tile=, =spacing=, =padding=,
 =background=, =letterSize=, =letterColor=, =level=, =showDelay=, =cancelKeys=, =backKeys=,
@@ -299,19 +360,37 @@ reloaded.
 
 * How buttons are drawn
 
-Hammerspoon 2 has no canvas and cannot draw text into an image, so a button is written as
-SVG and loaded through =HSImage.fromURL=. Composing an icon with a label means embedding
-the icon in that markup as a =data:= URI: AppKit renders SVG as a self-contained document
-and will not load a =file://= reference, and the bytes cannot be read in process, since
-=hs.fs.read= decodes as text and returns nothing for a PNG. The encoding is therefore done
-by =base64= as a subprocess.
+A button is composed with =hs.canvas= — a background rectangle, the icon as an =image=
+element, the label as =text= elements — and exported with =imageFromCanvas()=. The export
+renders at the backing scale, so a 96 point tile arrives as a 192 pixel image. Drawing one
+costs a few milliseconds and happens in process, with no subprocess and nothing to wait
+for.
 
-This is slow enough to matter, so the results are kept:
+Two details are worth knowing:
 
-- The finished tile is written to =cacheDir= as a PNG. Drawing one costs roughly 200 ms,
-  loading it costs one call, so an icon is drawn once and reused for good.
-- An icon with no label needs no composition at all and skips this entirely.
-- Encodings run one at a time and are cancelled when the menu is navigated away from.
+- *An SF Symbol is recoloured in a canvas of its own.* A template image is black on
+  transparent and invisible against a dark tile, so the symbol establishes the alpha and a
+  filled rectangle composited with =sourceIn= paints through it. That cannot be done in
+  the tile itself: a composite rule applies against everything already drawn in the same
+  canvas, so it would clip the colour to the tile's background rather than to the symbol.
+- *An icon is resized before it is drawn.* A canvas draws an image at whatever resolution
+  the image already holds, so a symbol left at its natural size — a fraction of a button —
+  arrives soft however large the frame it is given.
+
+Canvas text has no alignment attribute and nothing measures a string, so a label is
+centred, and shrunk to fit, from an estimate of its width. The estimate is for the system
+font; a label is placed within a point or two of centre, not exactly on it.
+
+The finished tile is written to =cacheDir= as a PNG and reused, so a button is drawn once
+per configuration rather than once per display. A tile that did not draw as asked — a
+button that wanted an icon and did not get one — is displayed but never written, so a
+later draw can try the icon again rather than inheriting one bad render for good.
+
+Before =hs.canvas= existed a tile was SVG rendered through =HSImage.fromURL=, and an icon
+had to reach that markup as a base64 =data:= URI, which meant a subprocess per icon, a
+queue to run them in, and a file poller to notice when one finished. Anything in a
+presenter that looks like it is guarding against a slow or abandoned drawing dates from
+then.
 
 #+begin_src js   :exports both
 menu.clearImageCache()   // forget the images held in memory

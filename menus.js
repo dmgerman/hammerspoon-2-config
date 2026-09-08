@@ -31,6 +31,18 @@ function stays(button) {
 }
 
 /**
+ * Leave the menu where it is, without saying whether it stays displayed.
+ *
+ * The half of `stays` that is about the stack rather than about the screen. Map it over a
+ * menu that answers `keepOpen` for itself — a menu written as an object with a `keepOpen`
+ * of its own cannot use `stays`, because a button that already carries a `keepOpen` never
+ * consults the menu's.
+ */
+function navigates(button) {
+    return { navigate: "stay", ...button }
+}
+
+/**
  * A button for something not ported from the Hammerspoon 1 configuration yet.
  *
  * It occupies its place in the menu and says what is missing when pressed, so the layout
@@ -200,49 +212,57 @@ const weatherTomorrow = weatherButton(
 // Hammerspoon 2 meaning keeps the lower case and the version 1 one takes the capital —
 // i is Info and I is Isolation, s is To screen and S is Swap. The four that were shift
 // variants in version 1 are capitals here too, which is the same gesture.
-const windowMenu = [
-    { label: "Undo", icon: "symbol:arrow.uturn.backward", key: "[", command: "window-undo" },
-    { label: "Redo", icon: "symbol:arrow.uturn.forward", key: "]", command: "window-redo" },
+// Placing a window is usually the whole errand, so the menu closes once one has acted.
+// That is the menu's own `keepOpen`, and it reaches every button that does not answer the
+// question itself: the four below that are pressed several times in a row, or that hand
+// over to a chooser, say `keepOpen: true` and are left displayed. A button with a submenu
+// is never closed by a default, so Thirds, Quadrants and Widths need say nothing.
+const windowMenu = {
+    keepOpen: false,
+    buttons: [
+        { label: "Undo", icon: "symbol:arrow.uturn.backward", key: "[", command: "window-undo", keepOpen: true },
+        { label: "Redo", icon: "symbol:arrow.uturn.forward", key: "]", command: "window-redo", keepOpen: true },
 
-    { label: "Maximize", icon: "symbol:arrow.up.left.and.arrow.down.right", key: "m", command: "window-maximize", keepOpen: false},
-    { label: "Left half", icon: "symbol:rectangle.lefthalf.filled", key: "h", command: "window-left-half", keepOpen: false},
-    { label: "Right half", icon: "symbol:rectangle.righthalf.filled", key: "l", command: "window-right-half", keepOpen: false },
-    { label: "Centre", icon: "symbol:rectangle.center.inset.filled", key: "c", command: "window-center" },
-    { label: "Fullscreen", icon: "symbol:arrow.up.left.and.down.right.magnifyingglass", key: "f", command: "window-toggle-fullscreen", keepOpen: false},
-    { label: "Minimize", icon: "symbol:arrow.down.right.and.arrow.up.left", key: "n", command: "window-minimize" },
+        { label: "Maximize", icon: "symbol:arrow.up.left.and.arrow.down.right", key: "m", command: "window-maximize" },
+        { label: "Left half", icon: "symbol:rectangle.lefthalf.filled", key: "h", command: "window-left-half" },
+        { label: "Right half", icon: "symbol:rectangle.righthalf.filled", key: "l", command: "window-right-half" },
+        { label: "Centre", icon: "symbol:rectangle.center.inset.filled", key: "c", command: "window-center" },
+        { label: "Fullscreen", icon: "symbol:arrow.up.left.and.down.right.magnifyingglass", key: "f", command: "window-toggle-fullscreen" },
+        { label: "Minimize", icon: "symbol:arrow.down.right.and.arrow.up.left", key: "n", command: "window-minimize" },
 
-    { label: "Vert max", icon: "symbol:arrow.up.and.down", key: "V", command: "window-vertical-maximize" },
-    { label: "Horiz max", icon: "symbol:arrow.left.and.right", key: "H", command: "window-horizontal-maximize" },
-    { label: "Half height", icon: "symbol:rectangle.tophalf.filled", key: "-", command: "window-half-height" },
-    { label: "Half width", icon: "symbol:rectangle.lefthalf.filled", key: "W", command: "window-half-width" },
+        { label: "Vert max", icon: "symbol:arrow.up.and.down", key: "V", command: "window-vertical-maximize" },
+        { label: "Horiz max", icon: "symbol:arrow.left.and.right", key: "H", command: "window-horizontal-maximize" },
+        { label: "Half height", icon: "symbol:rectangle.tophalf.filled", key: "-", command: "window-half-height" },
+        { label: "Half width", icon: "symbol:rectangle.lefthalf.filled", key: "W", command: "window-half-width" },
 
-    { label: "Move left", icon: "symbol:arrow.left", key: "left", command: "window-move-left" },
-    { label: "Move right", icon: "symbol:arrow.right", key: "right", command: "window-move-right" },
-    { label: "Move up", icon: "symbol:arrow.up", key: "up", command: "window-move-up" },
-    { label: "Move down", icon: "symbol:arrow.down", key: "down", command: "window-move-down" },
+        { label: "Move left", icon: "symbol:arrow.left", key: "left", command: "window-move-left" },
+        { label: "Move right", icon: "symbol:arrow.right", key: "right", command: "window-move-right" },
+        { label: "Move up", icon: "symbol:arrow.up", key: "up", command: "window-move-up" },
+        { label: "Move down", icon: "symbol:arrow.down", key: "down", command: "window-move-down" },
 
-    { label: "To screen", icon: "symbol:display.2", key: "s", command: "window-move-to-screen" },
-    { label: "Next screen", icon: "symbol:rectangle.on.rectangle", key: "space", command: "window-next-screen" },
-    { label: "Prev screen", icon: "symbol:rectangle.on.rectangle", key: "B", command: "window-previous-screen" },
+        { label: "To screen", icon: "symbol:display.2", key: "s", command: "window-move-to-screen" },
+        { label: "Next screen", icon: "symbol:rectangle.on.rectangle", key: "space", command: "window-next-screen" },
+        { label: "Prev screen", icon: "symbol:rectangle.on.rectangle", key: "B", command: "window-previous-screen" },
 
-    { label: "Swap behind", icon: "symbol:arrow.left.arrow.right", key: "S", command: "window-swap-behind" },
-    // Both ask for the second window. The menu stays drawn, as everything here does, but
-    // gives up the keyboard until the chooser is answered.
-    { label: "Swap with", icon: "symbol:arrow.triangle.swap", key: "x", command: "window-swap-with" },
-    { label: "Tile with", icon: "symbol:rectangle.split.2x1", key: "t", command: "window-tile-with" },
-    { label: "To back", icon: "symbol:square.on.square", key: "0", command: "window-send-to-back" },
-    { label: "Prev window", icon: "symbol:arrow.uturn.left", key: "p", command: "window-previous" },
+        { label: "Swap behind", icon: "symbol:arrow.left.arrow.right", key: "S", command: "window-swap-behind" },
+        // Both ask for the second window, so both stay drawn while the chooser is
+        // answered, giving up the keyboard until it is.
+        { label: "Swap with", icon: "symbol:arrow.triangle.swap", key: "x", command: "window-swap-with", keepOpen: true },
+        { label: "Tile with", icon: "symbol:rectangle.split.2x1", key: "t", command: "window-tile-with", keepOpen: true },
+        { label: "To back", icon: "symbol:square.on.square", key: "0", command: "window-send-to-back" },
+        { label: "Prev window", icon: "symbol:arrow.uturn.left", key: "p", command: "window-previous" },
 
-    { label: "Isolate", icon: "symbol:moon.fill", key: "I", command: "window-toggle-isolation" },
-    { label: "Info", icon: "symbol:info.circle", key: "i", command: "window-info" },
-    { label: "Centre mouse", icon: "symbol:cursorarrow", key: "M", command: "mouse-window-center" },
-    { label: "Mouse next", icon: "symbol:cursorarrow.motionlines", key: "N", command: "mouse-window-center-next" },
-    { label: "Mouse screen", icon: "symbol:cursorarrow.rays", key: "C", command: "mouse-screen-center" },
+        { label: "Isolate", icon: "symbol:moon.fill", key: "I", command: "window-toggle-isolation" },
+        { label: "Info", icon: "symbol:info.circle", key: "i", command: "window-info" },
+        { label: "Centre mouse", icon: "symbol:cursorarrow", key: "M", command: "mouse-window-center" },
+        { label: "Mouse next", icon: "symbol:cursorarrow.motionlines", key: "N", command: "mouse-window-center-next" },
+        { label: "Mouse screen", icon: "symbol:cursorarrow.rays", key: "C", command: "mouse-screen-center" },
 
-    { label: "Thirds", icon: "symbol:square.split.1x2", key: "3", children: () => thirdsMenu },
-    { label: "Quadrants", icon: "symbol:square.split.2x2", key: "4", children: () => quadrantsMenu },
-    { label: "Widths", icon: "symbol:ruler", key: "5", children: () => widthsMenu }
-].map(stays)
+        { label: "Thirds", icon: "symbol:square.split.1x2", key: "3", children: () => thirdsMenu },
+        { label: "Quadrants", icon: "symbol:square.split.2x2", key: "4", children: () => quadrantsMenu },
+        { label: "Widths", icon: "symbol:ruler", key: "5", children: () => widthsMenu }
+    ].map(navigates)
+}
 
 // The version 1 menu had these as 2 through 8 in its own row. One command with an argument
 // rather than seven commands, so the menu carries the number.

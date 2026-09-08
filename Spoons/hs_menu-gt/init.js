@@ -18,10 +18,13 @@
 // chooser. `app:` and `url:` are shorthands the session resolves directly, and `fn:` is
 // the escape hatch for an action not worth naming.
 //
-// Hammerspoon 2 has no canvas and cannot render text into an image, so button art is
-// written as SVG and loaded through HSImage.fromURL with a data URL. That call is
-// asynchronous, which is why a page is assembled through promises rather than drawn
-// directly.
+// Button art is composed with hs.canvas and exported through imageFromCanvas(). A page is
+// still assembled through promises, because an imageProvider may return one and because
+// the presenters were written against them, but drawing itself is synchronous and in
+// process. It was not always: before hs.canvas existed a tile was SVG rendered through
+// HSImage.fromURL, and an icon had to reach that markup as a base64 data URI, which meant
+// a subprocess per icon and a queue to run them in. Anything in a presenter that looks
+// like it is guarding against a slow or abandoned drawing dates from then.
 
 // MARK: - User-configurable settings
 
@@ -34,10 +37,6 @@ const config = {
     tileSize: 96,
     // A press held at least this long is a long press, and fires while still held.
     holdSeconds: 0.5,
-    // How long an icon encoding is given before it is abandoned.
-    taskTimeout: 4,
-    // How often the encoded file is looked for while the encoding runs.
-    taskPollInterval: 0.05,
     // Offered to buttons that declare no `key`, home row first. Lower case only: a capital
     // is an address a button asks for, not one handed out.
     alphabet: "asdfghjklqwertyuiopzxcvbnm",
@@ -52,6 +51,8 @@ const config = {
     background: "#101014",
     labelColor: "#F0F0F0",
     labelSize: 15,
+    // The presenter's letters. A tile's own label is drawn by hs.canvas, which has no
+    // font-family attribute and always uses the system font, so this does not reach it.
     font: "Helvetica",
     // Template images, such as SF Symbols, are black on transparent and would be
     // invisible. They are recoloured to this.
@@ -97,10 +98,6 @@ function resolveIconPath(name) {
     return expandPath(config.iconDir + "/" + bare)
 }
 
-function cacheKeyToFilename(key) {
-    return config.cacheDir + "/" + key.replace(/[^A-Za-z0-9._-]/g, "_") + ".png"
-}
-
 // djb2. A button's key holds its label and colours as well as its icon, so it needs
 // reducing to something a filename can hold, while still telling two buttons apart.
 function hashKey(key) {
@@ -120,13 +117,12 @@ function tileFilename(key) {
 
 // MARK: - Images
 //
-// Every button is drawn as one square image. Compositing an icon with a label needs the
-// icon as a file, because SVG references it by URL and there is no other way to combine
-// two images in Hammerspoon 2.
+// Every button is drawn as one square image, composed with hs.canvas and exported with
+// imageFromCanvas(). The whole of it is synchronous and in process; a button is a promise
+// only because the SVG escape hatch below still is, and because the presenters were
+// written against one.
 
 const tileCache = new Map()
-const iconFileCache = new Map()
-const iconDataCache = new Map()
 
 /**
  * Resolve a button's icon specification to an image, without drawing it.
@@ -146,193 +142,78 @@ function iconImage(spec) {
     return HSImage.fromPath(resolveIconPath(spec))
 }
 
-// SVG can only reference an image by URL, so the icon is written to the cache directory
-// once and referenced from there afterwards. It is saved at twice the tile size: an
-// application icon arrives at 32x32 and an SF Symbol smaller still, and both are drawn
-// at up to 96.
-function iconFile(image, key) {
-    if (iconFileCache.has(key)) return iconFileCache.get(key)
-
-    const path = cacheKeyToFilename(key)
-    if (!hs.fs.exists(path)) {
-        const copy = image.copyImage()
-        copy.size = new HSSize(config.tileSize * 2, config.tileSize * 2)
-        if (!copy.saveToFile(path)) {
-            console.error(`[hs_menu-gt] could not write icon cache file ${path}`)
-            return null
-        }
+// Canvas colours are {red, green, blue, alpha} components in 0..1, so the hex strings the
+// settings are written in are converted here. Eight digits carry the alpha.
+function canvasColor(value, fallback) {
+    const text = String(value || fallback || "#000000").replace("#", "")
+    const hex = text.length === 3 ? text.split("").map((c) => c + c).join("") : text
+    const component = (at) => parseInt(hex.slice(at, at + 2), 16) / 255
+    return {
+        red: component(0),
+        green: component(2),
+        blue: component(4),
+        alpha: hex.length >= 8 ? component(6) : 1
     }
-
-    iconFileCache.set(key, path)
-    return path
 }
 
-function shellQuote(path) {
-    return "'" + String(path).replace(/'/g, "'\\''") + "'"
-}
-
-// An hs.task promise is sometimes never resolved and never rejected. Twelve concurrent
-// `sleep 1` tasks produced anywhere from zero to twelve completions across runs, with no
-// error reported. The failure was only reproduced when the tasks were started from an
-// hs.ipc evaluation, and not when they were started from a timer after that connection
-// closed, so its cause is not established and it may not arise from init.js at all.
-// Encodings are run one at a time regardless: an icon is encoded once ever and the result
-// is kept on disk, so the cost is negligible, and a lost promise would otherwise leave a
-// button blank with nothing logged.
-let taskQueue = Promise.resolve()
-
-function runSerially(task) {
-    const result = taskQueue.then(task, task)
-    // The queue itself must never reject, or every task behind it is skipped.
-    taskQueue = result.then(() => null, () => null)
-    return result
-}
-
-// Timers are held: one with no reference left is garbage collected before it fires.
-const pendingTimers = new Set()
-
-/**
- * Run a shell command that writes `outputPath`, and report whether the file arrived.
- *
- * The command is not run again when its promise is lost. The process runs to completion
- * either way — every encoding this happened to still produced a correct file — so the
- * file is watched for instead, and the result is taken as soon as it is complete. Waiting
- * for the timeout instead would cost four seconds for work that finished in ninety
- * milliseconds.
- *
- * The file is only accepted once its size stops changing, since it appears on disk before
- * it has been written in full.
- *
- * @param {string} command The command to run.
- * @param {string} outputPath The file it writes.
- * @returns {Promise} Resolves true when the file has been written.
- */
-function runWritingFile(command, outputPath, isCurrent) {
-    return runSerially(() => {
-        // Checked here rather than at the call site: by the time a queued encoding
-        // reaches the front, the menu that asked for it may no longer be displayed.
-        if (isCurrent && !isCurrent()) return Promise.resolve(false)
-
-        return new Promise((resolve) => {
-            let settled = false
-            let previousSize = -1
-            const started = Date.now()
-
-            const finish = (ok) => {
-                if (settled) return
-                settled = true
-                if (poll) {
-                    poll.stop()
-                    pendingTimers.delete(poll)
-                }
-                resolve(ok)
-            }
-
-            const sizeOf = (path) => {
-                const attributes = hs.fs.attributes(path)
-                return attributes && attributes.size !== undefined ? attributes.size : -1
-            }
-
-            const poll = hs.timer.doEvery(config.taskPollInterval, () => {
-                if (settled) return
-
-                if (hs.fs.exists(outputPath)) {
-                    const size = sizeOf(outputPath)
-                    // Two readings the same means writing has stopped.
-                    if (size > 0 && size === previousSize) {
-                        finish(true)
-                        return
-                    }
-                    previousSize = size
-                }
-
-                if (Date.now() - started > config.taskTimeout * 1000) {
-                    finish(hs.fs.exists(outputPath) && sizeOf(outputPath) > 0)
-                }
-            })
-            pendingTimers.add(poll)
-
-            // Still the quickest answer when it arrives; the poll is what covers it when
-            // it does not.
-            hs.task.shell(command).then(
-                (result) => {
-                    if (result && result.exitCode === 0) finish(true)
-                    else finish(hs.fs.exists(outputPath) && sizeOf(outputPath) > 0)
-                },
-                () => {}
-            )
-        })
-    })
+// A canvas draws an image at whatever resolution the image already holds, so a symbol
+// left at its natural size — a fraction of a button — arrives soft however large the
+// frame it is given. Everything is rasterised at twice the tile edge instead.
+function sizedForTile(image) {
+    const copy = image.copyImage()
+    copy.size = new HSSize(config.tileSize * 2, config.tileSize * 2)
+    return copy
 }
 
 /**
- * An icon as a `data:` URI, for embedding in SVG.
+ * Recolour a template image — an SF Symbol is black on transparent, and invisible as it
+ * stands against a dark tile.
  *
- * AppKit renders SVG as a self-contained document and does not fetch external resources,
- * so an icon has to be written into the markup rather than referenced by path. The bytes
- * cannot be read in process — hs.fs.read decodes as text and returns undefined for a PNG
- * — so the encoding is done by `base64`. Its output is text, so it is cached to disk and
- * read back directly on later runs, and the subprocess runs once per icon ever.
+ * The symbol establishes the alpha and a filled rectangle composited with `sourceIn`
+ * paints through it. This needs a canvas of its own: a composite rule applies against
+ * everything already drawn in the same canvas, so doing it in the tile would clip the
+ * colour to the tile's background rather than to the symbol.
  *
- * @param {object} image The icon.
- * @param {string} key Identifies the icon, and names its cache files.
- * @returns {Promise} Resolves to a data URI, or to null if the icon cannot be encoded.
+ * @param {object} image The template image.
+ * @param {string} hex The colour to paint it.
+ * @returns {object} A recoloured HSImage, or the original if the canvas cannot render.
  */
-function iconDataURI(image, key, isCurrent) {
-    if (iconDataCache.has(key)) return iconDataCache.get(key)
-
-    const png = iconFile(image, key)
-    if (!png) return Promise.resolve(null)
-
-    const encodedPath = png.replace(/\.png$/, ".b64")
-    if (hs.fs.exists(encodedPath)) {
-        const stored = hs.fs.read(encodedPath)
-        if (stored) {
-            const promise = Promise.resolve("data:image/png;base64," + String(stored).trim())
-            iconDataCache.set(key, promise)
-            return promise
+function tintedImage(image, hex) {
+    const box = config.tileSize * 2
+    const canvas = hs.canvas.create({ x: 0, y: 0, w: box, h: box })
+    canvas.appendElements([
+        { type: "image", image: sizedForTile(image), frame: { x: 0, y: 0, w: box, h: box } },
+        {
+            type: "rectangle",
+            action: "fill",
+            fillColor: canvasColor(hex),
+            frame: { x: 0, y: 0, w: box, h: box },
+            compositeRule: "sourceIn"
         }
+    ])
+    const tinted = canvas.imageFromCanvas()
+    canvas.destroy()
+    return tinted || image
+}
+
+// Canvas text has no alignment attribute and nothing measures a string, so a label is
+// centred, and sized to fit, from an estimate of its width. The multipliers are for the
+// system font, which is the only one a canvas draws in.
+const NARROW_CHARACTERS = "iljtfIr1.,:;'!|()[] "
+const WIDE_CHARACTERS = "mwMW@%"
+
+function estimateTextWidth(text, fontSize) {
+    let units = 0
+    for (const character of String(text)) {
+        if (NARROW_CHARACTERS.includes(character)) units += 0.30
+        else if (WIDE_CHARACTERS.includes(character)) units += 0.87
+        else if (character >= "A" && character <= "Z") units += 0.68
+        else units += 0.54
     }
-
-    // base64 writes the file itself rather than returning it: hs.task.shell does not
-    // resolve when a command produces output of this size, and an encoded icon runs to
-    // well over a hundred kilobytes.
-    const command = "base64 -i " + shellQuote(png) + " -o " + shellQuote(encodedPath)
-    const promise = runWritingFile(command, encodedPath, isCurrent).then((ok) => {
-        if (!ok) {
-            // Not cached, so a later menu that wants this icon encodes it then. An
-            // abandoned encoding is not a failure and is not reported as one.
-            iconDataCache.delete(key)
-            if (!isCurrent || isCurrent()) {
-                console.error(`[hs_menu-gt] base64 produced nothing for ${png}`)
-            }
-            return null
-        }
-        const encoded = hs.fs.read(encodedPath)
-        if (!encoded) {
-            console.error(`[hs_menu-gt] base64 wrote nothing readable to ${encodedPath}`)
-            return null
-        }
-        return "data:image/png;base64," + String(encoded).replace(/\s+/g, "")
-    }).catch((e) => {
-        console.error(`[hs_menu-gt] base64 failed for ${png}: ${e && e.message ? e.message : e}`)
-        return null
-    })
-
-    iconDataCache.set(key, promise)
-    return promise
+    return units * fontSize
 }
 
-function escapeXML(text) {
-    return String(text)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&apos;")
-}
-
-// SVG does not wrap text, so a label is broken into lines here. A word longer than the
+// Canvas text does not wrap, so a label is broken into lines here. A word longer than the
 // line is truncated rather than allowed to overflow the button.
 function wrapLabel(text, maxChars, maxLines) {
     const words = String(text).split(/\s+/).filter(Boolean)
@@ -357,72 +238,86 @@ function wrapLabel(text, maxChars, maxLines) {
 }
 
 /**
- * The SVG for one button.
+ * Draw one button.
  *
- * @param {object} spec `{background, iconData, tint, label, labelColor}`, where iconData
- *        is a `data:` URI. Any may be omitted; a button with neither icon nor label is a
- *        plain coloured square.
- * @returns {string} SVG markup, sized to `config.tileSize`.
+ * Composed and exported in process through hs.canvas, at twice the tile edge — the export
+ * renders at the backing scale, so a 96 point tile arrives as a 192 pixel image.
+ *
+ * @param {object} spec `{background, image, tint, label, labelColor}`. `image` is an
+ *        HSImage and `tint` a colour to recolour it to, for a template image such as an
+ *        SF Symbol. Any may be omitted; a button with neither icon nor label is a plain
+ *        coloured square.
+ * @returns {object} An HSImage, or null when the canvas cannot render.
  */
-function tileMarkup(spec) {
+function tileImage(spec) {
     const size = config.tileSize
-    const background = spec.background || config.background
-    const parts = [`<rect width="${size}" height="${size}" fill="${background}"/>`]
-
-    // A template image carries its shape in the alpha channel and is black throughout, so
-    // it is recoloured by replacing RGB while keeping alpha.
-    if (spec.tint) {
-        const c = spec.tint
-        parts.push(
-            `<filter id="tint" color-interpolation-filters="sRGB">` +
-            `<feFlood flood-color="${c}" result="flood"/>` +
-            `<feComposite in="flood" in2="SourceAlpha" operator="in"/>` +
-            `</filter>`
-        )
-    }
-    const filter = spec.tint ? ' filter="url(#tint)"' : ""
+    const elements = [{
+        type: "rectangle",
+        action: "fill",
+        fillColor: canvasColor(spec.background, config.background),
+        frame: { x: 0, y: 0, w: size, h: size }
+    }]
 
     const hasLabel = spec.label !== undefined && spec.label !== null && spec.label !== ""
-    const lines = hasLabel ? wrapLabel(spec.label, 13, spec.iconData ? 1 : 3) : []
-    const labelColor = spec.labelColor || config.labelColor
+    const lines = hasLabel ? wrapLabel(spec.label, 13, spec.image ? 1 : 3) : []
 
-    if (spec.iconData) {
+    if (spec.image) {
         // With a label beneath it the icon sits high and leaves room for the text; alone
         // it fills the tile.
         const box = size * (lines.length > 0 ? config.iconScale : config.iconScaleAlone)
-        const x = (size - box) / 2
-        const y = lines.length > 0 ? size * 0.02 : (size - box) / 2
-        parts.push(
-            `<image x="${x.toFixed(1)}" y="${y.toFixed(1)}" ` +
-            `width="${box.toFixed(1)}" height="${box.toFixed(1)}"${filter} ` +
-            `preserveAspectRatio="xMidYMid meet" ` +
-            `xlink:href="${spec.iconData}"/>`
-        )
+        elements.push({
+            type: "image",
+            image: spec.tint ? tintedImage(spec.image, spec.tint) : sizedForTile(spec.image),
+            frame: {
+                x: (size - box) / 2,
+                y: lines.length > 0 ? size * 0.02 : (size - box) / 2,
+                w: box,
+                h: box
+            }
+        })
     }
 
     if (lines.length > 0) {
         // Shrink the text rather than truncate it, down to a floor that stays readable.
-        const longest = Math.max(...lines.map((l) => l.length))
-        const fontSize = Math.max(9, Math.min(config.labelSize, Math.floor(size * 1.55 / longest)))
+        // Measured against the estimate rather than a character count, since the system
+        // font is a good deal wider than the Helvetica the SVG used to ask for.
+        const available = size - 6
+        const widest = Math.max(...lines.map((l) => estimateTextWidth(l, config.labelSize)))
+        const fontSize = widest > available
+            ? Math.max(9, Math.floor(config.labelSize * available / widest))
+            : config.labelSize
+
         const lineHeight = fontSize * 1.15
+        const block = lines.length * lineHeight
         // Sits on the bottom edge beneath the icon, or centred vertically when the label
-        // is the whole button.
-        const firstBaseline = spec.iconData
-            ? size - 5 - (lines.length - 1) * lineHeight
-            : (size - (lines.length - 1) * lineHeight) / 2 + fontSize * 0.35
+        // is the whole button. Canvas text is drawn from the top left of its frame, so
+        // each line gets a frame of its own rather than a baseline.
+        const top = spec.image ? size - 5 - block : (size - block) / 2
 
         lines.forEach((line, i) => {
-            parts.push(
-                `<text x="${size / 2}" y="${(firstBaseline + i * lineHeight).toFixed(1)}" ` +
-                `font-family="${escapeXML(config.font)}" font-size="${fontSize}" ` +
-                `fill="${labelColor}" text-anchor="middle">${escapeXML(line)}</text>`
-            )
+            const width = estimateTextWidth(line, fontSize)
+            elements.push({
+                type: "text",
+                text: line,
+                textSize: fontSize,
+                textColor: canvasColor(spec.labelColor, config.labelColor),
+                frame: {
+                    x: Math.max(1, (size - width) / 2),
+                    y: top + i * lineHeight,
+                    w: size,
+                    h: lineHeight
+                }
+            })
         })
     }
 
-    return `<svg xmlns="http://www.w3.org/2000/svg" ` +
-        `xmlns:xlink="http://www.w3.org/1999/xlink" ` +
-        `width="${size}" height="${size}">${parts.join("")}</svg>`
+    const canvas = hs.canvas.create({ x: 0, y: 0, w: size, h: size })
+    canvas.appendElements(elements)
+    const image = canvas.imageFromCanvas()
+    canvas.destroy()
+
+    if (!image) console.error("[hs_menu-gt] canvas produced no image for a button")
+    return image
 }
 
 /** Render SVG markup to an image. Resolves to null if the markup cannot be rendered. */
@@ -443,11 +338,9 @@ function imageFromMarkup(markup) {
 function buttonImage(button, options) {
     if (button.image) return Promise.resolve(button.image)
 
-    const isCurrent = options && options.isCurrent ? options.isCurrent : null
-
     // A button that draws itself is never cached on disk: its picture is expected to
     // differ from one moment to the next, and a tile per minute would fill the cache.
-    if (button.imageProvider) return dynamicImage(button, options, isCurrent)
+    if (button.imageProvider) return dynamicImage(button, options)
 
     const iconSpec = button.icon || (button.app ? "bundle:" + button.app : null)
     const key = [
@@ -459,10 +352,8 @@ function buttonImage(button, options) {
 
     if (tileCache.has(key)) return tileCache.get(key)
 
-    // A finished tile is kept on disk. Drawing one costs an encoding subprocess and an SVG
-    // render — about 190 ms for an application icon, and more when a task's promise is
-    // lost and the timeout has to expire — while loading it costs a single call. Without
-    // this, every reload redraws every button.
+    // A finished tile is kept on disk. Drawing one costs a few milliseconds and loading it
+    // rather less, and without this every reload redraws every button.
     const file = tileFilename(key)
     if (hs.fs.exists(file)) {
         const stored = HSImage.fromPath(file)
@@ -473,10 +364,17 @@ function buttonImage(button, options) {
         }
     }
 
-    // A failure is not remembered: caching it would make one bad render permanent for as
-    // long as the configuration stays loaded.
-    const promise = drawButton(button, iconSpec, isCurrent).then((image) => {
+    // A failure is not remembered, in memory or on disk. The distinction matters: a button
+    // whose icon could not be loaded still draws — as its label, or as a question mark —
+    // and that tile is a perfectly valid image. Saving it would make one bad render
+    // permanent, and the button would never show its icon again however often the menu was
+    // reopened, because the cache would answer before anything tried to draw it.
+    const promise = renderButton(button, iconSpec).then(({ image, complete }) => {
         if (!image) {
+            tileCache.delete(key)
+            return image
+        }
+        if (!complete) {
             tileCache.delete(key)
             return image
         }
@@ -504,10 +402,9 @@ function buttonImage(button, options) {
  *
  * @param {object} button The button.
  * @param {object} [options] `{context}`, passed to the provider.
- * @param {function} [isCurrent] Whether the menu that asked for this is still displayed.
  * @returns {Promise} Resolves to an HSImage, or to null.
  */
-function dynamicImage(button, options, isCurrent) {
+function dynamicImage(button, options) {
     const context = (options && options.context) || {}
 
     let produced
@@ -518,20 +415,22 @@ function dynamicImage(button, options, isCurrent) {
         return Promise.resolve(null)
     }
 
-    return resolveProduced(produced, button, isCurrent)
+    return resolveProduced(produced, button)
 }
 
-function resolveProduced(value, button, isCurrent) {
+function resolveProduced(value, button) {
     if (value === undefined || value === null) return Promise.resolve(null)
 
     if (typeof value.then === "function") {
-        return value.then((resolved) => resolveProduced(resolved, button, isCurrent))
+        return value.then((resolved) => resolveProduced(resolved, button))
     }
 
     if (typeof value === "string") {
         const text = value.trim()
+        // The one drawing that is still SVG, and still asynchronous: a provider may hand
+        // back markup of its own, which hs.canvas has no way to render.
         if (text.startsWith("<svg")) return imageFromMarkup(text)
-        return imageFromMarkup(tileMarkup({
+        return Promise.resolve(tileImage({
             label: value,
             background: button.background,
             labelColor: button.labelColor
@@ -547,80 +446,80 @@ function resolveProduced(value, button, isCurrent) {
     const spec = Object.assign({}, button, value)
     delete spec.imageProvider
     const iconSpec = spec.icon || (spec.app ? "bundle:" + spec.app : null)
-    return drawButton(spec, iconSpec, isCurrent)
+    return drawButton(spec, iconSpec)
 }
 
-function drawButton(button, iconSpec, isCurrent) {
+/**
+ * Draw a button, and say whether it was drawn as asked.
+ *
+ * `complete` is false when the button wanted an icon and did not get one. The picture is
+ * still returned and still displayed — a label reads better than a blank square — but it
+ * is not what the button asked for, and the caller uses this to keep it out of the disk
+ * cache so a later draw can try the icon again.
+ *
+ * @returns {Promise} Resolves to `{image, complete}`.
+ */
+function renderButton(button, iconSpec) {
     const label = button.hideLabel ? null : button.label
     const hasLabel = label !== undefined && label !== null && label !== ""
 
-    // With no icon the label carries the button, as it did in Hammerspoon 1.
+    // With no icon the label carries the button, as it did in Hammerspoon 1. Asking for
+    // no icon and getting none is a complete drawing, not a failed one.
     if (!iconSpec) {
-        return imageFromMarkup(tileMarkup({
-            background: button.background,
-            label: label,
-            labelColor: button.labelColor
-        }))
+        return Promise.resolve({
+            image: tileImage({
+                background: button.background,
+                label: label,
+                labelColor: button.labelColor
+            }),
+            complete: true
+        })
     }
 
     const image = iconImage(iconSpec)
     if (!image) {
         console.error(`[hs_menu-gt] icon not found: ${iconSpec}`)
-        return imageFromMarkup(tileMarkup({
-            background: button.background,
-            label: hasLabel ? label : "?",
-            labelColor: button.labelColor
-        }))
-    }
-
-    // An SF Symbol is a template image: black on transparent, and invisible as it stands.
-    // Recolouring it means compositing, and so does a label or a background.
-    const isSymbol = typeof iconSpec === "string" && iconSpec.startsWith("symbol:")
-    const tint = isSymbol ? (button.symbolColor || config.symbolColor) : null
-
-    // Nothing to compose: the icon is the whole button. This is the common case, it needs
-    // no SVG and no subprocess, and it is how the Hammerspoon 1 configuration's icon
-    // buttons were drawn.
-    if (!hasLabel && !isSymbol && !button.background) {
-        const copy = image.copyImage()
-        copy.size = new HSSize(config.tileSize, config.tileSize)
-        return Promise.resolve(copy)
-    }
-
-    // An icon is cached under its own name, on the assumption that a given path always
-    // holds the same picture. A file that is rewritten — a generated forecast image, say
-    // — breaks that, so a button may name its own key and include whatever makes the
-    // picture different, such as the file's modification time.
-    const iconKey = button.iconKey ||
-        (typeof iconSpec === "string" ? iconSpec : ("image|" + (label || "")))
-    return iconDataURI(image, iconKey, isCurrent).then((uri) => {
-        if (!uri) {
-            // Abandoned rather than failed: draw nothing, so that nothing is cached and
-            // the menu that superseded this one is left alone.
-            if (isCurrent && !isCurrent()) return null
-
-            // The icon could not be encoded; the label alone is better than nothing.
-            return imageFromMarkup(tileMarkup({
+        return Promise.resolve({
+            image: tileImage({
                 background: button.background,
                 label: hasLabel ? label : "?",
                 labelColor: button.labelColor
-            }))
-        }
-        return imageFromMarkup(tileMarkup({
-            background: button.background,
-            iconData: uri,
-            tint: tint,
-            label: label,
-            labelColor: button.labelColor
-        }))
+            }),
+            complete: false
+        })
+    }
+
+    // An SF Symbol is a template image: black on transparent, and invisible as it stands,
+    // so it is recoloured before being drawn.
+    const isSymbol = typeof iconSpec === "string" && iconSpec.startsWith("symbol:")
+    const tint = isSymbol ? (button.symbolColor || config.symbolColor) : null
+
+    // Nothing to compose: the icon is the whole button. This is the common case, and it is
+    // how the Hammerspoon 1 configuration's icon buttons were drawn.
+    if (!hasLabel && !isSymbol && !button.background) {
+        const copy = image.copyImage()
+        copy.size = new HSSize(config.tileSize, config.tileSize)
+        return Promise.resolve({ image: copy, complete: true })
+    }
+
+    const drawn = tileImage({
+        background: button.background,
+        image: image,
+        tint: tint,
+        label: label,
+        labelColor: button.labelColor
     })
+    return Promise.resolve({ image: drawn, complete: drawn !== null })
+}
+
+/** Draw a button, for callers that only want the picture. */
+function drawButton(button, iconSpec) {
+    return renderButton(button, iconSpec).then(({ image }) => image)
 }
 
 /** Discard the button images held in memory. The tiles on disk are kept. */
 function clearImageCache() {
     tileCache.clear()
-    iconFileCache.clear()
-    iconDataCache.clear()
     return module.exports
 }
 
@@ -675,10 +574,38 @@ function assignLetters(buttons) {
     })
 }
 
-// A menu is an array, or a function returning one, so that a menu of running applications
-// or open windows is computed when it is opened rather than when it is defined.
+/**
+ * A menu is an array of buttons, or a function returning one, so that a menu of running
+ * applications or open windows is computed when it is opened rather than when it is
+ * defined.
+ *
+ * It may also be an object, which is how a menu says something about itself rather than
+ * about any one button:
+ *
+ *     { keepOpen: false, buttons: [ ... ] }
+ *
+ * `buttons` holds the menu, and may itself be a function. Everything alongside it is a
+ * default for the buttons in it — see `menuDefaults`.
+ */
+function menuButtons(menu) {
+    if (menu && !Array.isArray(menu) && typeof menu === "object") return menu.buttons
+    return menu
+}
+
+/**
+ * A menu's own settings: whatever it carries besides its buttons.
+ *
+ * @param {object|Array|function} menu The menu.
+ * @returns {object} The settings, or an empty object for a menu that is a plain array.
+ */
+function menuDefaults(menu) {
+    if (menu && !Array.isArray(menu) && typeof menu === "object") return menu
+    return {}
+}
+
 function resolveButtons(menu, context) {
-    const value = typeof menu === "function" ? menu(context) : menu
+    const source = menuButtons(menu)
+    const value = typeof source === "function" ? source(context) : source
     return Array.isArray(value) ? value.filter(Boolean) : []
 }
 
@@ -1084,11 +1011,15 @@ function openSession(menu, presenter, options) {
     // a presenter that can hide has to answer: a Stream Deck is always displaying
     // something, so there is nothing for it to keep open or close.
     function finish(button) {
+        // Taken before navigating: a button's `keepOpen` may fall back to the menu it
+        // belongs to, and by the time the question is asked the stack has moved on.
+        const menu = stack[stack.length - 1].menu
+
         const where = navigationFor(button)
         if (where === "parent" && session.canPop()) session.pop()
         else if (where === "root" && session.canPop()) session.popToRoot()
 
-        if (presenter.canHide && !staysOpen(button)) session.close()
+        if (presenter.canHide && !staysOpen(button, menu)) session.close()
     }
 
     /** Where the press leaves the stack: "stay", "parent" or "root". */
@@ -1100,12 +1031,28 @@ function openSession(menu, presenter, options) {
         return "parent"
     }
 
-    /** Whether a presenter that can hide should stay displayed. */
-    function staysOpen(button) {
+    /**
+     * Whether a presenter that can hide should stay displayed.
+     *
+     * A button answers for itself if it says anything at all — in the current spelling or
+     * either of the older ones. Only a button that is silent on the question takes the
+     * menu's `keepOpen`, so a default never overrules an entry that asked for something.
+     */
+    function staysOpen(button, menu) {
         if (button.keepOpen !== undefined) return Boolean(button.keepOpen)
         // Older spellings. `screen` held this same question, and `dismiss` held both.
         if (button.screen) return button.screen === "stay"
-        return button.dismiss === false
+        if (button.dismiss !== undefined) return button.dismiss === false
+
+        // A button with a submenu is not the end of an errand, so it stays open whatever
+        // the menu around it defaults to. A short press on one never reaches here — it
+        // descends instead — but a hold on it does, since a hold on a submenu is left for
+        // an action, and closing the menu is not what descending into it should do.
+        if (button.children) return true
+
+        const fallback = menuDefaults(menu).keepOpen
+        if (fallback !== undefined) return Boolean(fallback)
+        return false
     }
 
     render()
@@ -1411,10 +1358,9 @@ module.exports = {
     openSession,
     buttonImage,
     imageFromMarkup,
-    tileMarkup,
+    tileImage,
     openURL,
     iconImage,
-    iconFile,
     assignLetters,
     resolveButtons,
     clearImageCache,
