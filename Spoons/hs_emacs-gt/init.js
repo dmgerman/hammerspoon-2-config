@@ -572,6 +572,27 @@ function editAll() {
 // message rather than reused, which is also what lets it follow the primary screen.
 
 /** Hide the on-screen message, if one is displayed. */
+// Canvas colours are {red, green, blue, alpha} components in 0..1.
+function canvasColor(value) {
+    const text = String(value || "#000000").replace("#", "")
+    const hex = text.length === 3 ? text.split("").map((c) => c + c).join("") : text
+    const component = (at) => parseInt(hex.slice(at, at + 2), 16) / 255
+    return {
+        red: component(0),
+        green: component(2),
+        blue: component(4),
+        alpha: hex.length >= 8 ? component(6) : 1
+    }
+}
+
+// The screen the user is on: the one holding the focused window, as the other Spoons do
+// it. Not hs.screen.primary(), which is the display carrying the menu bar.
+function currentScreen() {
+    const focused = hs.window.focusedWindow()
+    if (focused && focused.screen) return focused.screen
+    return hs.screen.main() || hs.screen.primary()
+}
+
 function messageHide() {
     if (messageTimer) {
         messageTimer.stop()
@@ -594,25 +615,49 @@ function message(text, duration) {
     messageHide()
 
     const settings = config.message
-    const primary = hs.screen.primary().fullFrame
+    const screen = currentScreen()
+    const reference = hs.screen.primary() || screen
+    if (!screen || !reference) return module.exports
+
+    const area = screen.fullFrame
+    const primary = reference.fullFrame
 
     // Upper left, as the Hammerspoon 1 canvas was. hs.screen measures y downwards from the
-    // top of the primary display and hs.ui upwards from its bottom, hence the conversion.
-    const left = primary.x + (primary.w - settings.width) / 8
-    const top = primary.y + (primary.h - settings.height) / 4
+    // top of the primary display and a canvas upwards from its bottom, hence the
+    // conversion.
+    const left = area.x + (area.w - settings.width) / 8
+    const top = area.y + (area.h - settings.height) / 4
 
-    messageWindow = hs.ui.window({
+    messageWindow = hs.canvas.create({
         x: left,
         y: (primary.y + primary.h) - (top + settings.height),
         w: settings.width,
         h: settings.height
     })
-        .titled(false)
         .level(settings.level)
-        .backgroundColor(settings.background)
-        .text(String(text))
-            .font(HSFont.customSize(settings.font, settings.textSize))
-            .foregroundColor(settings.textColor)
+        // A message is read, not clicked. Without this it would swallow every click in
+        // the upper left of the screen for as long as it is up.
+        .ignoreMouseEvents(true)
+        .behaviorList(["canJoinAllSpaces", "stationary"])
+
+    messageWindow.appendElements([
+        {
+            type: "rectangle",
+            action: "fill",
+            fillColor: canvasColor(settings.background),
+            frame: { x: 0, y: 0, w: settings.width, h: settings.height }
+        },
+        {
+            type: "text",
+            text: String(text),
+            textFont: settings.font || undefined,
+            textSize: settings.textSize,
+            textColor: canvasColor(settings.textColor),
+            textAlignment: "center",
+            textLineBreak: "wordWrap",
+            frame: { x: 6, y: 6, w: settings.width - 12, h: settings.height - 12 }
+        }
+    ])
 
     messageWindow.show()
 

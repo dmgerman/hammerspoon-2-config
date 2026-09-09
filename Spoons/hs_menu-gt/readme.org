@@ -335,17 +335,42 @@ Settings are on =menu.config=, and through =use()= in =init.js=.
 | =iconScaleAlone=   | 0.94                       | Icon size without a label.                  |
 | =background=       | =#101014=                  | Button background.                          |
 | =labelColor=       | =#F0F0F0=                  | Label colour.                               |
-| =labelSize=        | 15                         | Largest label size. Long labels shrink.     |
-| =font=             | Helvetica                  | The presenter's letters. Not tile labels.   |
+| =labelSize=        | 15                         | Size a label starts at. Long labels shrink. |
+| =labelSizeFloor=   | 9                          | How far a label may shrink before it is cut.|
+| =font=             | Helvetica                  | Label and letter font.                      |
 | =symbolColor=      | =#FFFFFF=                  | Colour SF Symbols are drawn in.             |
+| =alpha=            | 0.8                        | How see-through the whole menu is.          |
 
-=font= reaches the letters the on-screen presenter draws beneath each button, and nothing
-else. A tile's own label is drawn by =hs.canvas=, which has no font-family attribute and
-always uses the system font.
+=alpha= runs from 0 for invisible to 1 for solid, and is the one knob for the menu's
+transparency on screen. It reaches the whole of it — the panel behind the buttons, and each
+button entire, background, icon and label together — so the menu fades as one thing rather
+than becoming a set of solid icons floating on a translucent sheet.
+
+It is applied when the menu is displayed rather than when a button is drawn, so the cached
+tiles are the same whatever it is set to, and changing it takes effect on the next display
+with no cache to clear. A Stream Deck, having no transparency to give, is unaffected.
+
+The panel's own colour may still carry an alpha as an eight-digit hex — the default
+=#1C1C1EF5= is already slightly see-through — and the two multiply.
+
+=font= is a font's PostScript name — ="Helvetica-Bold"=, not ="Helvetica Bold"= — and
+reaches a button's label and the presenter's letters alike. Null draws in the system font.
+An unresolvable name falls back to the system font and logs a warning.
 
 =config.screen= holds the on-screen presenter's settings: =tile=, =spacing=, =padding=,
 =background=, =letterSize=, =letterColor=, =level=, =showDelay=, =cancelKeys=, =backKeys=,
 and =columnsFor(count)=, which returns the number of columns to lay the buttons out in.
+
+The menu is centred on the screen holding the focused window, not on the display carrying
+the menu bar. With one display the two are the same.
+
+The screen is chosen when the menu opens and held until it closes, so a submenu opens
+where the menu it came from is.
+
+Beware the naming: what System Settings calls the /Main Display/ — the one carrying the
+menu bar — is =hs.screen.primary()=, not =hs.screen.main()=. =main()= is =NSScreen.main=,
+the screen holding the window with keyboard focus, which is the screen you are working on.
+The two are different displays whenever the menu bar is not on the one you are using.
 
 =showDelay= is how long a page's letters answer before its window is drawn, in seconds,
 and defaults to 0, which draws it at once. The letters are bound as soon as the page is
@@ -361,12 +386,12 @@ reloaded.
 * How buttons are drawn
 
 A button is composed with =hs.canvas= — a background rectangle, the icon as an =image=
-element, the label as =text= elements — and exported with =imageFromCanvas()=. The export
-renders at the backing scale, so a 96 point tile arrives as a 192 pixel image. Drawing one
-costs a few milliseconds and happens in process, with no subprocess and nothing to wait
-for.
+element, the label as one =text= element — and exported with =imageFromCanvas()=. The
+export renders at the backing scale, so a 96 point tile arrives as a 192 pixel image.
+Drawing one costs a few milliseconds and happens in process, with no subprocess and nothing
+to wait for.
 
-Two details are worth knowing:
+Three details are worth knowing:
 
 - *An SF Symbol is recoloured in a canvas of its own.* A template image is black on
   transparent and invisible against a dark tile, so the symbol establishes the alpha and a
@@ -375,11 +400,15 @@ Two details are worth knowing:
   canvas, so it would clip the colour to the tile's background rather than to the symbol.
 - *An icon is resized before it is drawn.* A canvas draws an image at whatever resolution
   the image already holds, so a symbol left at its natural size — a fraction of a button —
-  arrives soft however large the frame it is given.
-
-Canvas text has no alignment attribute and nothing measures a string, so a label is
-centred, and shrunk to fit, from an estimate of its width. The estimate is for the system
-font; a label is placed within a point or two of centre, not exactly on it.
+  arrives soft however large the frame it is given. Its longer side is scaled to twice the
+  tile edge and =imageScaling: scaleProportionally= fits it to its frame, so nothing that
+  is not square is stretched.
+- *The label is measured, not estimated.* =minimumTextSize()= reports what a string needs
+  in the font the element is carrying, so wrapping and shrinking are done against the font
+  actually being drawn. A label starts at =labelSize=, is wrapped to the width available,
+  and loses a point at a time until it fits or reaches =labelSizeFloor=; =textAlignment=
+  centres it and =textLineBreak= truncates with an ellipsis if it still will not fit.
+  Beneath an icon a label gets one line, and on its own up to three.
 
 The finished tile is written to =cacheDir= as a PNG and reused, so a button is drawn once
 per configuration rather than once per display. A tile that did not draw as asked — a

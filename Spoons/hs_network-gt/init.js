@@ -23,7 +23,10 @@
 //     recent macOS unless Location Services has authorized the caller.
 //   * There is no hs.execute, so netstat, route and scutil run under hs.task, and every
 //     reading is asynchronous. A poll cycle never overlaps its predecessor.
-//   * There is no hs.canvas, so the banner is an hs.ui window, as in hs_time-gt.
+//   * Network names come from a Shortcut rather than hs.wifi, as above.
+//
+// The banner is an hs.canvas, as in hs_time-gt: one text element, in whatever font
+// bannerFont names, ignoring the mouse so it does not swallow clicks behind it.
 
 // MARK: - User-configurable settings
 
@@ -46,10 +49,15 @@ const config = {
 
     // The announcement.
     bannerDuration: 2,
-    bannerWidth: 500,
+    // Wide enough that a long network name is shown at full size. Names that still do not
+    // fit shrink rather than truncate, down to bannerTextSizeFloor.
+    bannerWidth: 850,
     bannerHeight: 230,
     bannerFont: "Impact",
+    // The size a name starts at. A long one shrinks, as far as the floor, so that it is
+    // shown whole rather than cut off at the edge of the banner.
     bannerTextSize: 60,
+    bannerTextSizeFloor: 22,
     bannerTextColor: "#FF3342",
     // Window stacking level: "floating", "status", "screenSaver", "popUpMenu".
     bannerLevel: "floating",
@@ -85,8 +93,7 @@ let menubarItem = null
 let pollTimer = null
 let bannerTimer = null
 let wifiWatcher = null
-let bannerWindow = null
-let bannerText = null
+let bannerCanvas = null
 let bannerHideTimer = null
 
 // A poll cycle makes several asynchronous readings, so one can still be in flight when
@@ -558,12 +565,26 @@ function menuBuild() {
 // hs.ui windows take their frame when they are created, so the window is rebuilt at every
 // showing rather than moved.
 
+// The screen the user is on: the one holding the focused window, as hs_time-gt and
+// hs_menu-gt do it. hs.screen.main() answers the same question and agrees in practice;
+// the focused window is asked directly because that is the question this actually asks.
+// Not hs.screen.primary(), which is the display carrying the menu bar.
+function currentScreen() {
+    const focused = hs.window.focusedWindow()
+    if (focused && focused.screen) return focused.screen
+    return hs.screen.main() || hs.screen.primary()
+}
+
 // hs.screen frames have their origin at the top left of the primary display, while hs.ui
 // window frames have theirs at its bottom left, with y growing upwards. The eighth and
 // the fifth of the leftover space reproduce the placement of the v1 canvas.
 function bannerFrame() {
-    const primary = hs.screen.primary().fullFrame
-    const area = hs.screen.main().fullFrame
+    const screen = currentScreen()
+    const reference = hs.screen.primary() || screen
+    if (!screen || !reference) return { x: 0, y: 0, w: config.bannerWidth, h: config.bannerHeight }
+
+    const primary = reference.fullFrame
+    const area = screen.fullFrame
     const left = area.x + (area.w - config.bannerWidth) / 8
     const top = area.y + (area.h - config.bannerHeight) / 5
 
@@ -575,15 +596,49 @@ function bannerFrame() {
     }
 }
 
+// Canvas colours are {red, green, blue, alpha} components in 0..1.
+function canvasColor(value) {
+    const text = String(value || "#000000").replace("#", "")
+    const hex = text.length === 3 ? text.split("").map((c) => c + c).join("") : text
+    const component = (at) => parseInt(hex.slice(at, at + 2), 16) / 255
+    return {
+        red: component(0),
+        green: component(2),
+        blue: component(4),
+        alpha: hex.length >= 8 ? component(6) : 1
+    }
+}
+
 function bannerBuild(text) {
-    bannerText = hs.ui.string(text)
-    bannerWindow = hs.ui.window(bannerFrame())
-        .titled(false)
+    const frame = bannerFrame()
+    bannerCanvas = hs.canvas.create(frame)
         .level(config.bannerLevel)
-        .backgroundColor("#00000000")
-        .text(bannerText)
-            .font(HSFont.customSize(config.bannerFont, config.bannerTextSize))
-            .foregroundColor(config.bannerTextColor)
+        // A caption, not a target: without this it would swallow clicks in the upper left
+        // of the screen for as long as it is up.
+        .ignoreMouseEvents(true)
+        .behaviorList(["canJoinAllSpaces", "stationary"])
+
+    bannerCanvas.appendElements([{
+        type: "text",
+        text: text,
+        textFont: config.bannerFont || undefined,
+        textSize: config.bannerTextSize,
+        textColor: canvasColor(config.bannerTextColor),
+        textAlignment: "center",
+        textLineBreak: "truncateTail",
+        frame: { x: 0, y: 0, w: frame.w, h: frame.h }
+    }])
+
+    // A network name is whatever someone called their router, and the long ones used to
+    // reach the edge of the banner and stop. minimumTextSize reports what the name needs
+    // in the font being drawn, so it is shrunk until it fits rather than cut off.
+    let size = config.bannerTextSize
+    for (;;) {
+        const measured = bannerCanvas.minimumTextSize(0, text)
+        if ((measured.w || 0) <= frame.w || size <= config.bannerTextSizeFloor) break
+        size -= 2
+        bannerCanvas.setElementAttribute(0, "textSize", size)
+    }
 }
 
 // MARK: - Poll loop
@@ -680,7 +735,8 @@ async function networkNameShow(always) {
 
     networkNameHide()
     bannerBuild(text)
-    bannerWindow.show()
+    if (!bannerCanvas) return module.exports
+    bannerCanvas.show()
     bannerHideTimer = hs.timer.doAfter(config.bannerDuration, () => networkNameHide())
     return text
 }
@@ -691,11 +747,10 @@ function networkNameHide() {
         bannerHideTimer.stop()
         bannerHideTimer = null
     }
-    if (!bannerWindow) return module.exports
+    if (!bannerCanvas) return module.exports
 
-    bannerWindow.destroy()
-    bannerWindow = null
-    bannerText = null
+    bannerCanvas.destroy()
+    bannerCanvas = null
     return module.exports
 }
 

@@ -34,7 +34,7 @@ const config = {
     // The ring drawn around the pointer after it is moved, so it can be found again. Its
     // size is the diameter, in pixels, and its width the thickness of the line.
     //
-    // hs.ui windows cannot ignore mouse events, so a click inside the ring lands on it
+    // The ring ignores mouse events, so a click inside it reaches what is underneath
     // rather than on the window beneath. mouseHighlightSeconds is therefore also how long
     // that square is unclickable, and is the reason it is short.
     mouseHighlightColor: "#FF0000",
@@ -848,9 +848,8 @@ function mouseHighlightClear() {
  * so a filled circle cannot be a ring. The window is a stroke-width larger than the circle,
  * since the line is centred on the circle's edge and half of it would otherwise be clipped.
  *
- * As with the isolation overlays, an hs.ui window cannot ignore mouse events, so while the
- * ring is displayed a click inside its square lands on the ring rather than on the window
- * underneath. This is why it is measured in fractions of a second.
+ * The ring ignores mouse events, so a click inside its square reaches the window
+ * underneath rather than landing on the ring.
  *
  * @param {number} x Centre, in screen coordinates.
  * @param {number} y Centre, in screen coordinates.
@@ -863,17 +862,19 @@ function mouseHighlight(x, y) {
     const box = diameter + width
     const rect = toUIRect({ x: x - box / 2, y: y - box / 2, w: box, h: box })
 
-    highlightWindow = hs.ui.window({ x: rect.x, y: rect.y, w: rect.w, h: rect.h })
-        .titled(false)
+    highlightWindow = hs.canvas.create({ x: rect.x, y: rect.y, w: rect.w, h: rect.h })
         .level("status")
-        .backgroundColor("#00000000")
-        .hstack()
-        .spacing(0)
-    highlightWindow.circle()
-        .stroke(HSColor.hex(config.mouseHighlightColor))
-        .strokeWidth(width)
-        .frame({ w: diameter, h: diameter })
-    highlightWindow.end()
+        // A pointer to look at, never to click: the ring lets everything through.
+        .ignoreMouseEvents(true)
+        .behaviorList(["canJoinAllSpaces", "stationary"])
+    highlightWindow.appendElements([{
+        type: "circle",
+        action: "stroke",
+        strokeColor: canvasColor(config.mouseHighlightColor),
+        strokeWidth: width,
+        center: { x: rect.w / 2, y: rect.h / 2 },
+        radius: diameter / 2
+    }])
     highlightWindow.show()
 
     highlightTimer = hs.timer.doAfter(config.mouseHighlightSeconds, () => {
@@ -962,20 +963,36 @@ function toUIRect(rect) {
     }
 }
 
+// Canvas colours are {red, green, blue, alpha} components in 0..1.
+function canvasColor(value, alpha) {
+    const text = String(value || "#000000").replace("#", "")
+    const hex = text.length === 3 ? text.split("").map((c) => c + c).join("") : text
+    const component = (at) => parseInt(hex.slice(at, at + 2), 16) / 255
+    const own = hex.length >= 8 ? component(6) : 1
+    return {
+        red: component(0),
+        green: component(2),
+        blue: component(4),
+        alpha: own * (alpha === undefined ? 1 : alpha)
+    }
+}
+
 function addOverlay(screenRect) {
     if (screenRect.w <= 0 || screenRect.h <= 0) return
     const rect = toUIRect(screenRect)
 
-    const overlay = hs.ui.window({ x: rect.x, y: rect.y, w: rect.w, h: rect.h })
-        .titled(false)
+    const overlay = hs.canvas.create({ x: rect.x, y: rect.y, w: rect.w, h: rect.h })
         .level("status")
-        .hstack()
-        .spacing(0)
-    overlay.rectangle()
-        .fill(HSColor.hex(config.isolationColor))
-        .opacity(config.isolationOpacity)
-        .frame({ w: "100%", h: "100%" })
-    overlay.end()
+        // The dimming is a veil, not a surface: clicks pass straight through it to the
+        // windows underneath.
+        .ignoreMouseEvents(true)
+        .behaviorList(["canJoinAllSpaces", "stationary"])
+    overlay.appendElements([{
+        type: "rectangle",
+        action: "fill",
+        fillColor: canvasColor(config.isolationColor, config.isolationOpacity),
+        frame: { x: 0, y: 0, w: rect.w, h: rect.h }
+    }])
     overlay.show()
 
     isolationWindows.push(overlay)
@@ -989,9 +1006,8 @@ function addOverlay(screenRect) {
  * screen is covered by four panels around the window — above, below, left and right — and
  * every other screen by one.
  *
- * hs.ui windows cannot ignore mouse events, so while this is on, clicks land on the
- * dimming rather than on the windows beneath it. The focused window stays clickable
- * because nothing covers it.
+ * The panels ignore mouse events, so clicks reach the windows beneath the dimming as
+ * usual; nothing covers the focused window in any case.
  */
 function startIsolation() {
     if (isolationOn()) return module.exports

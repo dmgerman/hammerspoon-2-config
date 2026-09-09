@@ -31,7 +31,7 @@
 const config = {
     // Where a relative `icon` path is looked up.
     iconDir: hs.appinfo.configDir + "/icons",
-    // Rendered tiles, and the PNG and base64 forms of each icon, are kept here.
+    // Rendered tiles are kept here.
     cacheDir: hs.appinfo.configDir + "/.cache/menu-gt",
     // Edge of a button image, in pixels. 96 is the Stream Deck XL's native size.
     tileSize: 96,
@@ -50,13 +50,26 @@ const config = {
     iconScaleAlone: 0.94,
     background: "#101014",
     labelColor: "#F0F0F0",
+    // The size a label starts at. It shrinks, as far as labelSizeFloor, until it fits.
     labelSize: 15,
-    // The presenter's letters. A tile's own label is drawn by hs.canvas, which has no
-    // font-family attribute and always uses the system font, so this does not reach it.
+    labelSizeFloor: 9,
+    // A font's PostScript name, not its display name — "Helvetica-Bold", not "Helvetica
+    // Bold". Null draws in the system font. Used for a button's label and for the
+    // presenter's letters alike.
     font: "Helvetica",
     // Template images, such as SF Symbols, are black on transparent and would be
     // invisible. They are recoloured to this.
     symbolColor: "#FFFFFF",
+
+    // How see-through the menu is on screen, from 0 for invisible to 1 for solid. It
+    // reaches the whole of it: the panel behind the buttons, and each button entire —
+    // background, icon and label together — so the menu fades as one thing rather than
+    // becoming a set of solid icons floating on a translucent sheet.
+    //
+    // It is applied when the menu is displayed, not when a button is drawn, so the cached
+    // tiles are the same whatever it is set to, and a Stream Deck — which has no
+    // transparency to give — is unaffected.
+    alpha: 0.8,
 
     // The on-screen presenter.
     screen: {
@@ -156,12 +169,44 @@ function canvasColor(value, fallback) {
     }
 }
 
+/** The overall transparency, as a multiplier. Out-of-range or unset values mean solid. */
+function alphaFactor() {
+    const value = Number(config.alpha)
+    if (!isFinite(value)) return 1
+    return Math.max(0, Math.min(1, value))
+}
+
+/**
+ * A hex colour with `config.alpha` folded into it, for hs.ui, which takes a string.
+ *
+ * @param {string} value A colour, with or without its own alpha.
+ * @returns {string} An eight-digit `#RRGGBBAA`.
+ */
+function hexWithAlpha(value, fallback) {
+    const color = canvasColor(value, fallback)
+    color.alpha *= alphaFactor()
+    const byte = (component) => Math.round(Math.max(0, Math.min(1, component)) * 255)
+        .toString(16).padStart(2, "0")
+    return "#" + byte(color.red) + byte(color.green) + byte(color.blue) + byte(color.alpha)
+}
+
 // A canvas draws an image at whatever resolution the image already holds, so a symbol
 // left at its natural size — a fraction of a button — arrives soft however large the
 // frame it is given. Everything is rasterised at twice the tile edge instead.
+//
+// The longer side is what reaches that size: forcing both would distort anything that is
+// not square, and an SF Symbol rarely is. `imageScaling` fits the result to its frame
+// afterwards without stretching it.
 function sizedForTile(image) {
+    const box = config.tileSize * 2
+    const current = image.size
+    const width = (current && current.w) || box
+    const height = (current && current.h) || box
+    const scale = box / Math.max(width, height)
+
     const copy = image.copyImage()
-    copy.size = new HSSize(config.tileSize * 2, config.tileSize * 2)
+    copy.size = new HSSize(Math.max(1, Math.round(width * scale)),
+                           Math.max(1, Math.round(height * scale)))
     return copy
 }
 
@@ -179,15 +224,26 @@ function sizedForTile(image) {
  * @returns {object} A recoloured HSImage, or the original if the canvas cannot render.
  */
 function tintedImage(image, hex) {
-    const box = config.tileSize * 2
-    const canvas = hs.canvas.create({ x: 0, y: 0, w: box, h: box })
+    const source = sizedForTile(image)
+    // The canvas takes the symbol's own proportions, so the recoloured copy comes back
+    // without transparent margins around it and the tile can fit it on its own terms.
+    const size = source.size
+    const box = { w: (size && size.w) || config.tileSize * 2, h: (size && size.h) || config.tileSize * 2 }
+
+    const canvas = hs.canvas.create({ x: 0, y: 0, w: box.w, h: box.h })
     canvas.appendElements([
-        { type: "image", image: sizedForTile(image), frame: { x: 0, y: 0, w: box, h: box } },
+        {
+            type: "image",
+            image: source,
+            frame: { x: 0, y: 0, w: box.w, h: box.h },
+            imageScaling: "scaleProportionally",
+            imageAlignment: "center"
+        },
         {
             type: "rectangle",
             action: "fill",
             fillColor: canvasColor(hex),
-            frame: { x: 0, y: 0, w: box, h: box },
+            frame: { x: 0, y: 0, w: box.w, h: box.h },
             compositeRule: "sourceIn"
         }
     ])
@@ -196,45 +252,76 @@ function tintedImage(image, hex) {
     return tinted || image
 }
 
-// Canvas text has no alignment attribute and nothing measures a string, so a label is
-// centred, and sized to fit, from an estimate of its width. The multipliers are for the
-// system font, which is the only one a canvas draws in.
-const NARROW_CHARACTERS = "iljtfIr1.,:;'!|()[] "
-const WIDE_CHARACTERS = "mwMW@%"
-
-function estimateTextWidth(text, fontSize) {
-    let units = 0
-    for (const character of String(text)) {
-        if (NARROW_CHARACTERS.includes(character)) units += 0.30
-        else if (WIDE_CHARACTERS.includes(character)) units += 0.87
-        else if (character >= "A" && character <= "Z") units += 0.68
-        else units += 0.54
-    }
-    return units * fontSize
-}
-
-// Canvas text does not wrap, so a label is broken into lines here. A word longer than the
-// line is truncated rather than allowed to overflow the button.
-function wrapLabel(text, maxChars, maxLines) {
+/**
+ * Break a label into lines that fit a width, measuring as it goes.
+ *
+ * `minimumTextSize` reports what a string would need in the font a text element is already
+ * carrying, so the wrapping is done against the font actually being drawn rather than
+ * against a character count. A single word too long for the line is left alone, for
+ * `textLineBreak` to truncate.
+ *
+ * @param {object} canvas The canvas holding the element.
+ * @param {number} index The text element's index, whose font attributes are measured with.
+ * @param {string} text The label.
+ * @param {number} maxWidth The width to fit, in points.
+ * @param {number} maxLines How many lines to allow.
+ * @returns {Array} The lines.
+ */
+function wrapToWidth(canvas, index, text, maxWidth, maxLines) {
     const words = String(text).split(/\s+/).filter(Boolean)
     const lines = []
     let line = ""
 
     for (const word of words) {
         const candidate = line ? line + " " + word : word
-        if (candidate.length <= maxChars) {
+        const measured = canvas.minimumTextSize(index, candidate)
+        if (!line || (measured.w || 0) <= maxWidth) {
             line = candidate
             continue
         }
-        if (line) lines.push(line)
-        if (lines.length >= maxLines) break
+        lines.push(line)
+        if (lines.length >= maxLines) return lines
         line = word
     }
     if (line && lines.length < maxLines) lines.push(line)
-
     return lines
-        .slice(0, maxLines)
-        .map((l) => (l.length > maxChars ? l.slice(0, maxChars - 1) + "…" : l))
+}
+
+/**
+ * Lay a label into a box: wrapped to fit, and shrunk until it does.
+ *
+ * The text element is already on the canvas, so its size is changed in place and measured
+ * again. Text scales linearly, but wrapping does not — a smaller font may fit more words
+ * on a line — so the two are settled together, a step at a time, down to a floor that
+ * stays readable.
+ *
+ * @param {object} canvas The canvas holding the element.
+ * @param {number} index The text element's index.
+ * @param {string} text The label.
+ * @param {object} box `{w, h}` the label has to fit inside.
+ * @param {number} maxLines How many lines to allow.
+ * @returns {object} `{text, fontSize, height}` — the text with its line breaks in place.
+ */
+function fitLabel(canvas, index, text, box, maxLines) {
+    let fontSize = config.labelSize
+
+    for (;;) {
+        canvas.setElementAttribute(index, "textSize", fontSize)
+        // On a single line there is nothing to wrap to: breaking at a word boundary would
+        // throw the rest of the label away. It is shrunk to fit instead, and if it still
+        // does not fit at the floor, `textLineBreak` truncates what is drawn.
+        const lines = maxLines === 1
+            ? [String(text)]
+            : wrapToWidth(canvas, index, text, box.w, maxLines)
+        const laid = lines.join("\n")
+        const measured = canvas.minimumTextSize(index, laid)
+
+        const fits = (measured.w || 0) <= box.w && (measured.h || 0) <= box.h
+        if (fits || fontSize <= config.labelSizeFloor) {
+            return { text: laid, fontSize: fontSize, height: measured.h || fontSize }
+        }
+        fontSize -= 1
+    }
 }
 
 /**
@@ -242,6 +329,10 @@ function wrapLabel(text, maxChars, maxLines) {
  *
  * Composed and exported in process through hs.canvas, at twice the tile edge — the export
  * renders at the backing scale, so a 96 point tile arrives as a 192 pixel image.
+ *
+ * The label is laid out by the canvas rather than by arithmetic here: it is one text
+ * element, centred by `textAlignment`, wrapped and shrunk against `minimumTextSize`, and
+ * truncated by `textLineBreak` if it still will not fit.
  *
  * @param {object} spec `{background, image, tint, label, labelColor}`. `image` is an
  *        HSImage and `tint` a colour to recolour it to, for a template image such as an
@@ -251,6 +342,7 @@ function wrapLabel(text, maxChars, maxLines) {
  */
 function tileImage(spec) {
     const size = config.tileSize
+    const hasLabel = spec.label !== undefined && spec.label !== null && spec.label !== ""
     const elements = [{
         type: "rectangle",
         action: "fill",
@@ -258,61 +350,65 @@ function tileImage(spec) {
         frame: { x: 0, y: 0, w: size, h: size }
     }]
 
-    const hasLabel = spec.label !== undefined && spec.label !== null && spec.label !== ""
-    const lines = hasLabel ? wrapLabel(spec.label, 13, spec.image ? 1 : 3) : []
-
     if (spec.image) {
         // With a label beneath it the icon sits high and leaves room for the text; alone
-        // it fills the tile.
-        const box = size * (lines.length > 0 ? config.iconScale : config.iconScaleAlone)
+        // it fills the tile. The frame is a box to fit within, not a shape to fill:
+        // `imageScaling` keeps the icon's proportions inside it.
+        const box = size * (hasLabel ? config.iconScale : config.iconScaleAlone)
         elements.push({
             type: "image",
             image: spec.tint ? tintedImage(spec.image, spec.tint) : sizedForTile(spec.image),
             frame: {
                 x: (size - box) / 2,
-                y: lines.length > 0 ? size * 0.02 : (size - box) / 2,
+                y: hasLabel ? size * 0.02 : (size - box) / 2,
                 w: box,
                 h: box
-            }
+            },
+            imageScaling: "scaleProportionally",
+            imageAlignment: "center"
         })
     }
 
-    if (lines.length > 0) {
-        // Shrink the text rather than truncate it, down to a floor that stays readable.
-        // Measured against the estimate rather than a character count, since the system
-        // font is a good deal wider than the Helvetica the SVG used to ask for.
-        const available = size - 6
-        const widest = Math.max(...lines.map((l) => estimateTextWidth(l, config.labelSize)))
-        const fontSize = widest > available
-            ? Math.max(9, Math.floor(config.labelSize * available / widest))
-            : config.labelSize
+    // A label beneath an icon gets the strip below it and one line; a label on its own gets
+    // the tile and up to three.
+    const inset = 3
+    const band = spec.image
+        ? { x: inset, y: size * 0.02 + size * config.iconScale, w: size - inset * 2, h: size - (size * 0.02 + size * config.iconScale) - 2 }
+        : { x: inset, y: inset, w: size - inset * 2, h: size - inset * 2 }
+    const maxLines = spec.image ? 1 : 3
 
-        const lineHeight = fontSize * 1.15
-        const block = lines.length * lineHeight
-        // Sits on the bottom edge beneath the icon, or centred vertically when the label
-        // is the whole button. Canvas text is drawn from the top left of its frame, so
-        // each line gets a frame of its own rather than a baseline.
-        const top = spec.image ? size - 5 - block : (size - block) / 2
-
-        lines.forEach((line, i) => {
-            const width = estimateTextWidth(line, fontSize)
-            elements.push({
-                type: "text",
-                text: line,
-                textSize: fontSize,
-                textColor: canvasColor(spec.labelColor, config.labelColor),
-                frame: {
-                    x: Math.max(1, (size - width) / 2),
-                    y: top + i * lineHeight,
-                    w: size,
-                    h: lineHeight
-                }
-            })
+    const labelIndex = elements.length
+    if (hasLabel) {
+        elements.push({
+            type: "text",
+            text: spec.label,
+            textSize: config.labelSize,
+            textFont: config.font || undefined,
+            textColor: canvasColor(spec.labelColor, config.labelColor),
+            textAlignment: "center",
+            // One line truncates with an ellipsis; three wrap, having already been broken
+            // to fit, and clip only if something has gone wrong.
+            textLineBreak: maxLines === 1 ? "truncateTail" : "wordWrap",
+            frame: band
         })
     }
 
     const canvas = hs.canvas.create({ x: 0, y: 0, w: size, h: size })
     canvas.appendElements(elements)
+
+    if (hasLabel) {
+        // Measured now that the element exists: minimumTextSize reads the font from it.
+        const laid = fitLabel(canvas, labelIndex, spec.label, band, maxLines)
+        canvas.setElementAttribute(labelIndex, "text", laid.text)
+        canvas.setElementAttribute(labelIndex, "textSize", laid.fontSize)
+        // Sits on the bottom edge beneath an icon, and centred in the tile without one.
+        const top = spec.image
+            ? size - 2 - laid.height
+            : band.y + (band.h - laid.height) / 2
+        canvas.setElementAttribute(labelIndex, "frame",
+            { x: band.x, y: Math.max(band.y, top), w: band.w, h: laid.height })
+    }
+
     const image = canvas.imageFromCanvas()
     canvas.destroy()
 
@@ -1070,6 +1166,58 @@ function openSession(menu, presenter, options) {
 // before then navigates or closes, which cancels the pending draw, so the menu is only
 // displayed when it is needed as a reminder of what the letters are.
 
+/**
+ * The screen the user is on: the one holding the focused window.
+ *
+ * Asked of the focused window directly, as hs_time-gt does it, rather than through
+ * `hs.screen.main()`. The two agree in practice — `main()` is `NSScreen.main`, the screen
+ * holding the window with keyboard focus, and it was observed tracking the focused window
+ * correctly even while Hammerspoon had a window of its own on screen. It is used as the
+ * fallback rather than as the answer only because the focused window is the question this
+ * actually asks, and because `main()` is documented in terms of key windows, which is a
+ * detour through AppKit's idea of focus rather than the system's.
+ *
+ * Neither is `hs.screen.primary()`, which is the display carrying the menu bar — what
+ * System Settings calls the Main Display, confusingly enough.
+ *
+ * @returns {object} An HSScreen, or null if there are no screens.
+ */
+function currentScreen() {
+    const focused = hs.window.focusedWindow()
+    if (focused && focused.screen) return focused.screen
+    return hs.screen.main() || hs.screen.primary()
+}
+
+/**
+ * A frame of the given size, centred on a screen.
+ *
+ * The two coordinate systems have to be reconciled to place it: hs.screen frames have
+ * their origin at the top left of the primary display, while hs.ui window frames have
+ * theirs at its bottom left, with y growing upwards. Centring on the primary screen is
+ * symmetric and comes out the same either way — which is why drawing there needed no
+ * conversion — but on any other screen the two disagree, and by the height of the screen
+ * plus the height of the menu.
+ *
+ * @param {object} target The screen to centre on.
+ * @param {number} width The window's width.
+ * @param {number} height The window's height.
+ * @returns {object} An `{x, y, w, h}` frame in hs.ui's coordinates.
+ */
+function centredOnScreen(target, width, height) {
+    const reference = hs.screen.primary() || target
+    if (!target || !reference) return { x: 0, y: 0, w: width, h: height }
+
+    const area = target.fullFrame
+    const primary = reference.fullFrame
+
+    return {
+        x: area.x + (area.w - width) / 2,
+        y: (primary.y + primary.h) - ((area.y + (area.h - height) / 2) + height),
+        w: width,
+        h: height
+    }
+}
+
 function screenPresenter() {
     let win = null
     let hotkeys = []
@@ -1082,6 +1230,11 @@ function screenPresenter() {
     // chooser is up — a self-drawing button on its timer is enough — and the new page must
     // not take back the keys the prompt is using.
     let suspended = false
+    // The screen the menu was raised on, held for as long as it is displayed. Every
+    // navigation destroys the window and builds a new one, and asking again each time
+    // would let a submenu open on a different screen from the menu it came from: by then
+    // the focused window may be the menu's own, or nothing at all.
+    let screen = null
 
     function releaseKeys() {
         for (const hotkey of hotkeys) {
@@ -1159,17 +1312,11 @@ function screenPresenter() {
                 const width = columns * s.tile + (columns - 1) * s.spacing + s.padding * 2
                 const height = rows * cellHeight + (rows - 1) * s.spacing + s.padding * 2
 
-                // Centring is symmetric, so it holds whichever corner the origin is in.
-                const screen = hs.screen.primary().fullFrame
-                win = hs.ui.window({
-                    x: screen.x + (screen.w - width) / 2,
-                    y: screen.y + (screen.h - height) / 2,
-                    w: width,
-                    h: height
-                })
+                if (!screen) screen = currentScreen()
+                win = hs.ui.window(centredOnScreen(screen, width, height))
                     .titled(false)
                     .level(s.level)
-                    .backgroundColor(s.background)
+                    .backgroundColor(hexWithAlpha(s.background, config.background))
 
                 win.vstack().spacing(s.spacing).padding(s.padding)
                 for (let row = 0; row < rows; row++) {
@@ -1183,6 +1330,9 @@ function screenPresenter() {
                             win.image(buttons[index].image)
                                 .resizable()
                                 .aspectRatio("fit")
+                                // Dims the button entire — background, icon and label —
+                                // so the menu is see-through as one piece.
+                                .opacity(alphaFactor())
                                 .frame({ w: s.tile, h: s.tile })
                         } else {
                             win.rectangle()
@@ -1233,6 +1383,9 @@ function screenPresenter() {
             releaseKeys()
             takeKeys = null
             suspended = false
+            // Released with the menu, so the next one is raised on whichever screen is
+            // current then rather than on the one this menu was opened on.
+            screen = null
             destroyWindow()
         }
     }

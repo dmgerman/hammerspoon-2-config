@@ -7,8 +7,13 @@
 //     clock.toggleShow()             // displayed for a few seconds
 //     clock.toggleShowPersistent()   // displayed until toggled again, or Escape
 //
-// hs.ui windows take their frame when they are created, so the window is rebuilt at each
-// show(), which is what allows the clock to appear on a different screen.
+// The clock is an hs.canvas: one text element, drawn in whatever font `textFont` names.
+// It is built at each show() rather than moved, so it appears on whichever screen is
+// current then — a canvas could be repositioned instead, but the clock is torn down when
+// it is hidden, and building one costs microseconds.
+//
+// It ignores the mouse. The window spans the screen, and for the seconds it is up it would
+// otherwise swallow every click behind it.
 
 // MARK: - User-configurable settings
 
@@ -33,8 +38,7 @@ const config = {
 
 // MARK: - State
 
-let clockWindow = null
-let clockText = null        // HSString: set() re-renders without rebuilding the window
+let clockCanvas = null
 let tickTimer = null
 let showTimer = null
 let cancelHotkey = null
@@ -108,10 +112,13 @@ function currentScreen() {
     return win && win.screen ? win.screen : hs.screen.main()
 }
 
-// hs.screen frames have their origin at the top left of the primary display, while
-// hs.ui window frames have theirs at its bottom left, with y growing upwards.
+// hs.screen frames have their origin at the top left of the primary display, while a
+// canvas window's frame has its at that display's bottom left, with y growing upwards.
 function windowFrameCentredOn(screen) {
-    const primary = hs.screen.primary().fullFrame
+    const reference = hs.screen.primary() || screen
+    if (!screen || !reference) return null
+
+    const primary = reference.fullFrame
     const area = screen.fullFrame
 
     // The text is centred within the window, so a full-width window centres the clock on
@@ -128,30 +135,58 @@ function windowFrameCentredOn(screen) {
     }
 }
 
-function build() {
-    clockText = hs.ui.string(formatTime(config.format))
+// Canvas colours are {red, green, blue, alpha} components in 0..1.
+function canvasColor(value) {
+    const text = String(value || "#000000").replace("#", "")
+    const hex = text.length === 3 ? text.split("").map((c) => c + c).join("") : text
+    const component = (at) => parseInt(hex.slice(at, at + 2), 16) / 255
+    return {
+        red: component(0),
+        green: component(2),
+        blue: component(4),
+        alpha: hex.length >= 8 ? component(6) : 1
+    }
+}
 
-    clockWindow = hs.ui.window(windowFrameCentredOn(currentScreen()))
-        .titled(false)
+function build() {
+    const frame = windowFrameCentredOn(currentScreen())
+    if (!frame) return
+
+    clockCanvas = hs.canvas.create(frame)
         .level(config.level)
-        .backgroundColor("#00000000")
-        .text(clockText)
-            .font(HSFont.customSize(config.textFont, config.textSize))
-            .foregroundColor(config.textColor)
+        // The clock is a caption, not a target. Without this a window spanning the screen
+        // would swallow every click behind it for as long as it is up.
+        .ignoreMouseEvents(true)
+        .behaviorList(["canJoinAllSpaces", "stationary"])
+
+    clockCanvas.appendElements([{
+        type: "text",
+        text: formatTime(config.format),
+        textFont: config.textFont || undefined,
+        textSize: config.textSize,
+        textColor: canvasColor(config.textColor),
+        textAlignment: "center",
+        textLineBreak: "clip",
+        frame: { x: 0, y: 0, w: frame.w, h: frame.h }
+    }])
+}
+
+function setText(text) {
+    if (!clockCanvas) return
+    clockCanvas.setElementAttribute(0, "text", text)
 }
 
 function destroyWindow() {
-    if (!clockWindow) return
-    clockWindow.destroy()
-    clockWindow = null
-    clockText = null
+    if (!clockCanvas) return
+    clockCanvas.destroy()
+    clockCanvas = null
 }
 
 // MARK: - Public API
 
 /** Whether the clock is on screen. */
 function isShowing() {
-    return clockWindow !== null
+    return clockCanvas !== null
 }
 
 /**
@@ -159,14 +194,15 @@ function isShowing() {
  * `hide()` is called, or Escape is pressed.
  */
 function show() {
-    if (clockWindow) hide()
+    if (clockCanvas) hide()
 
     build()
-    clockWindow.show()
+    if (!clockCanvas) return module.exports
+    clockCanvas.show()
 
     // Ticks every second, so the displayed time stays current.
     tickTimer = hs.timer.doEvery(1, () => {
-        if (clockText) clockText.set(formatTime(config.format))
+        setText(formatTime(config.format))
     })
 
     if (config.hotkey) {

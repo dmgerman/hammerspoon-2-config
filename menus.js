@@ -358,7 +358,7 @@ const clipboardMenu = [
 // were shift-variants there are capitals here: b/B for track and album back, n/N forward,
 // u/U for a coarse and a fine volume rise, d/D for the fall.
 const musicMenu = [
-    { label: "Play/Pause", icon: "symbol:playpause.fill", key: "p", command: "appleMusic-play-pause" },
+    { label: "Play/Pause", icon: "symbol:playpause.fill", key: "p", command: "appleMusic-play-pause", keepOpen: false },
     { label: "Prev track", icon: "symbol:backward.fill", key: "b", command: "appleMusic-previous-track" },
     { label: "Next track", icon: "symbol:forward.fill", key: "n", command: "appleMusic-next-track" },
     { label: "Prev album", icon: "symbol:backward.end.fill", key: "B", command: "appleMusic-previous-album" },

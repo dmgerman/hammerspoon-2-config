@@ -753,6 +753,10 @@ interactive.use.report();
 
 console.log("Finished loading-------------------------");
 
+// The last thing the configuration does, so seeing it means everything above it ran. A
+// reload that fails part way through leaves no alert rather than a misleading one.
+hs.ui.alert("Hammerspoon 2 configuration loaded").duration(2).show();
+
 // const hyper = ["⌘", "⌥", "⌃", "⇧"];
 
 // function eventHandler(eventName, appObject) {
