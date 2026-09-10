@@ -153,7 +153,9 @@ function windowSwitcherMenu() {
                 imageProvider: () => ({
                     icon: app && app.bundleID ? "bundle:" + app.bundleID : "symbol:macwindow"
                 }),
-                fn: () => w.focus()
+                // Through the Spoon: window.focus() alone does not bring the application
+                // forward when Hammerspoon is not frontmost, which it is not here.
+                fn: () => hs.spoons["hs_window-gt"].focusWindow(w)
             }
         })
 }
@@ -264,6 +266,9 @@ const windowMenu = {
     buttons: [
         { label: "Undo", icon: "symbol:arrow.uturn.backward", key: "[", command: "window-undo", keepOpen: true },
         { label: "Redo", icon: "symbol:arrow.uturn.forward", key: "]", command: "window-redo", keepOpen: true },
+        // Asks which number key to attach the window to, so the menu has to get out of the
+        // way for the prompt, as the chooser buttons do.
+        { label: "Attach key", icon: "symbol:number", key: "a", command: "window-attach-to-key" },
 
         { label: "Maximize", icon: "symbol:arrow.up.left.and.arrow.down.right", key: "m", command: "window-maximize" },
         { label: "Left half", icon: "symbol:rectangle.lefthalf.filled", key: "h", command: "window-left-half" },

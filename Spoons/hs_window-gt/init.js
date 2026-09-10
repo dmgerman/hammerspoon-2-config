@@ -48,6 +48,15 @@ const config = {
     // Seconds the path stays on screen after a capture.
     screenshotAlertSeconds: 3,
 
+    // Windows attached to number keys. attachKeyToWindow() binds one of attachKeys, with
+    // these modifiers, to focus the window it was called on. Modifiers are named as
+    // hs.hotkey wants them: "cmd", "alt", "ctrl", "shift".
+    //
+    // 0 is not among the keys because alt-0 is what invokes the attaching, and attaching a
+    // window to it would replace that binding.
+    attachModifiers: ["alt"],
+    attachKeys: "123456789",
+
     // Seconds between sweeps for records of windows that have closed.
     forgetInterval: 120,
 
@@ -107,6 +116,31 @@ function alert(message) {
 
 function focused() {
     return hs.window.focusedWindow()
+}
+
+/**
+ * Focus a window and bring its application forward.
+ *
+ * Not window.focus() alone. That sets the window as its application's focused one and then
+ * calls NSRunningApplication.activate(), which macOS ignores when the calling application
+ * is not frontmost — and Hammerspoon never is at the moment a hotkey fires. It fails
+ * silently, reporting success while nothing moves. hs.application.launchOrFocus() goes
+ * through NSWorkspace.openApplication, which is not restricted, and is what hs_menu-gt
+ * uses for the same reason.
+ *
+ * The window is focused first so that the application comes forward with the right window
+ * already selected.
+ *
+ * @param {object} window The window to focus.
+ * @returns {boolean} Whether the window accepted focus.
+ */
+function focusWindow(window) {
+    if (!window) return false
+
+    const accepted = window.focus()
+    const bundleID = window.application ? window.application.bundleID : null
+    if (bundleID) hs.application.launchOrFocus(bundleID)
+    return accepted
 }
 
 /** Whether two frames describe the same rectangle, within a pixel. */
@@ -801,10 +835,7 @@ function swapWithPrevious(win) {
 function previousWindow() {
     if (previousFocusedId !== null) {
         const still = hs.window.allWindows().find((w) => w.id === previousFocusedId)
-        if (still) {
-            still.focus()
-            return true
-        }
+        if (still) return focusWindow(still)
     }
 
     // Nothing remembered, or it has gone: the next window in order will do.
@@ -813,8 +844,7 @@ function previousWindow() {
         alert("No previous window")
         return false
     }
-    ordered[1].focus()
-    return true
+    return focusWindow(ordered[1])
 }
 
 /** Send a window behind the others, by focusing the one under it. */
@@ -979,6 +1009,154 @@ function mouseScreenCenterNext() {
     const index = here ? screens.findIndex((s) => s.id === here.id) : -1
     // An unknown current screen gives -1, which starts at the first screen.
     return mouseScreenCenter(screens[(index + 1) % screens.length])
+}
+
+// MARK: - Windows attached to number keys
+//
+// A window is attached to a digit, and that digit with config.attachModifiers focuses it
+// from then on. Ported from wkeys_attach_current_window_to_key() in the Hammerspoon 1
+// configuration, with two changes: attaching a digit that is already in use releases the
+// old binding, which the v1 version left bound and holding its window; and the window is
+// remembered by id and looked up when the key is pressed, so a window that has since been
+// closed is reported rather than silently doing nothing.
+
+// Digit -> {hotkey, id, title}.
+const attachedKeys = new Map()
+
+/** Release a number key, if a window is attached to it. */
+function detachKey(key) {
+    const digit = String(key)
+    const entry = attachedKeys.get(digit)
+    if (!entry) return false
+
+    entry.hotkey.destroy()
+    attachedKeys.delete(digit)
+    return true
+}
+
+/** Release every number key. */
+function detachAllKeys() {
+    for (const digit of [...attachedKeys.keys()]) detachKey(digit)
+    return true
+}
+
+/**
+ * What is attached to what.
+ *
+ * `title` is what the window was called when it was attached, not what it is called now:
+ * the attachment follows the window's id, and a window that has been retitled since is
+ * still listed under its old name.
+ *
+ * @returns {object} Digit -> `{title, id, bundleID, alive, nowTitled}`.
+ */
+function attachedWindows() {
+    const windows = hs.window.allWindows()
+    const listed = {}
+    for (const [digit, entry] of attachedKeys) {
+        const window = windows.find((w) => w.id === entry.id)
+        listed[digit] = {
+            title: entry.title,
+            id: entry.id,
+            bundleID: entry.bundleID,
+            alive: Boolean(window),
+            nowTitled: window ? window.title : null,
+            nowBundleID: window && window.application ? window.application.bundleID : null
+        }
+    }
+    return listed
+}
+
+/**
+ * Focus the window attached to a digit, releasing the key if the window has gone.
+ *
+ * There is no window-closed event to unbind on — Hammerspoon 2 has no hs.window.filter —
+ * so the window is looked up when the key is pressed rather than held onto. Finding it
+ * gone is the moment the attachment is known to be dead, so that is when it is released:
+ * one press says what happened, and the chord is free from then on. Nothing has to be
+ * watched or swept, and a session that never attaches a key does no work at all.
+ *
+ * Releasing the hotkey from inside its own handler is safe. destroy() disables it and
+ * detaches its callbacks; the callback running at that moment is held by the interpreter's
+ * own stack frame, and the dispatch loop returns as soon as it has fired one hotkey.
+ *
+ * The application is checked as well as the id. Window ids are reused: a window opened
+ * after this one closed can be given the same number, and without this the key would
+ * silently focus a stranger. Comparing the bundle identifier catches another application
+ * inheriting the id; a second window of the same application is not distinguishable this
+ * way, and is not worth more machinery.
+ */
+function focusAttached(digit) {
+    const entry = attachedKeys.get(digit)
+    if (!entry) return false
+
+    const window = hs.window.allWindows().find((w) => w.id === entry.id)
+    const bundleID = window && window.application ? window.application.bundleID : null
+    if (!window || (entry.bundleID && bundleID !== entry.bundleID)) {
+        detachKey(digit)
+        alert(`${digit} was ${entry.title}\nthat window has gone, key released`)
+        return false
+    }
+
+    // Pressing the key for the window you are already in goes back where you came from, so
+    // one key both reaches a window and returns from it. previousWindow() is what tracks
+    // that, and it is updated by focusing here as much as by switching windows by hand.
+    const here = focused()
+    if (here && here.id === window.id) return previousWindow()
+
+    return focusWindow(window)
+}
+
+/**
+ * Attach a window to a number key.
+ *
+ * Pressing that key with config.attachModifiers focuses the window from then on, until it
+ * is attached to something else or the configuration is reloaded.
+ *
+ * @param {object} [window] The window to attach. Defaults to the focused one.
+ * @param {string|number} key The digit to attach it to; one of config.attachKeys.
+ * @returns {boolean} Whether it was attached.
+ */
+function attachKeyToWindow(window, key) {
+    const target = window || focused()
+    if (!target) {
+        alert("No window to attach")
+        return false
+    }
+
+    const digit = String(key === undefined || key === null ? "" : key).trim()
+    if (digit.length !== 1 || !config.attachKeys.includes(digit)) {
+        focusWindow(target)
+        alert(`Cannot attach to "${digit}"\nuse one of ${config.attachKeys}`)
+        return false
+    }
+
+    // Whatever was on this digit is forgotten: its hotkey is destroyed and its entry
+    // dropped, so the window it pointed at is no longer reachable through this key and
+    // nothing is left holding it.
+    detachKey(digit)
+
+    const title = target.title || (target.application ? target.application.title : "window")
+    const hotkey = hs.hotkey.bind(config.attachModifiers, digit, () => focusAttached(digit), null)
+    if (!hotkey) {
+        focusWindow(target)
+        alert(`Could not bind ${config.attachModifiers.join("-")}-${digit}`)
+        return false
+    }
+
+    attachedKeys.set(digit, {
+        hotkey: hotkey,
+        id: target.id,
+        title: title,
+        bundleID: target.application ? target.application.bundleID : null
+    })
+
+    // Reading the digit takes a prompt, and the prompt makes Hammerspoon the active
+    // application. Without this the window just attached is left in the background and
+    // Hammerspoon is what you are typing into. Done on every exit above as well, since the
+    // prompt has been and gone whether or not anything was attached.
+    focusWindow(target)
+    alert(`${config.attachModifiers.join("-")}-${digit}\n${title}`)
+    return true
 }
 
 // MARK: - Isolation
@@ -1236,6 +1414,7 @@ function stop() {
     removeAdvice()
     stopIsolation()
     mouseHighlightClear()
+    detachAllKeys()
     if (forgetTimer) {
         forgetTimer.stop()
         forgetTimer = null
@@ -1304,6 +1483,13 @@ module.exports = {
     startIsolation,
     stopIsolation,
     isolationOn,
+    focusWindow,
+    // Windows attached to number keys.
+    attachKeyToWindow,
+    focusAttached,
+    detachKey,
+    detachAllKeys,
+    attachedWindows,
     // Information.
     info,
     screenshot,

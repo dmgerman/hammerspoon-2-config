@@ -645,6 +645,25 @@ interactive.use("hs_window-gt", {
             fn: () => win.mouseScreenCenter()
         });
 
+        // Two parameters, and the order matters: the window is read from the snapshot
+        // taken when the command was invoked, before the prompt for the key takes focus.
+        // Reading it afterwards would attach Hammerspoon's own prompt window.
+        interactive.define({
+            name: "window-attach-to-key",
+            doc: "Attach a window to a number key, so that key with alt focuses it from then on.",
+            interactive: [
+                { name: "window", reader: interactive.readers.window.auto },
+                { name: "key", reader: interactive.readers.string.prompted, default: "1" }
+            ],
+            fn: (w, key) => win.attachKeyToWindow(w, key)
+        });
+
+        interactive.define({
+            name: "window-detach-keys",
+            doc: "Release every number key a window has been attached to.",
+            fn: () => win.detachAllKeys()
+        });
+
         interactive.define({
             name: "mouse-screen-center-next",
             doc: "Put the pointer in the middle of the next screen.",
@@ -801,6 +820,10 @@ interactive.setKeys({
     "cmd-ctrl-alt x": "commands-execute",
     "cmd-ctrl-alt r": "hammerspoon-reload",
     "cmd-ctrl-alt c": "hammerspoon-console-toggle",
+
+    // alt-0 attaches the focused window to a number key; alt-1 to alt-9 then focus the
+    // windows attached to them. Bound by hs_window-gt as they are attached.
+    "alt 0": "window-attach-to-key",
 
     "alt m": "window-maximize",
     "alt v": "window-vertical-maximize",

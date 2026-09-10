@@ -24,6 +24,23 @@ Hammerspoon2 is a replacement for Hammerspoon that uses **JavaScript instead of 
 2. **Syntax:** Use modern JavaScript features (arrow functions, const/let, template literals)
 3. **API Structure:** Similar to original Hammerspoon but adapted for JavaScript
 
+## Naming
+
+Two conventions, and they do not mix. Ported Hammerspoon 1 code is renamed to match these
+rather than keeping its Lua spelling.
+
+| What | Style | Examples |
+|------|-------|----------|
+| Functions and variables | `camelCase` | `attachKeyToWindow`, `mouseScreenCenterNext`, `forgetClosedWindows` |
+| Spoon `config` keys | `camelCase` | `attachModifiers`, `screenshotDir`, `historySize` |
+| Module-level constants | `UPPER_SNAKE` | `CANCEL`, `MUSIC_BUNDLE_ID`, `DELTA_PRESETS` |
+| Command names | `hyphenated`, Emacs Lisp style | `window-attach-to-key`, `mouse-screen-center-next` |
+| Spoon directories | `hs_<name>-gt` | `hs_window-gt` |
+
+No underscores in function names. A command name reads as a sentence of hyphenated words,
+usually `<subject>-<verb>-<qualifier>`: the subject first, so that related commands sort
+together in the chooser.
+
 ## Common Patterns
 
 ### Hotkey Binding
