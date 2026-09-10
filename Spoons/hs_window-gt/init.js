@@ -56,6 +56,9 @@ const config = {
     // window to it would replace that binding.
     attachModifiers: ["alt"],
     attachKeys: "123456789",
+    // Seconds to wait for the number key after attachKeyToWindow() asks for one. The wait
+    // ends early on Escape, or on any key that is not a digit.
+    attachKeyWait: 5,
 
     // Seconds between sweeps for records of windows that have closed.
     forgetInterval: 120,
@@ -1020,8 +1023,72 @@ function mouseScreenCenterNext() {
 // remembered by id and looked up when the key is pressed, so a window that has since been
 // closed is reported rather than silently doing nothing.
 
-// Digit -> {hotkey, id, title}.
+// Digit -> {hotkey, id, title, bundleID}.
 const attachedKeys = new Map()
+
+// The number row, by key code. hs.keycodes.map is no use here: it holds both directions in
+// one object, so the names "0" to "9" collide with the key codes 0 to 9, and the digits
+// are missing from it either way. Key codes are read rather than event.characters because
+// characters are transformed by the modifiers -- with Option held, 1 arrives as "\u00a1".
+const DIGIT_KEY_CODES = {
+    18: "1", 19: "2", 20: "3", 21: "4", 23: "5",
+    22: "6", 26: "7", 28: "8", 25: "9", 29: "0"
+}
+const ESCAPE_KEY_CODE = 53
+
+// The tap waiting for a number key, and the timer that gives up on it. One at a time.
+let captureTap = null
+let captureTimer = null
+
+/** Stop waiting for a number key. */
+function captureStop() {
+    if (captureTap) {
+        hs.eventtap.removeWatcher(captureTap)
+        captureTap = null
+    }
+    if (captureTimer) {
+        captureTimer.stop()
+        captureTimer = null
+    }
+}
+
+/**
+ * Wait for one key press and report which digit it was.
+ *
+ * A tap rather than a dialog: a text prompt is a lot of ceremony for one character, and it
+ * takes the keyboard and the focus with it. This consumes the key it captures, so the digit
+ * is not also typed into whatever is in front.
+ *
+ * The key is expected without a modifier. A modifier chord that is already bound is taken
+ * by the hotkey before any tap sees it -- alt-3 would fire the window attached to 3 rather
+ * than arriving here -- so the wait would simply time out.
+ *
+ * @param {function} report Called with the digit, or with null for Escape or a timeout, or
+ *        with "" for a key that is not a digit.
+ */
+function captureDigit(report) {
+    captureStop()
+
+    captureTap = hs.eventtap.addWatcher([hs.eventtap.eventTypes.keyDown], (event) => {
+        const code = event.keyCode
+        captureStop()
+        report(code === ESCAPE_KEY_CODE ? null : (DIGIT_KEY_CODES[code] || ""))
+        return hs.eventtap.consume
+    }, false)
+
+    if (!captureTap) {
+        console.error("[hs_window-gt] could not watch for a key press")
+        report(null)
+        return false
+    }
+
+    captureTap.start()
+    captureTimer = hs.timer.doAfter(config.attachKeyWait, () => {
+        captureStop()
+        report(null)
+    })
+    return true
+}
 
 /** Release a number key, if a window is attached to it. */
 function detachKey(key) {
@@ -1107,25 +1174,14 @@ function focusAttached(digit) {
 }
 
 /**
- * Attach a window to a number key.
+ * Attach a window to a number key, given the digit.
  *
- * Pressing that key with config.attachModifiers focuses the window from then on, until it
- * is attached to something else or the configuration is reloaded.
- *
- * @param {object} [window] The window to attach. Defaults to the focused one.
- * @param {string|number} key The digit to attach it to; one of config.attachKeys.
+ * @param {object} target The window.
+ * @param {string} digit One of config.attachKeys.
  * @returns {boolean} Whether it was attached.
  */
-function attachKeyToWindow(window, key) {
-    const target = window || focused()
-    if (!target) {
-        alert("No window to attach")
-        return false
-    }
-
-    const digit = String(key === undefined || key === null ? "" : key).trim()
+function attachDigit(target, digit) {
     if (digit.length !== 1 || !config.attachKeys.includes(digit)) {
-        focusWindow(target)
         alert(`Cannot attach to "${digit}"\nuse one of ${config.attachKeys}`)
         return false
     }
@@ -1138,7 +1194,6 @@ function attachKeyToWindow(window, key) {
     const title = target.title || (target.application ? target.application.title : "window")
     const hotkey = hs.hotkey.bind(config.attachModifiers, digit, () => focusAttached(digit), null)
     if (!hotkey) {
-        focusWindow(target)
         alert(`Could not bind ${config.attachModifiers.join("-")}-${digit}`)
         return false
     }
@@ -1149,13 +1204,41 @@ function attachKeyToWindow(window, key) {
         title: title,
         bundleID: target.application ? target.application.bundleID : null
     })
-
-    // Reading the digit takes a prompt, and the prompt makes Hammerspoon the active
-    // application. Without this the window just attached is left in the background and
-    // Hammerspoon is what you are typing into. Done on every exit above as well, since the
-    // prompt has been and gone whether or not anything was attached.
-    focusWindow(target)
     alert(`${config.attachModifiers.join("-")}-${digit}\n${title}`)
+    return true
+}
+
+/**
+ * Attach a window to a number key, asking for the key if one is not given.
+ *
+ * With no digit, the next key press is captured and consumed. The key is asked for on its
+ * own, without a modifier: a modifier chord that is already attached would be taken by its
+ * hotkey before the tap saw it.
+ *
+ * Nothing takes the focus, so the window being attached is still the focused one
+ * throughout, and there is nothing to give the focus back to afterwards.
+ *
+ * @param {object} [window] The window to attach. Defaults to the focused one.
+ * @param {string|number} [key] The digit. Omit to be asked for it.
+ * @returns {boolean} Whether a window was found to attach.
+ */
+function attachKeyToWindow(window, key) {
+    const target = window || focused()
+    if (!target) {
+        alert("No window to attach")
+        return false
+    }
+
+    if (key !== undefined && key !== null && String(key).trim() !== "") {
+        return attachDigit(target, String(key).trim())
+    }
+
+    alert(`Press a number key for\n${target.title || (target.application ? target.application.title : "window")}`)
+    captureDigit((digit) => {
+        // null is Escape or a timeout: nothing was chosen, so nothing is said.
+        if (digit === null) return
+        attachDigit(target, digit)
+    })
     return true
 }
 
@@ -1415,6 +1498,7 @@ function stop() {
     stopIsolation()
     mouseHighlightClear()
     detachAllKeys()
+    captureStop()
     if (forgetTimer) {
         forgetTimer.stop()
         forgetTimer = null
@@ -1486,6 +1570,7 @@ module.exports = {
     focusWindow,
     // Windows attached to number keys.
     attachKeyToWindow,
+    attachDigit,
     focusAttached,
     detachKey,
     detachAllKeys,
