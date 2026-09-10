@@ -645,18 +645,12 @@ interactive.use("hs_window-gt", {
             fn: () => win.mouseScreenCenter()
         });
 
-        // Two parameters, and the order matters: the window is read from the snapshot
-        // taken when the command was invoked, before the prompt for the key takes focus.
-        // Reading it afterwards would attach Hammerspoon's own prompt window.
-        interactive.define({
-            name: "window-attach-to-key",
-            doc: "Attach a window to a number key, so that key with alt focuses it from then on.",
-            interactive: [
-                { name: "window", reader: interactive.readers.window.auto },
-                { name: "key", reader: interactive.readers.string.prompted, default: "1" }
-            ],
-            fn: (w, key) => win.attachKeyToWindow(w, key)
-        });
+        // The Spoon asks for the number key itself, by capturing the next key press, so
+        // there is no parameter for it and nothing takes the focus away from the window
+        // being attached.
+        onWindow("window-attach-to-key",
+                 "Attach a window to a number key, so that key with alt focuses it from then on.",
+                 (w) => win.attachKeyToWindow(w));
 
         interactive.define({
             name: "window-detach-keys",
