@@ -635,8 +635,8 @@ function message(text, duration) {
         h: settings.height
     })
         .level(settings.level)
-        // A message is read, not clicked. Without this it would swallow every click in
-        // the upper left of the screen for as long as it is up.
+        // Without this the window would swallow every click in the upper left of the
+        // screen for as long as it is displayed.
         .ignoreMouseEvents(true)
         .behaviorList(["canJoinAllSpaces", "stationary"])
 
