@@ -154,7 +154,7 @@ it is the default.
 
 #+begin_src js   :exports both
 const windowMenu = {
-    // Placing a window is the whole errand, so a press closes the menu...
+    // A window is placed once, so a press closes the menu...
     keepOpen: false,
     buttons: [
         { label: "Maximize", command: "window-maximize" },          // closes
@@ -170,8 +170,7 @@ never overrules a button that asked for something.
 
 Two things do not take the default:
 
-- *A button with a submenu.* Descending into a submenu is not the end of an errand, so it
-  stays open whatever the menu around it says. A short press never asks the question — it
+- *A button with a submenu.* It stays open whatever the menu around it says. A short press never asks the question — it
   descends — but a /hold/ on a submenu button runs its action, and that should not close
   the menu either.
 - *A menu written as a plain array*, which has nowhere to carry a default. Nothing changes

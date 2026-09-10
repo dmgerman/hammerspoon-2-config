@@ -18,12 +18,11 @@
 // Byte counts come from the kernel by way of netstat, so they are physical-layer figures
 // for the interface: bytes inside a VPN tunnel are included.
 //
-// Three departures from the v1 Spoon, each forced by the v2 API:
+// Two departures from the v1 Spoon, each forced by the v2 API:
 //   * Network names come from a Shortcut. hs.wifi.currentNetwork() returns nothing on
 //     recent macOS unless Location Services has authorized the caller.
 //   * There is no hs.execute, so netstat, route and scutil run under hs.task, and every
 //     reading is asynchronous. A poll cycle never overlaps its predecessor.
-//   * Network names come from a Shortcut rather than hs.wifi, as above.
 //
 // The banner is an hs.canvas, as in hs_time-gt: one text element, in whatever font
 // bannerFont names, ignoring the mouse so it does not swallow clicks behind it.
@@ -613,8 +612,8 @@ function bannerBuild(text) {
     const frame = bannerFrame()
     bannerCanvas = hs.canvas.create(frame)
         .level(config.bannerLevel)
-        // A caption, not a target: without this it would swallow clicks in the upper left
-        // of the screen for as long as it is up.
+        // Without this the banner would swallow clicks in the upper left of the screen
+        // for as long as it is displayed.
         .ignoreMouseEvents(true)
         .behaviorList(["canJoinAllSpaces", "stationary"])
 

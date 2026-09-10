@@ -42,6 +42,12 @@ const config = {
     mouseHighlightWidth: 4,
     mouseHighlightSeconds: 0.5,
 
+    // Where screenshot() writes. The pasteboard copy is usually the one that gets used, so
+    // this is somewhere to find the file afterwards rather than somewhere to keep it.
+    screenshotDir: "/tmp",
+    // Seconds the path stays on screen after a capture.
+    screenshotAlertSeconds: 3,
+
     // Seconds between sweeps for records of windows that have closed.
     forgetInterval: 120,
 
@@ -78,6 +84,12 @@ let isolationWindows = []
 // second move removes the first ring before drawing its own.
 let highlightWindow = null
 let highlightTimer = null
+
+// How far through the window order mouseWindowCenterNext() has walked, and the order it
+// was walking, so that a changed list restarts it. See that function for why it cannot
+// just take the second window every time.
+let mouseNextIndex = 0
+let mouseNextOrder = ""
 
 // Held: a timer with no reference left is collected before it fires.
 let forgetTimer = null
@@ -864,7 +876,7 @@ function mouseHighlight(x, y) {
 
     highlightWindow = hs.canvas.create({ x: rect.x, y: rect.y, w: rect.w, h: rect.h })
         .level("status")
-        // A pointer to look at, never to click: the ring lets everything through.
+        // Clicks inside the ring reach whatever is underneath it.
         .ignoreMouseEvents(true)
         .behaviorList(["canJoinAllSpaces", "stationary"])
     highlightWindow.appendElements([{
@@ -898,14 +910,36 @@ function mouseWindowCenter(win) {
     return mouseMoveTo(frame.x + frame.w / 2, frame.y + frame.h / 2)
 }
 
-/** Put the pointer in the middle of the next window in order. */
+/**
+ * Put the pointer in the middle of the next window, advancing on each call.
+ *
+ * The position in the order has to be remembered between calls. Moving the pointer neither
+ * raises nor focuses a window, so `orderedWindows()` returns the same list every time, and
+ * taking the second entry each call would move the pointer to the same window however
+ * often it was invoked.
+ *
+ * The walk restarts whenever the set of windows or their order differs from the last call,
+ * which is what happens once a window is actually focused or opened, so it does not carry
+ * an index into a list it no longer describes.
+ *
+ * Only standard windows are walked, so the pointer does not stop on a Notification Centre
+ * widget or the Finder's desktop.
+ */
 function mouseWindowCenterNext() {
     const ordered = hs.window.orderedWindows()
+        .filter((w) => w.isStandard && w.isVisible && !w.isMinimized)
     if (ordered.length < 2) {
         alert("No other window")
         return false
     }
-    return mouseWindowCenter(ordered[1])
+
+    const order = ordered.map((w) => w.id).join(",")
+    // Index 0 is the frontmost window, so a fresh walk starts at 1, and wrapping past the
+    // end returns to it rather than skipping it.
+    mouseNextIndex = order === mouseNextOrder ? (mouseNextIndex + 1) % ordered.length : 1
+    mouseNextOrder = order
+
+    return mouseWindowCenter(ordered[mouseNextIndex])
 }
 
 /**
@@ -921,6 +955,30 @@ function mouseScreenCenter(screen) {
     if (!target) return false
     const frame = target.fullFrame
     return mouseMoveTo(frame.x + frame.w / 2, frame.y + frame.h / 2)
+}
+
+/**
+ * Put the pointer in the middle of the next screen.
+ *
+ * Nothing is remembered between calls, unlike mouseWindowCenterNext: the pointer is moved
+ * onto the screen, so the screen it is on is where the next call starts from. hs.screen.all()
+ * keeps a stable order, so repeated calls walk the displays and come back round.
+ *
+ * The screen under the pointer is the starting point rather than the focused window's. The
+ * pointer is what is being moved, and after the first call the two are on different screens
+ * anyway, since moving the pointer does not change which window has focus.
+ */
+function mouseScreenCenterNext() {
+    const screens = hs.screen.all()
+    if (screens.length < 2) {
+        alert("Only one screen")
+        return false
+    }
+
+    const here = hs.mouse.getCurrentScreen()
+    const index = here ? screens.findIndex((s) => s.id === here.id) : -1
+    // An unknown current screen gives -1, which starts at the first screen.
+    return mouseScreenCenter(screens[(index + 1) % screens.length])
 }
 
 // MARK: - Isolation
@@ -983,8 +1041,7 @@ function addOverlay(screenRect) {
 
     const overlay = hs.canvas.create({ x: rect.x, y: rect.y, w: rect.w, h: rect.h })
         .level("status")
-        // The dimming is a veil, not a surface: clicks pass straight through it to the
-        // windows underneath.
+        // Clicks pass through the dimming to the windows underneath.
         .ignoreMouseEvents(true)
         .behaviorList(["canJoinAllSpaces", "stationary"])
     overlay.appendElements([{
@@ -1081,6 +1138,72 @@ function info(win) {
     return text
 }
 
+// MARK: - Screenshots
+
+function twoDigits(n) {
+    return String(n).padStart(2, "0")
+}
+
+// Sortable, and safe in a filename on any system: 2026-09-09-174530.
+function timestamp() {
+    const now = new Date()
+    return `${now.getFullYear()}-${twoDigits(now.getMonth() + 1)}-${twoDigits(now.getDate())}` +
+        `-${twoDigits(now.getHours())}${twoDigits(now.getMinutes())}${twoDigits(now.getSeconds())}`
+}
+
+/**
+ * Capture a window to the pasteboard and to a PNG file.
+ *
+ * Both, because the two are used differently: the pasteboard copy can be pasted straight
+ * into a message, and the file remains available afterwards.
+ *
+ * PNG only, deliberately. A window is flat colour and sharp text, which is what PNG
+ * compresses well and JPEG compresses badly: the same capture came to 710KB as a PNG and
+ * 1.3MB as a JPEG at quality 80, with visible artefacts around the text. If these files
+ * ever need to be smaller, scale the image down; JPEG will not make them smaller.
+ *
+ * @param {object} [window] The window. Defaults to the focused one.
+ * @returns {Promise} Resolves to the path written, or to null if nothing was captured.
+ */
+function screenshot(window) {
+    const target = window || focused()
+    if (!target) {
+        console.error("[hs_window-gt] no window to capture")
+        return Promise.resolve(null)
+    }
+
+    const application = target.application ? target.application.title : "window"
+    const directory = hs.fs.pathToAbsolute(config.screenshotDir) || config.screenshotDir
+    const name = `${timestamp()}-${application}`.replace(/[^A-Za-z0-9._-]+/g, "_")
+    const png = `${directory}/${name}.png`
+
+    return target.snapshot().then((image) => {
+        if (!image) return screenshotFailed(application, "nothing was captured")
+
+        hs.pasteboard.writeImage(image)
+
+        if (!image.saveToFile(png)) {
+            return screenshotFailed(application, `could not write ${png}`)
+        }
+
+        // Said on screen, as info() does: the pasteboard copy is invisible, so without
+        // this there is nothing to tell a capture that worked from one that did not.
+        hs.ui.alert(`Copied, and saved to\n${png}`).duration(config.screenshotAlertSeconds).show()
+        console.log(`[hs_window-gt] captured ${application} to ${png}`)
+        return png
+    }, (e) => {
+        // Rejected rather than thrown: the window may have closed, or Screen Recording
+        // permission may not have been granted.
+        return screenshotFailed(application, e && e.message ? e.message : String(e))
+    })
+}
+
+function screenshotFailed(application, reason) {
+    console.error(`[hs_window-gt] could not capture ${application}: ${reason}`)
+    hs.ui.alert(`Could not capture ${application}`).duration(config.screenshotAlertSeconds).show()
+    return null
+}
+
 // MARK: - Lifecycle
 
 function start() {
@@ -1173,6 +1296,7 @@ module.exports = {
     mouseWindowCenter,
     mouseWindowCenterNext,
     mouseScreenCenter,
+    mouseScreenCenterNext,
     mouseMoveTo,
     mouseHighlight,
     // Isolation.
@@ -1182,6 +1306,7 @@ module.exports = {
     isolationOn,
     // Information.
     info,
+    screenshot,
     start,
     stop
 }

@@ -116,6 +116,48 @@ function applicationsMenu() {
         }))
 }
 
+// MARK: - Windows
+//
+// Every window worth switching to, titled and carrying its application's icon. Computed
+// when the menu is opened, so it lists what is on screen at that moment.
+//
+// Only standard windows are listed. An application's other windows — a Notification
+// Centre widget, the Finder's desktop — are not ones to switch to, and there are enough of
+// them to crowd out the ones that are.
+//
+// The buttons show the application's icon rather than a snapshot of the window, though
+// hs.window can now snapshot a window. A snapshot costs about 170ms and they are taken one
+// at a time, so thirteen windows is over two seconds — and the screen presenter binds a
+// page's letters only once every image has been drawn, so the menu would answer nothing at
+// all for that long. Listing the windows costs about 60ms by comparison, nearly all of it
+// in allWindows() itself; reading a title or an application off one is free. Thumbnails
+// become affordable if the presenter is ever able to draw a page before its images are
+// ready, which needs a canvas rather than an hs.ui window.
+//
+// They draw themselves so that nothing is written to the tile cache: a window's title is
+// whatever a browser tab or an editor buffer happens to be showing, and caching by title
+// would leave a PNG on disk for every title ever seen.
+
+function windowSwitcherMenu() {
+    return hs.window.allWindows()
+        .filter((w) => w.isStandard && w.isVisible && !w.isMinimized)
+        .sort((a, b) => {
+            const byApp = (a.application ? a.application.title : "").localeCompare(
+                b.application ? b.application.title : "")
+            return byApp !== 0 ? byApp : (a.title || "").localeCompare(b.title || "")
+        })
+        .map((w) => {
+            const app = w.application
+            return {
+                label: w.title || (app ? app.title : "Window"),
+                imageProvider: () => ({
+                    icon: app && app.bundleID ? "bundle:" + app.bundleID : "symbol:macwindow"
+                }),
+                fn: () => w.focus()
+            }
+        })
+}
+
 // MARK: - Buttons that draw themselves
 //
 // `stateProvider` decides whether anything has changed; the image is only redrawn when it
@@ -212,7 +254,7 @@ const weatherTomorrow = weatherButton(
 // Hammerspoon 2 meaning keeps the lower case and the version 1 one takes the capital —
 // i is Info and I is Isolation, s is To screen and S is Swap. The four that were shift
 // variants in version 1 are capitals here too, which is the same gesture.
-// Placing a window is usually the whole errand, so the menu closes once one has acted.
+// A window is usually placed once, so the menu closes after a button has acted.
 // That is the menu's own `keepOpen`, and it reaches every button that does not answer the
 // question itself: the four below that are pressed several times in a row, or that hand
 // over to a chooser, say `keepOpen: true` and are left displayed. A button with a submenu
@@ -254,8 +296,9 @@ const windowMenu = {
 
         { label: "Isolate", icon: "symbol:moon.fill", key: "I", command: "window-toggle-isolation" },
         { label: "Info", icon: "symbol:info.circle", key: "i", command: "window-info" },
+        { label: "Screenshot", icon: "symbol:camera", key: "P", command: "window-screenshot" },
         { label: "Centre mouse", icon: "symbol:cursorarrow", key: "M", command: "mouse-window-center" },
-        { label: "Mouse next", icon: "symbol:cursorarrow.motionlines", key: "N", command: "mouse-window-center-next" },
+        { label: "Mouse next", icon: "symbol:cursorarrow.motionlines", key: "N", command: "mouse-screen-center-next" },
         { label: "Mouse screen", icon: "symbol:cursorarrow.rays", key: "C", command: "mouse-screen-center" },
 
         { label: "Thirds", icon: "symbol:square.split.1x2", key: "3", children: () => thirdsMenu },
@@ -404,12 +447,16 @@ const rootMenu = [
     weatherTomorrow,
 
     { label: "Apps", icon: "apps.png", key: "a", children: applicationsMenu },
-    todo("Window switcher", "windows.jpeg", "a window list; snapshots are gone from HS2"),
+    { label: "Switcher", icon: "windows.jpeg", key: "c", children: windowSwitcherMenu },
 
     { label: "HASS", icon: "hass.png", key: "h", children: hassMenu },
 
     audioOutButton,
     todo("Audio in", "symbol:mic", "an input-device command"),
+
+    // Running UnnaturalScrollWheels is what inverts the wheel, so the button starts and
+    // stops it. macOS's own setting cannot tell a mouse from a trackpad.
+    { label: "Mouse dir", icon: "symbol:computermouse", key: "m", command: "mouse-direction-toggle" },
 
     { label: "Buses", icon: "bus2.png", key: "b", children: busMenu },
     { label: "Teaching", icon: "teaching.png", key: "y", children: teachingMenu },
@@ -478,5 +525,6 @@ module.exports = {
     chromeMenu,
     clipboardMenu,
     musicMenu,
-    applicationsMenu
+    applicationsMenu,
+    windowSwitcherMenu
 }

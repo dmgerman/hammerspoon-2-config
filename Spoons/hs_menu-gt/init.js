@@ -63,8 +63,8 @@ const config = {
 
     // How see-through the menu is on screen, from 0 for invisible to 1 for solid. It
     // reaches the whole of it: the panel behind the buttons, and each button entire —
-    // background, icon and label together — so the menu fades as one thing rather than
-    // becoming a set of solid icons floating on a translucent sheet.
+    // background, icon and label together — so that the whole menu is dimmed by the same
+    // amount, rather than solid buttons being left on a translucent panel.
     //
     // It is applied when the menu is displayed, not when a button is drawn, so the cached
     // tiles are the same whatever it is set to, and a Stream Deck — which has no
@@ -1140,10 +1140,10 @@ function openSession(menu, presenter, options) {
         if (button.screen) return button.screen === "stay"
         if (button.dismiss !== undefined) return button.dismiss === false
 
-        // A button with a submenu is not the end of an errand, so it stays open whatever
-        // the menu around it defaults to. A short press on one never reaches here — it
-        // descends instead — but a hold on it does, since a hold on a submenu is left for
-        // an action, and closing the menu is not what descending into it should do.
+        // A button with a submenu stays open whatever the menu around it defaults to.
+        // A short press on one never reaches here, because it descends into the submenu
+        // instead; a hold does reach here, since a hold on a submenu runs its action, and
+        // that should not close the menu either.
         if (button.children) return true
 
         const fallback = menuDefaults(menu).keepOpen

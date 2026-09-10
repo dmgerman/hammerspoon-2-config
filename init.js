@@ -481,6 +481,13 @@ interactive.use("hs_hass-gt", {
 });
 
 interactive.use("hs_menu-gt", {
+    // `config` is merged over the Spoon's own, one key deep, so top-level settings belong
+    // here and anything nested — config.screen — has to go in `after` instead, or the
+    // whole nested object would be replaced.
+    config: {
+        alpha: 0.7
+    },
+
     // The letters answer immediately; the window is only drawn when half a second has
     // passed without one being pressed. Most presses are from memory and never need it.
     after: (menu) => {
@@ -581,6 +588,8 @@ interactive.use("hs_window-gt", {
         onWindow("mouse-window-center", "Put the pointer in the middle of a window.", (w) => win.mouseWindowCenter(w));
         onWindow("window-info", "Show the application, title, screen and frame of a window.", (w) => win.info(w));
 
+        onWindow("window-screenshot", "Copy a window to the clipboard and save it as a PNG.", (w) => win.screenshot(w));
+
         onWindow("window-toggle-fullscreen", "Enter or leave fullscreen for a window.", (w) => w.toggleFullscreen());
         onWindow("window-minimize", "Minimize a window.", (w) => w.minimize());
 
@@ -634,6 +643,12 @@ interactive.use("hs_window-gt", {
             name: "mouse-screen-center",
             doc: "Put the pointer in the middle of the focused window's screen.",
             fn: () => win.mouseScreenCenter()
+        });
+
+        interactive.define({
+            name: "mouse-screen-center-next",
+            doc: "Put the pointer in the middle of the next screen.",
+            fn: () => win.mouseScreenCenterNext()
         });
 
         interactive.define({
@@ -705,6 +720,50 @@ interactive.define({
     fn: () => hs.task.shell("/usr/bin/open -a ScreenSaverEngine").catch((e) => {
         console.error(`[screen-lock] failed: ${e && e.stderr ? e.stderr : e}`);
     })
+});
+
+// The scroll wheel.
+//
+// macOS keeps one scroll direction for every pointing device — NSGlobalDomain's
+// com.apple.swipescrolldirection — so a mouse and a trackpad cannot disagree about it.
+// It appears under both Trackpad and Mouse in System Settings, but both checkboxes write
+// the same value. Setting it from a script is no use either: the preference is written,
+// and nothing re-reads it until the next login, whatever notification is posted alongside.
+// The Hammerspoon 1 configuration drove the checkbox by UI scripting instead, which broke
+// when System Preferences became System Settings.
+//
+// So the setting is left alone and UnnaturalScrollWheels is switched on and off instead.
+// It intercepts scroll events and inverts a physical wheel only, leaving the trackpad
+// alone, which is the thing macOS itself cannot do. It has no command line, URL scheme or
+// hotkey, so running it is the only switch there is.
+const SCROLL_INVERTER = "UnnaturalScrollWheels";
+const SCROLL_INVERTER_APP = `/Applications/${SCROLL_INVERTER}.app`;
+
+interactive.define({
+    name: "mouse-direction-toggle",
+    doc: "Invert the mouse's scroll wheel, or stop inverting it. The trackpad is unaffected.",
+    fn: () => {
+        // Matched by name rather than by bundle ID, which is not documented anywhere the
+        // configuration can see without the application installed.
+        const running = hs.application.matchingName(SCROLL_INVERTER);
+        if (running) {
+            running.kill();
+            hs.ui.alert("Mouse wheel: as macOS sends it").duration(2).show();
+            return false;
+        }
+
+        if (!hs.fs.exists(SCROLL_INVERTER_APP)) {
+            hs.ui.alert(`${SCROLL_INVERTER} is not installed\nbrew install --cask unnaturalscrollwheels`)
+                .duration(4).show();
+            return null;
+        }
+
+        hs.task.shell(`/usr/bin/open -a ${JSON.stringify(SCROLL_INVERTER_APP)}`).catch((e) => {
+            console.error(`[mouse-direction-toggle] could not start ${SCROLL_INVERTER}: ${e}`);
+        });
+        hs.ui.alert("Mouse wheel: inverted").duration(2).show();
+        return true;
+    }
 });
 
 // Hammerspoon 2 itself.

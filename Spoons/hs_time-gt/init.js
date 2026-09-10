@@ -154,8 +154,8 @@ function build() {
 
     clockCanvas = hs.canvas.create(frame)
         .level(config.level)
-        // The clock is a caption, not a target. Without this a window spanning the screen
-        // would swallow every click behind it for as long as it is up.
+        // Without this the window, which spans the screen, would swallow every click
+        // behind it for as long as the clock is displayed.
         .ignoreMouseEvents(true)
         .behaviorList(["canJoinAllSpaces", "stationary"])
 
