@@ -11,9 +11,14 @@
 //
 // The recording hook is advice on HSWindow's `frame` setter, so anything that moves a
 // window from JavaScript is recorded, not only the commands here. Hammerspoon 1 had
-// hs.window.filter to subscribe to window events; Hammerspoon 2 has no equivalent, and
-// assembling one from hs.ax means an observer per application per notification. The advice
-// costs one property redefinition and sees everything except a window moved by hand.
+// hs.window.filter to subscribe to window events; Hammerspoon 2 has no single equivalent,
+// and assembling one from hs.ax means an observer per window or per application. The
+// advice costs one property redefinition and sees everything except a window moved by hand.
+//
+// hs.ax watchers can now watch any element rather than only an application, which is what
+// the number keys below use to notice a window closing. Watching windowMoved and
+// windowResized the same way would let the history see a window moved by hand as it
+// happens, rather than reconstructing it afterwards as record() does.
 //
 // Hand movement is recovered without watching for it. Before changing a window we compare
 // where it is with where we last put it; if they differ, someone moved it, and both
@@ -1090,11 +1095,28 @@ function captureDigit(report) {
     return true
 }
 
-/** Release a number key, if a window is attached to it. */
+/**
+ * Release a number key, if a window is attached to it.
+ *
+ * Both halves of the attachment go: the hotkey, and the watcher that was waiting for the
+ * window to close. Removing the watcher takes the same element, notification and listener
+ * that added it, which is why the entry keeps all three.
+ */
 function detachKey(key) {
     const digit = String(key)
     const entry = attachedKeys.get(digit)
     if (!entry) return false
+
+    if (entry.element && entry.onDestroyed) {
+        try {
+            hs.ax.removeWatcher(entry.element, hs.ax.notificationTypes.uIElementDestroyed,
+                                entry.onDestroyed)
+        } catch (e) {
+            // The element is usually already gone when this runs, since the window closing
+            // is what brought us here. Nothing is left to remove, and that is not a fault.
+            console.log(`[hs_window-gt] watcher for ${digit} was already gone: ${e && e.message ? e.message : e}`)
+        }
+    }
 
     entry.hotkey.destroy()
     attachedKeys.delete(digit)
@@ -1198,11 +1220,38 @@ function attachDigit(target, digit) {
         return false
     }
 
+    // Watching the window itself, which became possible when hs.ax watchers stopped being
+    // restricted to applications. Without it the key stays bound to a window that no longer
+    // exists: Hammerspoon goes on swallowing the chord, and nothing gives it back until the
+    // key is pressed and found to be dead. A closed window is invisible as a cause, so the
+    // chord would simply stop working in other applications for no apparent reason.
+    //
+    // The press-time check in focusAttached stays as the backstop. This does not fire when
+    // an application quits outright rather than closing its windows, and addWatcher can
+    // fail to attach at all.
+    const element = target.axElement()
+    let onDestroyed = null
+    if (element) {
+        onDestroyed = () => {
+            if (!attachedKeys.has(digit)) return
+            detachKey(digit)
+            alert(`${config.attachModifiers.join("-")}-${digit} released\n${title} has closed`)
+        }
+        try {
+            hs.ax.addWatcher(element, hs.ax.notificationTypes.uIElementDestroyed, onDestroyed)
+        } catch (e) {
+            console.error(`[hs_window-gt] could not watch ${title} for closing: ${e && e.message ? e.message : e}`)
+            onDestroyed = null
+        }
+    }
+
     attachedKeys.set(digit, {
         hotkey: hotkey,
         id: target.id,
         title: title,
-        bundleID: target.application ? target.application.bundleID : null
+        bundleID: target.application ? target.application.bundleID : null,
+        element: onDestroyed ? element : null,
+        onDestroyed: onDestroyed
     })
     alert(`${config.attachModifiers.join("-")}-${digit}\n${title}`)
     return true
