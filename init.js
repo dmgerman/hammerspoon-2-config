@@ -833,25 +833,3 @@ console.log("Finished loading-------------------------");
 // reload that fails part way through leaves no alert rather than a misleading one.
 hs.ui.alert("Hammerspoon 2 configuration loaded").duration(2).show();
 
-// const hyper = ["⌘", "⌥", "⌃", "⇧"];
-
-// function eventHandler(eventName, appObject) {
-//     console.log("INIT.JS appWatcher eventHandler: " + eventName + " " + appObject.title);
-// }
-
-// The handler is called for every application event, so it does its own selecting.
-// hs.application.addWatcher(eventHandler);
-
-// const safari = hs.application.matchingBundleID("com.apple.Safari");
-// function handler(notification, element) {
-//     console.log("AX event: " + notification + " on: " + element.title);
-// }
-
-// if (safari != null) {
-//     hs.ax.addWatcher(safari, hs.ax.notificationTypes["windowCreated"], handler);
-// }
-
-// hs.hotkey.bind(hyper, "4", () => { console.log("HYPER 4"); }, null);
-// hs.hotkey.bind(hyper, "5",
-//                () => { console.log("HYPER 5 DOWN"); },
-//                () => { console.log("HYPER 5 UP");   });
