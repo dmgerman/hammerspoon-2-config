@@ -401,20 +401,43 @@ class WindowFilter {
     }
 
     /**
-     * The windows this filter accepts, as HSWindow objects.
+     * The windows this filter accepts, with the state the tracker holds for each.
      *
-     * Ordered front to back, so the first is the most recently focused.
+     * Served from the tracker's records, so this makes no accessibility calls at all: the
+     * windows and their titles, screens and flags are already known, and are kept current
+     * by the same notifications that produce the events. That is what the tracker is for.
+     * hs.window.allWindows() and its relatives walk every running process rather than every
+     * application, which on a normal desktop takes over a second.
+     *
+     * While nothing is being watched the tracker holds nothing, so the windows are
+     * enumerated once instead. Subscribing to anything makes subsequent calls free.
+     *
+     * @returns {Array} `{window, state}` objects.
      */
-    windows() {
-        return hs.window.orderedWindows().filter((window) => {
+    records() {
+        if (tracking) {
+            return [...tracked.values()]
+                .filter((record) => record.state && this.allows(record.state))
+                .map((record) => ({ window: record.window, state: record.state }))
+        }
+
+        const found = []
+        for (const window of applicationWindows()) {
             const state = windowState(window)
-            return state ? this.allows(state) : false
-        })
+            if (state && this.allows(state)) found.push({ window: window, state: state })
+        }
+        return found
+    }
+
+    /** The windows this filter accepts, as HSWindow objects. */
+    windows() {
+        return this.records().map((record) => record.window)
     }
 
     /** Whether a window is accepted right now. */
     isWindowAllowed(window) {
-        const state = windowState(window)
+        const tracked_ = tracked.get(window ? window.id : null)
+        const state = tracked_ && tracked_.state ? tracked_.state : windowState(window)
         return state ? this.allows(state) : false
     }
 
@@ -485,6 +508,10 @@ let applicationWatcher = null
 // Debounce timers, by window id, held so they are not collected before they fire.
 const pending = new Map()
 
+// The focused window's id. See readFocusedId() for why this is cached rather than asked
+// for each time.
+let focusedId = null
+
 const WINDOW_NOTIFICATIONS = () => [
     hs.ax.notificationTypes.uIElementDestroyed,
     hs.ax.notificationTypes.windowMoved,
@@ -498,6 +525,28 @@ const APPLICATION_NOTIFICATIONS = () => [
     hs.ax.notificationTypes.windowCreated,
     hs.ax.notificationTypes.focusedWindowChanged
 ]
+
+/**
+ * Every window of every ordinary application.
+ *
+ * Not hs.window.allWindows(), orderedWindows() or visibleWindows(). All three walk every
+ * running process rather than every application: measured on one machine at one moment,
+ * 1556 ms for 23 windows against 18 ms for the same 20 windows gathered per application.
+ * The difference is the 126 agents and daemons among the 143 processes, some of which
+ * answer accessibility slowly.
+ */
+function applicationWindows() {
+    const windows = []
+    for (const application of hs.application.runningApplications()) {
+        if (!worthTracking(application)) continue
+        try {
+            for (const window of (application.allWindows || [])) windows.push(window)
+        } catch (e) {
+            // An application that will not answer is skipped rather than failing the walk.
+        }
+    }
+    return windows
+}
 
 /** Whether an application is worth watching at all. */
 function worthTracking(application) {
@@ -597,9 +646,45 @@ function refresh(id, alsoEmit) {
     deliver(record.window, state, events)
 }
 
-function isFocused(id) {
+/**
+ * Which window has focus, read once per event rather than once per window.
+ *
+ * hs.window.focusedWindow() asks the frontmost application through accessibility, so it
+ * costs whatever that application takes to answer. An application that is busy can take
+ * seconds, and refreshing fifteen windows used to make fifteen of these calls into it. The
+ * answer is the same for all of them, so it is read when something happens that can change
+ * it, and compared from the cache after that.
+ */
+function readFocusedId() {
     const focused = hs.window.focusedWindow()
-    return Boolean(focused && focused.id === id)
+    focusedId = focused ? focused.id : null
+    return focusedId
+}
+
+function isFocused(id) {
+    return focusedId === id
+}
+
+/**
+ * Time a notification handler, when something is watching.
+ *
+ * Accessibility notifications arrive on the main thread, so a handler that blocks blocks
+ * everything. Wrapping them here rather than around hs.ax.addWatcher keeps the handler's
+ * identity intact, which hs.ax.removeWatcher matches on to unregister it.
+ *
+ * Costs one property read per notification when nothing has set the hook.
+ */
+function timed(label, handler) {
+    return (notification, ...rest) => {
+        const watcher = globalThis.__probeSlowCall
+        if (!watcher) return handler(notification, ...rest)
+        const started = Date.now()
+        try {
+            return handler(notification, ...rest)
+        } finally {
+            watcher(`${label}:${notification}`, Date.now() - started)
+        }
+    }
 }
 
 /** Hold an event until the burst it belongs to has finished. */
@@ -629,7 +714,7 @@ function trackWindow(window) {
         return
     }
 
-    const handler = (notification) => {
+    const handler = timed("window", (notification) => {
         switch (notification) {
         case "uIElementDestroyed":
             forgetWindow(id, true)
@@ -655,7 +740,7 @@ function trackWindow(window) {
             // the properties to settle produces one comparison and the whole transition.
             debounce(id, `${id}:state`, config.stateDebounce, () => refresh(id))
         }
-    }
+    })
 
     try {
         hs.ax.addWatcher(element, WINDOW_NOTIFICATIONS(), handler)
@@ -672,11 +757,16 @@ function forgetWindow(id, destroyed) {
     const record = tracked.get(id)
     if (!record) return
 
-    try {
-        hs.ax.removeWatcher(record.element, WINDOW_NOTIFICATIONS(), record.handler)
-    } catch (e) {
-        // Expected when the window has been destroyed: its element is already invalid.
-        log("debug", `watcher for window ${id} was already gone`)
+    // Not removed when the window has been destroyed. Its element is invalid by then, and
+    // hs.ax.removeWatcher reports that as an error on the console rather than returning
+    // one, so asking would produce a line of noise for every window ever closed. The
+    // observer goes with the element.
+    if (!destroyed) {
+        try {
+            hs.ax.removeWatcher(record.element, WINDOW_NOTIFICATIONS(), record.handler)
+        } catch (e) {
+            log("debug", `watcher for window ${id} was already gone`)
+        }
     }
     tracked.delete(id)
 
@@ -701,18 +791,20 @@ function trackApplication(application) {
     const element = application.axElement()
     if (!element) return
 
-    const handler = (notification) => {
+    const handler = timed("app", (notification) => {
         if (notification === "windowCreated") {
             // The new window is not always readable the instant the notification arrives.
             debounce(pid, `app${pid}:created`, 0.05, () => scanApplication(application))
         } else {
             // focusedWindowChanged: which window is focused has moved within this
-            // application, so every window of it may have changed focus state.
+            // application, so every window of it may have changed focus state. The focused
+            // window is read once here, not once per window.
+            readFocusedId()
             for (const [id, record] of tracked) {
                 if (record.state && record.state.pid === pid) refresh(id)
             }
         }
-    }
+    })
 
     try {
         hs.ax.addWatcher(element, APPLICATION_NOTIFICATIONS(), handler)
@@ -757,6 +849,7 @@ function trackerStart() {
     if (tracking) return
     tracking = true
 
+    readFocusedId()
     for (const application of hs.application.runningApplications()) trackApplication(application)
 
     applicationWatcher = (event, application) => {
@@ -767,10 +860,37 @@ function trackerStart() {
         case "didTerminate":
             if (application) forgetApplication(application.pid)
             break
-        default:
+        default: {
             // didActivate, didDeactivate, didHide, didUnhide all change which windows are
-            // focused or on screen, and the state comparison works out which.
-            for (const id of [...tracked.keys()]) refresh(id)
+            // focused or on screen, and the state comparison works out which. Again the
+            // focused window is read once rather than once per window.
+            //
+            // Only the windows a change can reach are refreshed. Refreshing every tracked
+            // window meant one application switch cost a full state read of all of them,
+            // and a state read is several accessibility calls into the window's own
+            // application. An application that is slow to answer — one that is activating
+            // at that moment, which is exactly when these events arrive — blocks each of
+            // those calls, and the cost is paid once per window rather than once. Measured
+            // in a native sample, this was 82% of the main thread during a nine second
+            // stall, all of it inside AXUIElementCopyAttributeValue for subrole, frame and
+            // screen.
+            //
+            // A window can be reached by one of these events when it belongs to the
+            // application the event is about, or when it holds focus or is about to: those
+            // are the only focus flags that can flip.
+            const previouslyFocused = focusedId
+            readFocusedId()
+            const pid = application ? application.pid : null
+
+            for (const [id, record] of tracked) {
+                const state = record.state
+                if (!state) continue
+                const reachable = (pid !== null && state.pid === pid) ||
+                    id === previouslyFocused || id === focusedId || state.focused
+                if (reachable) refresh(id)
+            }
+            break
+        }
         }
     }
     hs.application.addWatcher(applicationWatcher)
@@ -829,6 +949,7 @@ function destroy(filter) {
 function status() {
     return {
         tracking: tracking,
+        focusedId: focusedId,
         applications: trackedApps.size,
         windows: tracked.size,
         filters: filters.size,

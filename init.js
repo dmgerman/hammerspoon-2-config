@@ -717,6 +717,49 @@ interactive.use("hs_window-gt", {
     }
 });
 
+// Switching between windows, as hs_select_window did in the Hammerspoon 1 configuration.
+// The Spoon keeps the most-recently-used order by subscribing to hs_windowfilter-gt, which
+// it loads itself, so nothing here has to arrange that.
+//
+// No keys are bound. These are reachable from the command chooser and can go in a menu; a
+// switcher is worth a key, but which one is not settled yet.
+interactive.use("hs_selectWindow-gt", {
+    commands: (interactive, switcher) => {
+        interactive.define({
+            name: "window-select",
+            doc: "Choose a window to switch to, from every window, most recently used first.",
+            fn: () => switcher.selectWindow()
+        });
+
+        interactive.define({
+            name: "window-select-in-application",
+            doc: "Choose a window to switch to, from the focused application's windows.",
+            fn: () => switcher.selectApplicationWindow()
+        });
+
+        interactive.define({
+            name: "window-select-application",
+            doc: "Choose an application to switch to, showing its most recently used window.",
+            fn: () => switcher.selectApp()
+        });
+
+        // Distinct from window-previous, which hs_window-gt provides: that one follows the
+        // focus history it records itself, while this follows the switcher's order, which
+        // also counts windows that are minimized or belong to a hidden application.
+        interactive.define({
+            name: "window-select-previous",
+            doc: "Switch to the window used before this one, without showing a chooser.",
+            fn: () => switcher.selectPreviousWindow()
+        });
+
+        interactive.define({
+            name: "window-select-previous-in-application",
+            doc: "Switch to the previously used window of the focused application.",
+            fn: () => switcher.selectPreviousApplicationWindow()
+        });
+    }
+});
+
 interactive.define({
     name: "paste",
     doc: "Send cmd-v to the focused application.",
@@ -818,6 +861,9 @@ interactive.setKeys({
     // alt-0 attaches the focused window to a number key; alt-1 to alt-9 then focus the
     // windows attached to them. Bound by hs_window-gt as they are attached.
     "alt 0": "window-attach-to-key",
+
+    // The window switcher, where hs_select_window had it in the version 1 configuration.
+    "alt tab": "window-select",
 
     "alt m": "window-maximize",
     "alt v": "window-vertical-maximize",

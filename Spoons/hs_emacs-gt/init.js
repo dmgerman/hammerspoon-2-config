@@ -380,9 +380,20 @@ function unbindAll() {
 // result back when Emacs is done. Emacs closes the loop by calling endEditing() through
 // the Hammerspoon command line; see hammerspoon.el.
 
-/** The window with this identifier, or null. hs.window has no lookup by id. */
+/**
+ * The window with this identifier, or null. hs.window has no lookup by id.
+ *
+ * Asks hs_windowfilter-gt, which tracks every window, rather than hs.window.allWindows(),
+ * which walks every running process and waits on the slowest of them.
+ */
 function windowById(id) {
     const wanted = Number(id)
+
+    const tracker = hs.spoons ? hs.spoons["hs_windowfilter-gt"] : null
+    if (tracker) {
+        const found = tracker.default.records().find((record) => record.state.id === wanted)
+        if (found) return found.window
+    }
     return hs.window.allWindows().filter((w) => w.id === wanted)[0] || null
 }
 

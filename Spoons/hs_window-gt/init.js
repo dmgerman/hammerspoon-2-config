@@ -122,6 +122,59 @@ function alert(message) {
     hs.ui.alert(message).duration(2).show()
 }
 
+/**
+ * Every window of every ordinary application.
+ *
+ * Not hs.window.allWindows(), orderedWindows() or visibleWindows(). Those walk every
+ * running process rather than every application, and a process that is slow to answer
+ * accessibility holds the whole call up. The same call has measured 52ms with the machine
+ * quiet and 1554ms with a video meeting running, which is a freeze of the whole of
+ * Hammerspoon for as long as it lasts. Enumerating per application asks only the
+ * applications that have windows.
+ *
+ * Ordering is by application rather than front to back, so a caller that needs the order
+ * has to say so; see orderedByFront().
+ */
+function allApplicationWindows() {
+    const windows = []
+    for (const application of hs.application.runningApplications()) {
+        if (application.kind !== "standard") continue
+        try {
+            for (const window of (application.allWindows || [])) windows.push(window)
+        } catch (e) {
+            // An application that will not answer is skipped rather than failing the walk.
+        }
+    }
+    return windows
+}
+
+/**
+ * Windows front to back.
+ *
+ * The only call here that needs hs.window.orderedWindows(): the z-order comes from the
+ * window server and cannot be reconstructed per application. It carries the same cost as
+ * every hs.window enumeration — measured at 1546ms while another process was slow to
+ * answer, against 1ms for asking the tracker — so it is used only where the order itself
+ * is the point, which is swapWithPrevious() and sendToBack().
+ */
+function orderedByFront() {
+    return hs.window.orderedWindows()
+}
+
+/**
+ * Every tracked window, most recently focused first, or null when nothing is tracking.
+ *
+ * hs_windowfilter-gt holds these already. Its order is by use rather than by z-order,
+ * which suits anything asking "the other window" better than the window server's order
+ * does: it includes minimized windows and windows of hidden applications.
+ */
+function trackedWindows() {
+    const tracker = hs.spoons ? hs.spoons["hs_windowfilter-gt"] : null
+    if (!tracker) return null
+    const records = tracker.default.records()
+    return records.length ? records.map((record) => record.window) : null
+}
+
 function focused() {
     return hs.window.focusedWindow()
 }
@@ -145,9 +198,25 @@ function focused() {
 function focusWindow(window) {
     if (!window) return false
 
-    const accepted = window.focus()
-    const bundleID = window.application ? window.application.bundleID : null
-    if (bundleID) hs.application.launchOrFocus(bundleID)
+    // Each step is timed separately when something has set the hook. All three block the
+    // main thread, and which one blocks depends on the application: focus() and reading
+    // .application go through accessibility, while launchOrFocus() goes through
+    // NSWorkspace, which waits for the application to finish activating.
+    const watcher = globalThis.__probeSlowCall
+    const step = (label, fn) => {
+        if (!watcher) return fn()
+        const started = Date.now()
+        try {
+            return fn()
+        } finally {
+            watcher(`focusWindow:${label}`, Date.now() - started)
+        }
+    }
+
+    const accepted = step("focus", () => window.focus())
+    const bundleID = step("application.bundleID",
+        () => (window.application ? window.application.bundleID : null))
+    if (bundleID) step(`launchOrFocus:${bundleID}`, () => hs.application.launchOrFocus(bundleID))
     return accepted
 }
 
@@ -182,7 +251,7 @@ function entryFor(win) {
  * every window ever moved.
  */
 function forgetClosedWindows() {
-    const alive = new Set(hs.window.allWindows().map((w) => w.id))
+    const alive = new Set(allApplicationWindows().map((w) => w.id))
     for (const id of [...history.keys()]) {
         if (!alive.has(id)) history.delete(id)
     }
@@ -314,7 +383,7 @@ function clearHistory() {
 function installAdvice() {
     if (framePropertyOriginal) return
 
-    const win = hs.window.focusedWindow() || hs.window.allWindows()[0]
+    const win = hs.window.focusedWindow() || allApplicationWindows()[0]
     if (!win) {
         console.error("[hs_window-gt] no window to take the prototype from; undo is off")
         return
@@ -607,7 +676,7 @@ function screenList() {
  */
 function fullscreenScreenIds() {
     const ids = new Set()
-    for (const window of hs.window.allWindows()) {
+    for (const window of allApplicationWindows()) {
         if (window.isFullscreen && window.screen) ids.add(window.screen.id)
     }
     return ids
@@ -842,12 +911,14 @@ function swapWithPrevious(win) {
 /** Focus the window that had focus before this one. */
 function previousWindow() {
     if (previousFocusedId !== null) {
-        const still = hs.window.allWindows().find((w) => w.id === previousFocusedId)
+        const still = allApplicationWindows().find((w) => w.id === previousFocusedId)
         if (still) return focusWindow(still)
     }
 
-    // Nothing remembered, or it has gone: the next window in order will do.
-    const ordered = hs.window.orderedWindows()
+    // Nothing remembered, or it has gone: the next window will do. Taken from the tracker,
+    // whose order is by use; hs.window.orderedWindows() would answer with the window
+    // server's order and wait on every running process to do it.
+    const ordered = trackedWindows() || hs.window.orderedWindows()
     if (ordered.length < 2) {
         alert("No previous window")
         return false
@@ -964,7 +1035,9 @@ function mouseWindowCenter(win) {
  * widget or the Finder's desktop.
  */
 function mouseWindowCenterNext() {
-    const ordered = hs.window.orderedWindows()
+    // Any stable order will do for walking the pointer round, so this takes the tracker's
+    // rather than the window server's, which costs a full enumeration.
+    const ordered = (trackedWindows() || hs.window.orderedWindows())
         .filter((w) => w.isStandard && w.isVisible && !w.isMinimized)
     if (ordered.length < 2) {
         alert("No other window")
@@ -1101,19 +1174,23 @@ function captureDigit(report) {
  * Both halves of the attachment go: the hotkey, and the watcher that was waiting for the
  * window to close. Removing the watcher takes the same element, notification and listener
  * that added it, which is why the entry keeps all three.
+ *
+ * @param {string|number} key The digit.
+ * @param {boolean} [destroyed] True when the window has gone, in which case the watcher is
+ *        left alone: its element is invalid by then, and hs.ax.removeWatcher reports that
+ *        as an error on the console rather than returning one. The observer goes with the
+ *        element, so there is nothing to release.
  */
-function detachKey(key) {
+function detachKey(key, destroyed) {
     const digit = String(key)
     const entry = attachedKeys.get(digit)
     if (!entry) return false
 
-    if (entry.element && entry.onDestroyed) {
+    if (!destroyed && entry.element && entry.onDestroyed) {
         try {
             hs.ax.removeWatcher(entry.element, hs.ax.notificationTypes.uIElementDestroyed,
                                 entry.onDestroyed)
         } catch (e) {
-            // The element is usually already gone when this runs, since the window closing
-            // is what brought us here. Nothing is left to remove, and that is not a fault.
             console.log(`[hs_window-gt] watcher for ${digit} was already gone: ${e && e.message ? e.message : e}`)
         }
     }
@@ -1139,7 +1216,7 @@ function detachAllKeys() {
  * @returns {object} Digit -> `{title, id, bundleID, alive, nowTitled}`.
  */
 function attachedWindows() {
-    const windows = hs.window.allWindows()
+    const windows = allApplicationWindows()
     const listed = {}
     for (const [digit, entry] of attachedKeys) {
         const window = windows.find((w) => w.id === entry.id)
@@ -1178,7 +1255,7 @@ function focusAttached(digit) {
     const entry = attachedKeys.get(digit)
     if (!entry) return false
 
-    const window = hs.window.allWindows().find((w) => w.id === entry.id)
+    const window = allApplicationWindows().find((w) => w.id === entry.id)
     const bundleID = window && window.application ? window.application.bundleID : null
     if (!window || (entry.bundleID && bundleID !== entry.bundleID)) {
         detachKey(digit)
@@ -1234,7 +1311,7 @@ function attachDigit(target, digit) {
     if (element) {
         onDestroyed = () => {
             if (!attachedKeys.has(digit)) return
-            detachKey(digit)
+            detachKey(digit, true)
             alert(`${config.attachModifiers.join("-")}-${digit} released\n${title} has closed`)
         }
         try {

@@ -139,25 +139,28 @@ function applicationsMenu() {
 // would leave a PNG on disk for every title ever seen.
 
 function windowSwitcherMenu() {
-    return hs.window.allWindows()
-        .filter((w) => w.isStandard && w.isVisible && !w.isMinimized)
+    // From hs_windowfilter-gt, which already tracks every window and holds its title,
+    // application and flags. hs.window.allWindows() walks every running process instead,
+    // and blocks for as long as the slowest of them takes to answer -- measured at 52ms
+    // with the machine quiet and over 1.5 seconds with a video meeting running.
+    const filter = hs.spoons["hs_windowfilter-gt"]
+    if (!filter) return []
+
+    return filter.default.records()
+        .filter(({ state }) => state.standard && state.visible && !state.minimized)
         .sort((a, b) => {
-            const byApp = (a.application ? a.application.title : "").localeCompare(
-                b.application ? b.application.title : "")
-            return byApp !== 0 ? byApp : (a.title || "").localeCompare(b.title || "")
+            const byApp = a.state.application.localeCompare(b.state.application)
+            return byApp !== 0 ? byApp : a.state.title.localeCompare(b.state.title)
         })
-        .map((w) => {
-            const app = w.application
-            return {
-                label: w.title || (app ? app.title : "Window"),
-                imageProvider: () => ({
-                    icon: app && app.bundleID ? "bundle:" + app.bundleID : "symbol:macwindow"
-                }),
-                // Through the Spoon: window.focus() alone does not bring the application
-                // forward when Hammerspoon is not frontmost, which it is not here.
-                fn: () => hs.spoons["hs_window-gt"].focusWindow(w)
-            }
-        })
+        .map(({ window, state }) => ({
+            label: state.title || state.application || "Window",
+            imageProvider: () => ({
+                icon: state.bundleID ? "bundle:" + state.bundleID : "symbol:macwindow"
+            }),
+            // Through the Spoon: window.focus() alone does not bring the application
+            // forward when Hammerspoon is not frontmost, which it is not here.
+            fn: () => hs.spoons["hs_window-gt"].focusWindow(window)
+        }))
 }
 
 // MARK: - Buttons that draw themselves

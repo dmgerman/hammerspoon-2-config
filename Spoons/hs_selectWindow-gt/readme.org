@@ -1,0 +1,198 @@
+* hs_selectWindow-gt
+
+Switch to a window by typing part of its title or its application's name. The list is
+ordered by when each window was last used, and the selected window is shown as a picture
+while you move through it.
+
+This is a port of the Hammerspoon 1 =hs_select_window= Spoon.
+
+* Simple usage
+
+#+begin_src js   :exports both
+const sw = hs.loadSpoon("hs_selectWindow-gt")
+
+sw.selectWindow()                  // choose from every window
+sw.selectApplicationWindow()       // choose from the focused application's windows
+sw.selectApp()                     // choose an application, by its most recent window
+sw.selectPreviousWindow()          // switch to the last used window, with no chooser
+#+end_src
+
+In this configuration the same functions are available as commands, so they can be run from
+the command chooser or put in a menu without writing any JavaScript. See /Commands/ below.
+
+No keys are bound by default.
+
+* The chooser
+
+Typing filters the list. Both the window's title and the line under it — the application
+and screen — are searched, so =mail chrome= finds a Chrome window with "mail" in its title.
+
+Windows are listed with the most recently used first, so the window you want is usually
+first or second, and Return takes it.
+
+Minimized windows are listed, and marked as such. A window belonging to a hidden
+application is listed too. This is the reason the ordering is recorded rather than read
+from the window server: the system's front-to-back order leaves out both.
+
+** Keys while the chooser is open
+
+| Key         | Action                                          |
+|-------------+-------------------------------------------------|
+| typing      | filter the list                                 |
+| up / down   | move through the list                           |
+| Return      | switch to the selected window                   |
+| Escape      | close without switching                         |
+| =Tab=       | turn the picture off, or back on                |
+| =Shift+Tab= | take the picture of the selected window again   |
+
+=Tab= and =Shift+Tab= are bound only while the chooser is open, and released when it
+closes. Their keys can be changed; see /Settings/.
+
+** The picture
+
+Off by default at the moment: set =config.showThumbnail = true=, or press =Tab= while the
+chooser is open to turn it on for that invocation.
+
+When it is on, the selected window is drawn above the chooser. A picture is taken once per window and kept
+while the chooser is open, so moving back to a window you have already looked at is
+immediate. =Shift+Tab= takes a fresh one, which is useful when the window has changed since.
+
+Taking a picture of a window requires Screen Recording permission. Without it the chooser
+still works and no pictures appear.
+
+* Functions
+
+** selectWindow()
+
+Choose from every window, most recently used first.
+
+** selectApplicationWindow([application])
+
+Choose from one application's windows. With no argument, the focused application's.
+
+#+begin_src js   :exports both
+sw.selectApplicationWindow()            // the application in front
+sw.selectApplicationWindow("Emacs")     // a particular one, by name
+#+end_src
+
+** selectApp()
+
+Choose an application rather than a window: one entry per application, showing its most
+recently used window, and switching to that window.
+
+** selectPreviousWindow()
+
+Switch straight to the window used before the current one. No chooser is shown.
+
+** selectPreviousApplicationWindow()
+
+The same, restricted to the focused application's windows. Useful for moving between two
+windows of one editor or browser.
+
+** order()
+
+The order the chooser will use, as =Application: title= strings. Useful for checking that
+the most-recently-used ordering is what you expect.
+
+#+begin_src js   :exports both
+hs.spoons["hs_selectWindow-gt"].order().slice(0, 3)
+// ["kitty: notes", "Emacs: init.js", "Google Chrome: Inbox"]
+#+end_src
+
+** bindHotkeys(mapping)
+
+Bind keys, if you want them. The action names are =allWindows=,
+=applicationWindows=, =firstWindowPerApp=, =previousWindow= and
+=previousApplicationWindow=.
+
+#+begin_src js   :exports both
+sw.bindHotkeys({
+    allWindows:     [["alt"], "tab"],
+    previousWindow: [["alt"], "`"]
+})
+#+end_src
+
+* Commands
+
+Defined in =init.js= rather than by the Spoon, and reachable from the command chooser.
+
+| Command                                    | Function                                |
+|--------------------------------------------+-----------------------------------------|
+| =window-select=                            | =selectWindow()=                        |
+| =window-select-in-application=             | =selectApplicationWindow()=             |
+| =window-select-application=                | =selectApp()=                           |
+| =window-select-previous=                   | =selectPreviousWindow()=                |
+| =window-select-previous-in-application=    | =selectPreviousApplicationWindow()=     |
+
+Note that =window-previous=, from
+[[file:../hs_window-gt/readme.org][hs_window-gt]], does something similar to
+=window-select-previous=. They differ in what they count: =window-previous= follows the
+focus history that Spoon records, while =window-select-previous= follows this Spoon's
+ordering, which also includes minimized windows and windows of hidden applications.
+
+* Settings
+
+#+begin_src js   :exports both
+const sw = hs.loadSpoon("hs_selectWindow-gt")
+sw.config.rowsToDisplay = 20
+sw.config.showThumbnail = false
+#+end_src
+
+| Setting                    | Default | Meaning                                                  |
+|----------------------------+---------+----------------------------------------------------------|
+| =rowsToDisplay=            |      14 | Rows visible in the chooser at once                      |
+| =width=                    |     0.4 | Chooser width, as a fraction of the screen's width       |
+| =wideWidth=                |    0.22 | The fraction used on a display wider than =wideScreenPoints= |
+| =wideScreenPoints=         |    3000 | Above this width, in points, =wideWidth= is used         |
+| =showThumbnail=            |   false | Whether a picture is shown at all                        |
+| =thumbnailHeightRatio=     |     0.4 | Height of the picture, as a fraction of the screen       |
+| =selectionPollSeconds=     |    0.15 | How often the selected row is checked                    |
+| =persistentThumbnailCache= |   false | Keep pictures between invocations                        |
+| =thumbnailToggleKey=       |   "tab" | Key that turns the picture off and on                    |
+| =thumbnailRefreshKey=      |   "tab" | Key, with shift, that retakes the picture                |
+| =skipApplications=         |  a list | Applications whose windows are never offered             |
+
+=width= and =wideWidth= are fractions, not percentages: 0.4 is four tenths of the screen.
+This is what =hs.chooser= takes, and it differs from the Hammerspoon 1 chooser, which took
+a percentage.
+
+=selectionPollSeconds= exists because the chooser reports no callback when the selection
+moves, so the selected row is read on a timer. A larger value costs less and makes the
+picture lag behind the selection.
+
+Setting =persistentThumbnailCache= to true makes the chooser faster to open and its pictures
+older. =Shift+Tab= retakes the selected one.
+
+* What this Spoon does not do
+
+- *Anything involving Spaces.* The Hammerspoon 1 Spoon could restrict any picker to the
+  current workspace, move a chosen window to the current workspace, and show each window's
+  workspace in the chooser. Hammerspoon 2 has no spaces module, so none of that is here:
+  =all_windows_ws=, =app_windows_ws=, =previous_window_ws=, =previous_app_window_ws= and
+  =all_windows_move_to_current_workspace= are not ported, and the workspace is absent from
+  the line under each window. This will be revisited if a spaces module appears.
+
+- *Windows of applications listed in =config.skipApplications=,* which is Hammerspoon's own
+  windows by default.
+
+* Coming from Hammerspoon 1
+
+| Hammerspoon 1 binding                   | Here                                    |
+|-----------------------------------------+-----------------------------------------|
+| =all_windows=                           | =selectWindow()=                        |
+| =app_windows=                           | =selectApplicationWindow()=             |
+| =first_window_per_app=                  | =selectApp()=                           |
+| =previous_window=                       | =selectPreviousWindow()=                |
+| =previous_app_window=                   | =selectPreviousApplicationWindow()=     |
+| =all_windows_ws= and the other =_ws= bindings | not ported; see above             |
+| =all_windows_move_to_current_workspace= | not ported; see above                   |
+
+=fontSize= is gone: the Hammerspoon 2 chooser has no font setting.
+
+* Requirements
+
+- *Accessibility permission*, which Hammerspoon needs to see windows at all.
+- *Screen Recording permission*, for the pictures. Everything else works without it.
+- [[file:../hs_windowfilter-gt/readme.org][hs_windowfilter-gt]], which supplies the
+  most-recently-used ordering. It is loaded automatically. Without it the Spoon still runs,
+  and lists windows front to back rather than by use.

@@ -251,7 +251,14 @@ const readers = {
             const current = snap ? snap.window : null
             const wantCurrent = parameter.includeCurrent !== false
 
-            const windows = hs.window.orderedWindows().filter(
+            // From hs_windowfilter-gt when it is loaded: it tracks every window already,
+            // whereas hs.window.orderedWindows() walks every running process and waits on
+            // the slowest. The order is lost, which matters only for reading the list.
+            const tracker = hs.spoons ? hs.spoons["hs_windowfilter-gt"] : null
+            const listed = tracker
+                ? tracker.default.records().map((record) => record.window)
+                : hs.window.orderedWindows()
+            const windows = listed.filter(
                 (w) => wantCurrent || !current || w.id !== current.id)
 
             if (!windows.length) {
@@ -313,8 +320,16 @@ const readers = {
             // spaces module, so a screen counts as fullscreen when a window on it is.
             const fullscreen = new Set()
             if (!wantFullscreen) {
-                for (const window of hs.window.allWindows()) {
-                    if (window.isFullscreen && window.screen) fullscreen.add(window.screen.id)
+                const tracker = hs.spoons ? hs.spoons["hs_windowfilter-gt"] : null
+                if (tracker) {
+                    // The tracker holds each window's fullscreen flag and screen already.
+                    for (const { state } of tracker.default.records()) {
+                        if (state.fullscreen && state.screenID !== null) fullscreen.add(state.screenID)
+                    }
+                } else {
+                    for (const window of hs.window.allWindows()) {
+                        if (window.isFullscreen && window.screen) fullscreen.add(window.screen.id)
+                    }
                 }
             }
 
