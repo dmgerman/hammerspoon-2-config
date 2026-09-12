@@ -1,0 +1,7 @@
+{
+    "name": "hs_windowfilter-gt",
+    "version": "0.1",
+    "author": "dmg <dmg@turingmachine.org>",
+    "license": "MIT - https://opensource.org/licenses/MIT",
+    "description": "Subscribe to window events, narrowed by rules. A port of the intent of Hammerspoon 1's hs.window.filter."
+}
