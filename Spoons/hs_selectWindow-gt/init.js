@@ -46,12 +46,18 @@ const config = {
     wideWidth: 0.22,
     wideScreenPoints: 3000,
 
-    // A picture of the selected window, drawn above the chooser. Off for now: taking one
-    // costs around 150ms per window and the drawing has not been looked at on screen yet.
-    // Tab turns it on while the chooser is open, so it can be tried without changing this.
-    showThumbnail: false,
-    // Height of the picture as a fraction of the screen's height.
+    // A picture of the selected window, drawn above the chooser. One snapshot costs around
+    // 120ms, so it is taken when a window is first selected rather than for the whole list,
+    // and kept while the chooser is open. Tab turns it off and on.
+    showThumbnail: true,
+    // Largest the picture may be, as a fraction of the usable screen height. A maximum, not
+    // a target: a snapshot smaller than this is drawn at its own size rather than enlarged.
     thumbnailHeightRatio: 0.4,
+    // How far down the screen the top of the picture sits, as a fraction of screen height.
+    // hs.chooser does not report its own frame, so this is set rather than read from it.
+    thumbnailTopRatio: 0.12,
+    // Gap between the picture and the chooser, in points.
+    thumbnailGap: 12,
     // How often the selected row is read while the chooser is open. There is no callback
     // for the selection changing, so it is polled.
     selectionPollSeconds: 0.15,
@@ -85,6 +91,7 @@ let thumbnails = new Map()         // window id -> HSImage
 let showingThumbnail = config.showThumbnail
 let sessionKeys = []               // hotkeys bound only while the chooser is open
 let lastDrawnId = null
+let pendingSnapshots = new Set()   // window ids whose snapshot has been asked for
 // Window id -> window, for the chooser that is open. Enumerating windows is the most
 // expensive thing this Spoon does, so it is done once and the result kept until the
 // chooser closes.
@@ -228,28 +235,53 @@ function firstRecordPerApplication() {
 // Drawn on a canvas beside the chooser. The chooser reports no callback when the selection
 // moves, so the selected row is read on a timer while the chooser is open.
 
+/**
+ * Where to draw the preview: to the left of the chooser, at most a fraction of the screen
+ * high, and never enlarged beyond the snapshot's own size.
+ *
+ * The height ratio is a maximum rather than a target, which is what Hammerspoon 1 does.
+ * Scaling a snapshot up to a fixed fraction of the screen makes a small window's picture
+ * both blurry and larger than the window it stands for, and makes a wide window's picture
+ * wider than the space beside the chooser.
+ *
+ * Hammerspoon 1 read the chooser's own y by searching hs.window.allWindows() for
+ * Hammerspoon's "Chooser" window. hs.chooser exposes no frame here, and that search costs a
+ * second and a half on this machine, so the position is computed from the screen and the
+ * chooser's width fraction instead. config.thumbnailTopRatio sets the height it sits at.
+ */
 function thumbnailFrame(image) {
     const screen = hs.screen.main() || hs.screen.primary()
     const reference = hs.screen.primary() || screen
     if (!screen || !reference) return null
 
-    const area = screen.fullFrame
-    const primary = reference.fullFrame
-
+    // frame rather than fullFrame: the menu bar and the dock are not usable space, and
+    // Hammerspoon 1 sizes against the usable area.
+    const area = screen.frame
     const size = image.size
-    const height = area.h * config.thumbnailHeightRatio
-    const width = size && size.h ? height * (size.w / size.h) : height
+    if (!size || !size.w || !size.h) return null
 
-    // Centred horizontally, above the middle of the screen, so it does not sit under the
-    // chooser itself.
-    const left = area.x + (area.w - width) / 2
-    const top = area.y + area.h * 0.12
+    let height = Math.min(area.h * config.thumbnailHeightRatio, size.h)
+    let width = size.w * (height / size.h)
+
+    // The chooser is centred, so the space beside it is what is left on one side. A wide
+    // snapshot is narrowed to fit rather than sliding under the chooser or off the screen.
+    const chooser = chooserGeometry(area)
+    const available = (chooser.left - area.x) - config.thumbnailGap * 2
+    if (available > 0 && width > available) {
+        height = height * (available / width)
+        width = available
+    }
+
+    // Top aligned with the chooser, right edge just short of its left edge, as in
+    // Hammerspoon 1.
+    const left = chooser.left - config.thumbnailGap - width
+    const top = chooser.top
 
     // hs.screen measures y downwards from the top of the primary display and a canvas
     // upwards from its bottom.
     return {
         x: left,
-        y: (primary.y + primary.h) - (top + height),
+        y: (reference.fullFrame.y + reference.fullFrame.h) - (top + height),
         w: width,
         h: height
     }
@@ -320,7 +352,15 @@ function showThumbnailFor(id, force) {
         return
     }
 
+    // One request per window at a time. The selected row is polled every
+    // config.selectionPollSeconds and lastDrawnId is not set until the snapshot arrives, so
+    // without this a window slower to capture than the poll interval is asked again on
+    // every tick, and the requests pile up on the window that is already struggling.
+    if (pendingSnapshots.has(id) && !force) return
+    pendingSnapshots.add(id)
+
     window.snapshot().then((image) => {
+        pendingSnapshots.delete(id)
         if (!image) return
         thumbnails.set(id, image)
         // The selection may have moved on while the snapshot was being taken.
@@ -330,6 +370,7 @@ function showThumbnailFor(id, force) {
         }
     }, () => {
         // A window that cannot be captured simply has no picture.
+        pendingSnapshots.delete(id)
     })
 }
 
@@ -415,6 +456,47 @@ function chooserWidth() {
     return screen.fullFrame.w > config.wideScreenPoints ? config.wideWidth : config.width
 }
 
+// Hammerspoon's own bundle, asked for its windows to locate the open chooser.
+const HAMMERSPOON_BUNDLE_ID = "net.tenshu.Hammerspoon-2"
+
+/**
+ * Where the chooser is on screen.
+ *
+ * Its width and left edge follow from hs.chooser centring a window of config.width, and
+ * measuring confirms both to the point. Its vertical position does not follow from anything
+ * this Spoon sets, so it is read from Hammerspoon's own window list: the chooser is the
+ * window whose left edge and width match the computed ones, which separates it from the
+ * console and from this Spoon's own preview canvas.
+ *
+ * Asking one application for its windows costs about 10ms. Hammerspoon 1 found the same
+ * window with hs.window.allWindows(), which walks every process and costs a second and a
+ * half here.
+ *
+ * config.thumbnailTopRatio is the fallback for when the chooser cannot be found, which is
+ * the case in the moment before it is shown.
+ */
+function chooserGeometry(area) {
+    const width = area.w * chooserWidth()
+    const left = area.x + (area.w - width) / 2
+    let top = area.y + area.h * config.thumbnailTopRatio
+
+    try {
+        const app = hs.application.matchingBundleID(HAMMERSPOON_BUNDLE_ID)
+        for (const window of (app ? app.allWindows || [] : [])) {
+            const frame = window.frame
+            if (!frame) continue
+            if (Math.abs(frame.x - left) <= 2 && Math.abs(frame.w - width) <= 2) {
+                top = frame.y
+                break
+            }
+        }
+    } catch (e) {
+        // The computed position stands.
+    }
+
+    return { left, width, top }
+}
+
 /**
  * Show a chooser over a list of windows, and focus whichever is chosen.
  *
@@ -439,6 +521,7 @@ function chooseFrom(records, placeholder) {
 
     sessionWindows = new Map(records.map((r) => [r.state.id, r.window]))
     if (!config.persistentThumbnailCache) thumbnails = new Map()
+    pendingSnapshots = new Set()
     showingThumbnail = config.showThumbnail
     lastDrawnId = null
     mark("session")
@@ -520,11 +603,31 @@ function timings() {
         `front: ${t.front.padEnd(16)} ${t.steps}`)
 }
 
+/**
+ * What the preview is doing, for checking it without watching the screen.
+ *
+ * Says whether the chooser is open, whether previews are switched on, which window is
+ * selected, whether a canvas is currently drawn, and how many snapshots are cached or still
+ * being taken.
+ */
+function thumbnailState() {
+    return {
+        chooserOpen: Boolean(chooser && chooser.isVisible),
+        previewsOn: showingThumbnail,
+        selectedId: selectedWindowId(),
+        drawnId: lastDrawnId,
+        overlayDrawn: Boolean(overlay),
+        cached: thumbnails.size,
+        pending: pendingSnapshots.size
+    }
+}
+
 function finishChoosing() {
     stopPolling()
     releaseSessionKeys()
     hideThumbnail()
     if (!config.persistentThumbnailCache) thumbnails = new Map()
+    pendingSnapshots = new Set()
     sessionWindows = new Map()
     chooser = null
 }
@@ -643,6 +746,7 @@ function stop() {
     }
     focusOrder = []
     thumbnails = new Map()
+    pendingSnapshots = new Set()
 
     for (const key of hotkeys) {
         if (key) key.destroy()
@@ -660,6 +764,7 @@ module.exports = {
     selectPreviousApplicationWindow,
     order,
     timings,
+    thumbnailState,
     bindHotkeys,
     start,
     stop
