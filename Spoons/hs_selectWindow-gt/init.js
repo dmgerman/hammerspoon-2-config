@@ -49,7 +49,7 @@ const config = {
     // A picture of the selected window, drawn above the chooser. One snapshot costs around
     // 120ms, so it is taken when a window is first selected rather than for the whole list,
     // and kept while the chooser is open. Tab turns it off and on.
-    showThumbnail: true,
+    showThumbnail: false,
     // Largest the picture may be, as a fraction of the usable screen height. A maximum, not
     // a target: a snapshot smaller than this is drawn at its own size rather than enlarged.
     thumbnailHeightRatio: 0.4,
@@ -648,6 +648,9 @@ function focusWindowById(id) {
     if (helper && typeof helper.focusWindow === "function") return helper.focusWindow(window)
 
     window.focus()
+    // raise() as well: focus() alone will not leave a full screen space for another window
+    // of the same application. See focusWindow() in hs_window-gt.
+    window.raise()
     const bundleID = window.application ? window.application.bundleID : null
     if (bundleID) hs.application.launchOrFocus(bundleID)
     return true

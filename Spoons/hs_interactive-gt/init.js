@@ -59,6 +59,10 @@ let useCount = 0
 // JavaScriptCore collects the object and the callback never fires.
 let activeChooser = null
 
+// The command chosen from the chooser, when it is run from a timer rather than from the
+// chooser's own callback; see the note there. Held for the same reason as activeChooser.
+let runTimer = null
+
 // MARK: - Prompt observers
 //
 // A prompt takes the keyboard, so whatever else is bound to it has to stand down for as
@@ -397,11 +401,19 @@ const readers = {
 /**
  * Declare a command.
  *
- * @param {object} spec `name`, `fn`, and optionally `doc` and `interactive`.
+ * @param {object} spec `name`, `fn`, and optionally `doc`, `interactive` and `runDelay`.
  *        Each `interactive` entry is `{name, reader, default, optional}`, where `reader`
  *        is one reader variant — `readers.window.auto`, `readers.number.prompted` — or
  *        any function `(context, parameter, snapshot)`. A bare function is also accepted
  *        in place of the whole entry.
+ *
+ *        `runDelay` is a delay in seconds, and applies only when the command is
+ *        run from the command chooser. Zero, the default, runs it from that chooser's own
+ *        callback, which is while the chooser is still closing. A command that opens a
+ *        chooser of its own wants a small delay instead: created during the overlap, the
+ *        new chooser does not take the key window cleanly, and the next thing to draw takes
+ *        it away, which looks like the chooser vanishing by itself. Reached from a key,
+ *        with no other chooser closing, the same command is unaffected. 0.05 is enough.
  * @returns {object} The stored command.
  */
 function define(spec) {
@@ -416,6 +428,7 @@ function define(spec) {
         name: spec.name,
         doc: spec.doc || "",
         fn: spec.fn,
+        runDelay: Number(spec.runDelay) || 0,
         parameters: (spec.interactive || []).map((entry, index) => {
             if (typeof entry === "function") return { name: `arg${index + 1}`, reader: { prompted: entry } }
             return {
@@ -629,12 +642,34 @@ function execute() {
     })))
     chooser.onSelect = (item) => {
         activeChooser = null
-        try {
-            // Before this chooser is counted out, so that a command which prompts in turn
-            // keeps the count above zero and observers see one prompt throughout.
-            if (item) callInteractively(item.text, { snapshot: snap })
-        } finally {
+
+        if (!item) {
             promptClosed()
+            return
+        }
+
+        // The count is not dropped until the command has finished, so that a command which
+        // prompts in turn keeps it above zero and observers see one prompt throughout.
+        const run = () => {
+            try {
+                callInteractively(item.text, { snapshot: snap })
+            } finally {
+                promptClosed()
+            }
+        }
+
+        // From here, or from a timer once this chooser has closed, as the command asked.
+        // See the runDelay option on define().
+        const chosen = registry.get(item.text)
+        const after = chosen ? chosen.runDelay : 0
+
+        if (after > 0) {
+            runTimer = hs.timer.doAfter(after, () => {
+                runTimer = null
+                run()
+            })
+        } else {
+            run()
         }
     }
     activeChooser = chooser

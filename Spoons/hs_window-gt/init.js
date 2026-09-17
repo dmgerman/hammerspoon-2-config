@@ -192,15 +192,24 @@ function focused() {
  * The window is focused first so that the application comes forward with the right window
  * already selected.
  *
+ * window.raise() is then needed for the case of two windows of one application in different
+ * spaces, one of them full screen. Full screen puts a window in a space of its own, and the
+ * only thing that makes macOS leave a space is an application coming forward. When the
+ * window being left and the window being asked for belong to the same application, that
+ * application is already frontmost, so neither activate() nor launchOrFocus() moves
+ * anything, and setting AXFocused on a window in another space does not either: focus()
+ * returns true, hs.window.focusedWindow() reports the new window, and the screen still shows
+ * the old one. AXRaise does cross the space boundary, which is what raise() performs.
+ *
  * @param {object} window The window to focus.
  * @returns {boolean} Whether the window accepted focus.
  */
 function focusWindow(window) {
     if (!window) return false
 
-    // Each step is timed separately when something has set the hook. All three block the
-    // main thread, and which one blocks depends on the application: focus() and reading
-    // .application go through accessibility, while launchOrFocus() goes through
+    // Each step is timed separately when something has set the hook. All of them block the
+    // main thread, and which one blocks depends on the application: focus(), raise() and
+    // reading .application go through accessibility, while launchOrFocus() goes through
     // NSWorkspace, which waits for the application to finish activating.
     const watcher = globalThis.__probeSlowCall
     const step = (label, fn) => {
@@ -214,6 +223,7 @@ function focusWindow(window) {
     }
 
     const accepted = step("focus", () => window.focus())
+    step("raise", () => window.raise())
     const bundleID = step("application.bundleID",
         () => (window.application ? window.application.bundleID : null))
     if (bundleID) step(`launchOrFocus:${bundleID}`, () => hs.application.launchOrFocus(bundleID))

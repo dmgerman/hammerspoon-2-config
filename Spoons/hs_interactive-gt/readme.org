@@ -80,7 +80,7 @@ window parameter, and the lambda is executed with this parameter.
 
 ** define(spec)
 
-/spec/ takes four fields. Only /name/ and /fn/ are required.
+/spec/ takes five fields. Only /name/ and /fn/ are required.
 
 | Field         | Meaning                                                          |
 |---------------+------------------------------------------------------------------|
@@ -88,6 +88,7 @@ window parameter, and the lambda is executed with this parameter.
 | =doc=         | One line, shown in the chooser and by =describeKey=.             |
 | =fn=          | The implementation. Receives the arguments.                      |
 | =interactive= | How to obtain each argument. Omit for a command that takes none. |
+| =runDelay=    | Seconds to wait before running, when run from the command chooser. Defaults to 0. See /Commands that open a chooser/ below. |
 
 Defining a command whose name already exists replaces the previous definition. A
 configuration can therefore be reloaded without error.
@@ -99,6 +100,34 @@ interactive.define({
     fn:   () => hs.spoons["hs_countdown-gt"].cancel()
 })
 #+end_src
+
+** Commands that open a chooser
+
+A command run from the command chooser is run from that chooser's =onSelect=, which is
+called while the chooser is still closing. For nearly every command that is fine. For a
+command that opens a chooser of its own it is not: the second chooser is created while the
+first is still on screen, and it does not take the key window cleanly. The next thing to
+draw takes the key window instead and the new chooser disappears, seemingly by itself.
+
+The same command bound to a key does not show this, because no other chooser is closing.
+That difference — works from a key, vanishes from the chooser — is the sign of it.
+
+=runDelay= is the number of seconds to wait for the first chooser to go. 0.05 is enough.
+It applies only when the command is run from the chooser; a key runs it immediately either
+way.
+
+#+begin_src js   :exports both
+interactive.define({
+    name: "menubar-interactive",
+    doc:  "Choose a macOS menu bar extra and press it.",
+    // This command opens a chooser, so it waits for the command chooser to close first.
+    runDelay: 0.05,
+    fn:   () => hs.spoons["hs_menubar-gt"].choose()
+})
+#+end_src
+
+The default is 0, which runs the command from the chooser's callback as before. Commands
+that do not open a chooser should leave it alone.
 
 ** Naming a command that belongs to a Spoon
 

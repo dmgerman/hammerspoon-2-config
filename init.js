@@ -112,6 +112,10 @@ interactive.use("hs_time-gt", {
 // announcing — home and the office; it is left empty until the announcements have been
 // watched for a while.
 interactive.use("hs_network-gt", {
+    config: {
+        // The banner naming the network, every minute rather than the Spoon's two.
+        bannerInterval: 60
+    },
     commands: (interactive, network) => {
         // Every threshold is per network, and the one to act on is the one in use. Reading
         // its name means running a Shortcut, so these commands return that promise.
@@ -181,6 +185,41 @@ interactive.use("hs_network-gt", {
     }
 });
 
+// The icons on the right of the menu bar, pressed from the keyboard. A port of the
+// hs_menubar Spoon in ~/.hammerspoon.
+//
+// One command only. The extras themselves are named by the Spoon — mb-nordvpn,
+// mb-hammerspoon-2-build — and stay in its own chooser rather than being defined here:
+// finding out what to define would mean scanning every process at load, and a command
+// defined from that scan would name an application that may since have quit.
+interactive.use("hs_menubar-gt", {
+    commands: (interactive, menubar) => {
+        // Two commands over the same list. The first offers the icons themselves and is
+        // quick; the second also offers what is inside each of their menus, which means
+        // reading every menu and takes a few seconds.
+        interactive.define({
+            name: "menubar-interactive",
+            doc: "Choose a macOS menu bar icon and open it.",
+            // This command opens a chooser, so it waits for the command chooser to close
+            // first. Created while that one is still closing, its own chooser does not hold
+            // the key window and the next thing to draw takes it away.
+            runDelay: 0.05,
+            fn: () => menubar.choose()
+        });
+
+        interactive.define({
+            name: "menubar-interactive-deep",
+            doc: "Choose a macOS menu bar icon or any entry inside its menu. Slower: every menu is read.",
+            runDelay: 0.05,
+            fn: () => menubar.choose(true)
+        });
+    },
+    keys: {
+        "cmd-ctrl-alt-shift m": "menubar-interactive",
+        "cmd-ctrl-alt-shift n": "menubar-interactive-deep"
+    }
+});
+
 // A port of ClipboardTool.spoon, loaded in ~/.hammerspoon by dmg_load_clipboard(). The
 // two chords are the ones it bound there. Everything the chooser offers is also a
 // command, so the history can be managed without opening it.
@@ -189,12 +228,16 @@ interactive.use("hs_clipboard-gt", {
         interactive.define({
             name: "clipboard-show",
             doc: "Open the clipboard history.",
+            // Opens a chooser, so it waits for the command chooser to close first.
+            runDelay: 0.05,
             fn: () => clipboard.historyShow()
         });
 
         interactive.define({
             name: "clipboard-toggle",
             doc: "Open the clipboard history, or close it when it is already open.",
+            // Opens a chooser, so it waits for the command chooser to close first.
+            runDelay: 0.05,
             fn: () => clipboard.historyToggle()
         });
 
@@ -333,7 +376,13 @@ interactive.use("hs_appleMusic-gt", {
         command("appleMusic-volume", "Show Apple Music's volume.", () => music.showVolume());
         command("appleMusic-focus", "Bring Apple Music forward.", () => music.focus());
         command("appleMusic-random-album", "Play a random album from the list.", () => music.playRandomAlbum());
-        command("appleMusic-choose-album", "Choose an album from the list and play it.", () => music.chooseAlbum());
+        interactive.define({
+            name: "appleMusic-choose-album",
+            doc: "Choose an album from the list and play it.",
+            // Opens a chooser, so it waits for the command chooser to close first.
+            runDelay: 0.05,
+            fn: () => music.chooseAlbum()
+        });
         command("appleMusic-add-current-album", "Add the album playing to the list.", () => music.addCurrentAlbum());
         command("appleMusic-toggle-auto-play", "Turn auto-play on or off.", () => music.toggleAutoPlay());
 
@@ -372,6 +421,8 @@ interactive.use("hs_url-gt", {
         interactive.define({
             name: "url-route-switch",
             doc: "Choose how URLs are routed, or stop handling them.",
+            // Opens a chooser, so it waits for the command chooser to close first.
+            runDelay: 0.05,
             fn: () => url.switchRoute()
         });
 
@@ -728,18 +779,24 @@ interactive.use("hs_selectWindow-gt", {
         interactive.define({
             name: "window-select",
             doc: "Choose a window to switch to, from every window, most recently used first.",
+            // Opens a chooser, so it waits for the command chooser to close first.
+            runDelay: 0.05,
             fn: () => switcher.selectWindow()
         });
 
         interactive.define({
             name: "window-select-in-application",
             doc: "Choose a window to switch to, from the focused application's windows.",
+            // Opens a chooser, so it waits for the command chooser to close first.
+            runDelay: 0.05,
             fn: () => switcher.selectApplicationWindow()
         });
 
         interactive.define({
             name: "window-select-application",
             doc: "Choose an application to switch to, showing its most recently used window.",
+            // Opens a chooser, so it waits for the command chooser to close first.
+            runDelay: 0.05,
             fn: () => switcher.selectApp()
         });
 
@@ -863,8 +920,8 @@ interactive.setKeys({
     "alt 0": "window-attach-to-key",
 
     // The window switcher, where hs_select_window had it in the version 1 configuration.
-    "alt tab": "window-select",
-    "alt b": "window-select-application",
+    "alt b": "window-select",
+    "alt <tab>": "window-select-application",
     "alt m": "window-maximize",
     "alt v": "window-vertical-maximize",
     // alt-t in the version 1 configuration too.
