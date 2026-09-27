@@ -35,6 +35,9 @@ const config = {
     // hs.window.highlight, which Hammerspoon 2 does not have.
     isolationColor: "#000000",
     isolationOpacity: 0.85,
+    // Seconds between checks for the focus having moved to another window, or the focused
+    // window having been moved or resized. A tick that finds nothing changed draws nothing.
+    isolationFollowInterval: 0.2,
 
     // The ring drawn around the pointer after it is moved, so it can be found again. Its
     // size is the diameter, in pixels, and its width the thickness of the line.
@@ -94,8 +97,14 @@ const history = new Map()
 let framePropertyOriginal = null
 let recording = true
 
-// Isolation overlays, one per screen.
+// Isolation: the dark panels on screen, whether isolation is on (which is not the same as
+// there being panels — a window filling its only screen needs none), the timer that follows
+// the focus, and a description of the panels currently drawn, so that a tick which changes
+// nothing draws nothing.
 let isolationWindows = []
+let isolationActive = false
+let isolationTimer = null
+let isolationLayout = null
 
 // The ring drawn around the pointer, and the timer that takes it away. One at a time: a
 // second move removes the first ring before drawing its own.
@@ -126,11 +135,15 @@ function alert(message) {
  * Every window of every ordinary application.
  *
  * Not hs.window.allWindows(), orderedWindows() or visibleWindows(). Those walk every
- * running process rather than every application, and a process that is slow to answer
- * accessibility holds the whole call up. The same call has measured 52ms with the machine
- * quiet and 1554ms with a video meeting running, which is a freeze of the whole of
- * Hammerspoon for as long as it lasts. Enumerating per application asks only the
- * applications that have windows.
+ * running process rather than every application, so their cost is set by the slowest
+ * process rather than by the number of windows.
+ *
+ * Upstream reduced the accessibility timeout for allWindows() and visibleWindows() in
+ * response to issue #219, and both now measure about 330ms here rather than the 1540ms
+ * they did. orderedWindows() was not covered and still measures about 1560ms.
+ *
+ * 330ms is still a stutter on anything that runs from a timer, and asking the tracker
+ * costs 1ms, so the per-application walk stays.
  *
  * Ordering is by application rather than front to back, so a caller that needs the order
  * has to say so; see orderedByFront().
@@ -152,10 +165,12 @@ function allApplicationWindows() {
  * Windows front to back.
  *
  * The only call here that needs hs.window.orderedWindows(): the z-order comes from the
- * window server and cannot be reconstructed per application. It carries the same cost as
- * every hs.window enumeration — measured at 1546ms while another process was slow to
- * answer, against 1ms for asking the tracker — so it is used only where the order itself
- * is the point, which is swapWithPrevious() and sendToBack().
+ * window server and cannot be reconstructed per application.
+ *
+ * It is the one enumeration upstream's fix for issue #219 did not cover: allWindows() and
+ * visibleWindows() came down from about 1540ms to about 330ms, while this still measures
+ * about 1560ms. Asking the tracker costs 1ms. So it is used only where the front-to-back
+ * order is itself the point, which is swapWithPrevious() and sendToBack().
  */
 function orderedByFront() {
     return hs.window.orderedWindows()
@@ -207,10 +222,9 @@ function focused() {
 function focusWindow(window) {
     if (!window) return false
 
-    // Each step is timed separately when something has set the hook. All of them block the
-    // main thread, and which one blocks depends on the application: focus(), raise() and
-    // reading .application go through accessibility, while launchOrFocus() goes through
-    // NSWorkspace, which waits for the application to finish activating.
+    // Each step is timed separately when something has set the hook. All of them go through
+    // accessibility and all of them block the main thread, so which one is slow depends on
+    // how quickly the target application answers.
     const watcher = globalThis.__probeSlowCall
     const step = (label, fn) => {
         if (!watcher) return fn()
@@ -222,12 +236,55 @@ function focusWindow(window) {
         }
     }
 
+    // The application is brought forward first, and the window focused after.
+    //
+    // The other way round does not work across screens. Activating an application makes
+    // macOS focus whichever of its windows it considers main, which is the one on the
+    // screen in use, and that discards a focus applied a moment earlier. Asking for a
+    // Chrome window on a second monitor while working on the first gave the Chrome window
+    // on the first: the focus was applied and then overridden by the activation.
+    step("frontmost", () => frontmostSet(window))
     const accepted = step("focus", () => window.focus())
     step("raise", () => window.raise())
-    const bundleID = step("application.bundleID",
-        () => (window.application ? window.application.bundleID : null))
-    if (bundleID) step(`launchOrFocus:${bundleID}`, () => hs.application.launchOrFocus(bundleID))
     return accepted
+}
+
+/**
+ * Bring a window's application forward without disturbing its other windows.
+ *
+ * Setting AXFrontmost on the application element, rather than calling
+ * hs.application.launchOrFocus().
+ *
+ * window.focus() sets AXFocused on the window and then calls activate() on the application,
+ * but that activation is refused: macOS does not let an application which is not frontmost
+ * activate another, and Hammerspoon is not frontmost when a key is pressed. Measured —
+ * focus() returns true and the target application stays where it is.
+ *
+ * launchOrFocus() does bring it forward, because NSWorkspace.openApplication is not subject
+ * to that restriction, but it raises every window the application has: selecting one window
+ * of an editor with six open brought all six in front of everything else.
+ *
+ * Setting AXFrontmost activates the application and leaves its window order alone, so the
+ * window that was focused is the one in front. Hammerspoon 1 achieved the same by calling
+ * activate() without its allWindows argument.
+ *
+ * @param {object} window An HSWindow.
+ * @returns {boolean} Whether the attribute was set.
+ */
+function frontmostSet(window) {
+    try {
+        const application = window.application
+        if (!application) return false
+
+        const element = application.axElement()
+        if (!element || typeof element.setAttributeValueValue !== "function") return false
+
+        element.setAttributeValueValue("AXFrontmost", true)
+        return true
+    } catch (e) {
+        console.error(`[hs_window-gt] could not set AXFrontmost: ${e}`)
+        return false
+    }
 }
 
 /** Whether two frames describe the same rectangle, within a pixel. */
@@ -1380,24 +1437,21 @@ function attachKeyToWindow(window, key) {
 
 // MARK: - Isolation
 //
-// Everything except the focused window is dimmed, by covering each screen with a dark
-// window placed just below the focused one.
+// Everything except the focused window is dimmed, by covering every screen with dark panels
+// that leave a hole the shape of that window. It follows the focus: while isolation is on,
+// the hole moves to whichever window is focused, on whichever screen, and changes shape when
+// that window is moved or resized.
+//
+// The hole is the window, not the display the window is on. A window occupying part of a
+// screen leaves the rest of that screen dimmed, and a fullscreen window — whose frame is the
+// whole display, menu bar included — leaves its display clear.
 
 function isolationOn() {
-    return isolationWindows.length > 0
+    // Not the number of panels: a window filling its screen on a single-screen setup needs
+    // no panels at all, and isolation is still on.
+    return isolationActive
 }
 
-/**
- * One dark panel.
- *
- * The darkness is a filled rectangle inside the window, not the window's own background: a
- * window with nothing in it draws nothing, whatever its background colour is set to, which
- * is why earlier versions of this were invisible. This is the shape hs_countdown-gt's
- * progress bar uses, which is known to render.
- *
- * "status" is above other applications' windows. "normal" is Hammerspoon's own layer,
- * behind whichever application is frontmost.
- */
 /**
  * Convert a rectangle from screen coordinates to hs.ui window coordinates.
  *
@@ -1432,10 +1486,21 @@ function canvasColor(value, alpha) {
     }
 }
 
-function addOverlay(screenRect) {
-    if (screenRect.w <= 0 || screenRect.h <= 0) return
-    const rect = toUIRect(screenRect)
-
+/**
+ * One dark panel.
+ *
+ * The darkness is a filled rectangle inside the window, not the window's own background: a
+ * window with nothing in it draws nothing, whatever its background colour is set to, which
+ * is why earlier versions of this were invisible. This is the shape hs_countdown-gt's
+ * progress bar uses, which is known to render.
+ *
+ * "status" is above other applications' windows. "normal" is Hammerspoon's own layer,
+ * behind whichever application is frontmost.
+ *
+ * "canJoinAllSpaces" is what puts a panel over a fullscreen window, which lives in a space
+ * of its own: without it the dimming would vanish the moment focus moved into one.
+ */
+function makeOverlay(rect) {
     const overlay = hs.canvas.create({ x: rect.x, y: rect.y, w: rect.w, h: rect.h })
         .level("status")
         // Clicks pass through the dimming to the windows underneath.
@@ -1448,58 +1513,169 @@ function addOverlay(screenRect) {
         frame: { x: 0, y: 0, w: rect.w, h: rect.h }
     }])
     overlay.show()
-
-    isolationWindows.push(overlay)
+    return overlay
 }
 
 /**
- * Dim everything except the focused window.
+ * The screen a window is on.
  *
- * The focused window is left uncovered rather than raised above the dimming: window level
- * beats window order, so an overlay above other applications cannot be got behind. Its
- * screen is covered by four panels around the window — above, below, left and right — and
- * every other screen by one.
- *
- * The panels ignore mouse events, so clicks reach the windows beneath the dimming as
- * usual; nothing covers the focused window in any case.
+ * window.screen is asked first. It can be null — a window in another space is one case —
+ * and then the screen holding the window's centre is used, so that the dimming still knows
+ * which display to cut the hole in rather than covering every one of them.
  */
-function startIsolation() {
-    if (isolationOn()) return module.exports
+function screenOfWindow(window) {
+    if (!window) return null
+    if (window.screen) return window.screen
 
-    const window = focused()
+    const frame = window.frame
+    if (!frame || frame.w <= 0 || frame.h <= 0) return null
+    const x = frame.x + frame.w / 2
+    const y = frame.y + frame.h / 2
+
+    for (const screen of screenList()) {
+        const f = screen.fullFrame
+        if (x >= f.x && x < f.x + f.w && y >= f.y && y < f.y + f.h) return screen
+    }
+    return null
+}
+
+/**
+ * The panels that dim everything except one window.
+ *
+ * The window's screen is covered by four panels around it — above, below, left and right —
+ * and every other screen by one. The hole is clipped to the screen, so a window hanging off
+ * an edge, or one whose frame is the whole display because it is fullscreen, gives panels
+ * of zero size rather than negative ones.
+ *
+ * With no window the hole is nothing and every screen is covered.
+ *
+ * @returns {Array<{x: number, y: number, w: number, h: number}>} in screen coordinates.
+ */
+function isolationRects(window) {
     const hole = window ? window.frame : null
-    const holeScreen = window && window.screen ? window.screen.id : null
+    const holeScreen = screenOfWindow(window)
+    const rects = []
+    const add = (rect) => {
+        if (rect.w > 0 && rect.h > 0) rects.push(rect)
+    }
 
     for (const screen of screenList()) {
         const f = screen.fullFrame
 
-        if (!hole || screen.id !== holeScreen) {
-            addOverlay({ x: f.x, y: f.y, w: f.w, h: f.h })
+        if (!hole || !holeScreen || screen.id !== holeScreen.id) {
+            add({ x: f.x, y: f.y, w: f.w, h: f.h })
             continue
         }
 
-        const holeBottom = hole.y + hole.h
-        const holeRight = hole.x + hole.w
+        const clamp = (value, low, high) => Math.max(low, Math.min(value, high))
+        const left = clamp(hole.x, f.x, f.x + f.w)
+        const right = clamp(hole.x + hole.w, left, f.x + f.w)
+        const top = clamp(hole.y, f.y, f.y + f.h)
+        const bottom = clamp(hole.y + hole.h, top, f.y + f.h)
 
-        addOverlay({ x: f.x, y: f.y, w: f.w, h: hole.y - f.y })
-        addOverlay({ x: f.x, y: holeBottom, w: f.w, h: (f.y + f.h) - holeBottom })
-        addOverlay({ x: f.x, y: hole.y, w: hole.x - f.x, h: hole.h })
-        addOverlay({ x: holeRight, y: hole.y, w: (f.x + f.w) - holeRight, h: hole.h })
+        add({ x: f.x, y: f.y, w: f.w, h: top - f.y })
+        add({ x: f.x, y: bottom, w: f.w, h: (f.y + f.h) - bottom })
+        add({ x: f.x, y: top, w: left - f.x, h: bottom - top })
+        add({ x: right, y: top, w: (f.x + f.w) - right, h: bottom - top })
+    }
+    return rects
+}
+
+/** What is on screen now, so that a refresh that changes nothing redraws nothing. */
+function isolationSignature(rects) {
+    return rects.map((r) => `${r.x},${r.y},${r.w},${r.h}`).join(" ")
+}
+
+/**
+ * Put the panels where the layout says.
+ *
+ * Panels are moved rather than replaced: destroying and recreating them on every focus
+ * change flickers, and the pool is at most one panel per screen plus three.
+ */
+function drawIsolation(rects) {
+    rects.forEach((screenRect, index) => {
+        const rect = toUIRect(screenRect)
+        const overlay = isolationWindows[index]
+        if (!overlay) {
+            isolationWindows[index] = makeOverlay(rect)
+            return
+        }
+        overlay.setFrame({ x: rect.x, y: rect.y, w: rect.w, h: rect.h })
+        overlay.setElementAttribute(0, "frame", { x: 0, y: 0, w: rect.w, h: rect.h })
+    })
+
+    for (const overlay of isolationWindows.splice(rects.length)) removeOverlay(overlay)
+}
+
+function removeOverlay(overlay) {
+    try {
+        // Hidden as well as destroyed: destroy() on its own left the panels on screen, and
+        // once the list is cleared there is no way back to them short of a reload.
+        overlay.hide()
+        overlay.destroy()
+    } catch (e) {
+        console.error(`[hs_window-gt] could not remove an isolation overlay: ${e.message}`)
+    }
+}
+
+/**
+ * Move the dimming to whatever is focused now.
+ *
+ * Nothing focused leaves the panels where they are rather than covering everything: focus
+ * is briefly nowhere while a menu or a chooser is up, and the screen going dark and back
+ * each time one opens is worse than the dimming lagging by a window.
+ */
+function refreshIsolation() {
+    if (!isolationActive) return
+
+    const window = focused()
+    if (!window && isolationLayout !== null) return
+
+    const rects = isolationRects(window)
+    const signature = isolationSignature(rects)
+    if (signature === isolationLayout) return
+
+    isolationLayout = signature
+    drawIsolation(rects)
+}
+
+/**
+ * Dim everything except the focused window, and keep doing so as the focus moves.
+ *
+ * The focused window is left uncovered rather than raised above the dimming: window level
+ * beats window order, so an overlay above other applications cannot be got behind.
+ *
+ * The panels ignore mouse events, so clicks reach the windows beneath the dimming as
+ * usual; nothing covers the focused window in any case.
+ *
+ * Following is a timer rather than a watcher. Application activation, which is what
+ * previousWindow() uses, does not see a move between two windows of one application, and
+ * says nothing about a window being moved or resized while isolation is on. A tick costs
+ * one hs.window.focusedWindow() and one hs.screen.all(), measured at about 0.1ms together,
+ * and draws only when the layout it computes differs from the one on screen.
+ */
+function startIsolation() {
+    if (isolationActive) return module.exports
+
+    isolationActive = true
+    isolationLayout = null
+    refreshIsolation()
+
+    if (!isolationTimer) {
+        isolationTimer = hs.timer.doEvery(config.isolationFollowInterval, () => refreshIsolation())
     }
     return module.exports
 }
 
 function stopIsolation() {
-    for (const overlay of isolationWindows) {
-        try {
-            // Hidden as well as destroyed: destroy() on its own left the panels on screen,
-            // and once the list is cleared there is no way back to them short of a reload.
-            overlay.hide()
-            overlay.destroy()
-        } catch (e) {
-            console.error(`[hs_window-gt] could not remove an isolation overlay: ${e.message}`)
-        }
+    isolationActive = false
+    isolationLayout = null
+
+    if (isolationTimer) {
+        isolationTimer.stop()
+        isolationTimer = null
     }
+    for (const overlay of isolationWindows) removeOverlay(overlay)
     isolationWindows = []
     return module.exports
 }

@@ -157,6 +157,12 @@ bar and the Dock.
 dimming, =toggleIsolation()= switches between them, and =isolationOn()= reports which state
 it is in. Hammerspoon 1's =hs.window.highlight= has no equivalent in Hammerspoon 2.
 
+The dimming follows the focus: while it is on, the clear hole moves to whichever window is
+focused, on whichever screen, and changes shape when that window is moved or resized. The
+hole is the window, not the display it is on — part of a screen stays dimmed when the
+window only covers part of it, and a fullscreen window, whose frame is the whole display,
+leaves that display clear and every other one dimmed.
+
 ** info(win)
 
 Show a window's application, bundle id, title, screen, frame and history depth in an alert,
@@ -177,6 +183,7 @@ Settings are properties of =config=.
 | =historySize=            | =200=       | Positions remembered per window, oldest discarded |
 | =isolationColor=         | ="#000000"= | Colour of the isolation panels |
 | =isolationOpacity=       | =0.85=      | Opacity of the isolation panels, 0.0 to 1.0 |
+| =isolationFollowInterval= | =0.2=      | Seconds between checks for the focus having moved. See /Notes/ |
 | =mouseHighlightColor=    | ="#FF0000"= | Colour of the ring drawn around the pointer |
 | =mouseHighlightSize=     | =60=        | Diameter of the ring, in pixels |
 | =mouseHighlightWidth=    | =4=         | Thickness of the ring's line |
@@ -202,10 +209,17 @@ win.config.mouseHighlightColor = "#00FF00"
 - *A window moved by hand is not seen as it happens.* It is recovered on the next command:
   before changing a window, where it is is compared with where the Spoon last put it, and
   if they differ both positions go on the ring.
-- *Overlays swallow clicks.* =hs.ui= windows cannot ignore mouse events, so while
-  isolation is on, clicks land on the dimming rather than on the windows beneath it — the
-  focused window stays clickable because nothing covers it. The pointer ring has the same
-  property, which is why it is measured in fractions of a second.
+- *Overlays do not swallow clicks.* The dimming panels and the pointer ring are
+  =hs.canvas= windows with =ignoreMouseEvents(true)=, so a click lands on whatever is
+  underneath them. They are also =canJoinAllSpaces=, which is what puts them over a
+  fullscreen window's space.
+- *Isolation follows the focus from a timer, not a watcher.* Application activation, which
+  is what =previousWindow()= uses, does not see a move between two windows of one
+  application, and says nothing about a window being moved or resized while the dimming is
+  on. A tick costs one =hs.window.focusedWindow()= and one =hs.screen.all()=, measured at
+  about 0.1ms together, and redraws only when the layout it computes differs from the one
+  on screen. With nothing focused the panels stay where they are rather than covering
+  everything, because focus is briefly nowhere while a menu or a chooser is up.
 - *Fullscreen windows are refused.* macOS does not treat a fullscreen window as a window
   with a frame: it refuses to move one, and a window sent to a screen a fullscreen window
   occupies is taken into that window's space, after which neither =hs.window.allWindows()=
