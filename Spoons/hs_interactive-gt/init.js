@@ -42,6 +42,10 @@ const CANCEL = Symbol("cancel")
 // is dropped so the command's own default applies.
 const SKIP = Symbol("skip")
 
+// This application, so that a prompt can bring it forward and put back what was in front
+// afterwards. See ask().
+const OWN_BUNDLE_ID = "net.tenshu.Hammerspoon-2"
+
 // MARK: - State
 
 const registry = new Map()          // name -> command spec
@@ -165,6 +169,27 @@ function ask(options) {
     const labels = options.optional ? ["OK", "Skip", "Cancel"] : ["OK", "Cancel"]
     let result = { action: "cancel", text: "" }
 
+    // Hammerspoon is brought forward first, and the application that was in front is put
+    // back afterwards.
+    //
+    // Without it the prompt appears and cannot be typed into. hs.ui.textPrompt is a plain
+    // NSWindow, styled [.titled, .closable], and a plain window cannot take keyboard focus
+    // while its application is in the background: it becomes key within Hammerspoon, which
+    // is not frontmost when a command runs from a key or from the command chooser, and
+    // macOS signals that by bouncing the dock icon instead of giving it focus.
+    //
+    // hs.chooser does not have the problem because ChooserPanel is an NSPanel with
+    // .nonactivatingPanel in its style mask, which is exactly what lets a background
+    // application's panel accept keys. Dialogs getting the same treatment upstream would
+    // make this unnecessary.
+    //
+    // launchOrFocus rather than activate: an application that is not frontmost may not
+    // activate another, and that includes activating itself from a background context.
+    // launchOrFocus goes through NSWorkspace, which is not restricted.
+    const previous = hs.application.frontmost()
+    const restoreTo = previous && previous.bundleID !== OWN_BUNDLE_ID ? previous.bundleID : null
+    hs.application.launchOrFocus(OWN_BUNDLE_ID)
+
     promptOpened()
     try {
         hs.ui.textPrompt(options.message)
@@ -178,6 +203,7 @@ function ask(options) {
     } finally {
         // show() is modal, so the prompt is gone by the time it returns.
         promptClosed()
+        if (restoreTo) hs.application.launchOrFocus(restoreTo)
     }
 
     return result
@@ -212,6 +238,45 @@ function pick(options) {
     })
 }
 
+// A chooser sits horizontally centred on the main screen, a quarter of the way down, and
+// is half the screen's width. The frame is computed inside Hammerspoon 2, by
+// ChooserPanel.initialFrame in hs.chooser/Views/ChooserWindow.swift, and HSChooser exposes
+// neither the frame nor the window, so these two repeat the arithmetic rather than read
+// it. They place the alert, never the chooser, and so are copies that can fall out of step:
+//
+//   CHOOSER_WIDTH_FRACTION  the default of the JS-settable `chooser.width`, applied by
+//                           HSChooser as width × the main screen's full width. pick()
+//                           leaves it alone; anything that does set chooser.width has to
+//                           set this to match.
+//   CHOOSER_TOP_FRACTION    hardcoded in initialFrame, neither settable nor readable, so
+//                           an upstream change to it moves the chooser and leaves the
+//                           alert behind.
+const CHOOSER_WIDTH_FRACTION = 0.5
+const CHOOSER_TOP_FRACTION = 0.25
+
+/**
+ * Show a short message where a chooser's top left corner is, or would be.
+ *
+ * hs.ui.alert positions the centre of its bubble, in points down and right of the main
+ * screen's top left corner, so the message straddles the corner rather than starting at
+ * it, and is lifted clear of the search field.
+ *
+ * @param {string} message The text to show.
+ */
+function alertAtChooser(message) {
+    const alert = hs.ui.alert(message).duration(2)
+    const screen = hs.screen.main()
+    if (screen) {
+        const frame = screen.frame
+        const width = CHOOSER_WIDTH_FRACTION * screen.fullFrame.w
+        alert.position({
+            x: (frame.w - width) / 2,
+            y: CHOOSER_TOP_FRACTION * frame.h - 30
+        })
+    }
+    alert.show()
+}
+
 // MARK: - Snapshot
 //
 // The focused window, frontmost application and current screen at the moment the command
@@ -243,7 +308,21 @@ function snapshot() {
 const readers = {
     window: {
         implicit: (context, parameter, snap) => snap.window,
-        auto: (context, parameter, snap) => snap.window || readers.window.prompted(context, parameter, snap),
+
+        /**
+         * The focused window, or a chooser when there is none. An application that
+         * reports no window at all — Emacs does this once its accessibility interface
+         * stops answering — is named in an alert at the chooser's corner, so that the
+         * chooser appearing in place of the expected window is not read as the command
+         * failing.
+         */
+        auto: (context, parameter, snap) => {
+            if (snap.window) return snap.window
+            if (snap.application) {
+                alertAtChooser(`${snap.application.title} reports no visible window`)
+            }
+            return readers.window.prompted(context, parameter, snap)
+        },
 
         /**
          * Choose a window. The parameter may narrow what is offered:
@@ -378,6 +457,70 @@ const readers = {
                 return CANCEL
             }
             return value
+        },
+
+        /**
+         * A reader for a number within a range, offering the value it has now.
+         *
+         * Two things `number.prompted` cannot do. It accepts any number, so a command
+         * taking a percentage has to check the bounds itself and has already prompted by
+         * the time it can complain. And `default` is a fixed value, written when the
+         * command is defined, where what is wanted is usually the setting's current value
+         * — which is only known when the prompt opens.
+         *
+         * @param {object} options `min`, `max`, and `current`, a function returning the
+         *        value to offer. `current` may be omitted, and may return null.
+         * @returns {function} A reader, to be given as a parameter's `reader`.
+         *
+         * @example
+         * interactive.define({
+         *     name: "system-volume",
+         *     interactive: [{
+         *         name: "volume (0-100)",
+         *         reader: interactive.readers.number.ranged({
+         *             min: 0, max: 100, current: () => audio.systemVolume()
+         *         })
+         *     }],
+         *     fn: (percent) => audio.systemVolumeSet(percent)
+         * })
+         */
+        ranged: (options) => {
+            const min = options && options.min !== undefined ? options.min : -Infinity
+            const max = options && options.max !== undefined ? options.max : Infinity
+            const current = options ? options.current : null
+
+            return (context, parameter) => {
+                let offered = parameter.default
+                if (typeof current === "function") {
+                    try {
+                        const now = current()
+                        if (now !== null && now !== undefined) offered = now
+                    } catch (e) {
+                        // The fixed default stands.
+                    }
+                }
+
+                const answer = ask({
+                    message: parameter.name,
+                    context: context,
+                    defaultText: offered,
+                    optional: parameter.optional
+                })
+                if (answer.action === "cancel") return CANCEL
+                if (answer.action === "skip") return SKIP
+
+                const value = Number(answer.text)
+                if (!Number.isFinite(value)) {
+                    hs.ui.alert(`${parameter.name}: "${answer.text}" is not a number`).duration(2).show()
+                    return CANCEL
+                }
+                if (value < min || value > max) {
+                    hs.ui.alert(`${parameter.name}: ${value} is outside ${min} to ${max}`)
+                        .duration(2).show()
+                    return CANCEL
+                }
+                return value
+            }
         }
     },
 

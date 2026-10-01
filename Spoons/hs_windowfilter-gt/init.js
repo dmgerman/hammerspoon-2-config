@@ -531,7 +531,8 @@ const APPLICATION_NOTIFICATIONS = () => [
  *
  * Not hs.window.allWindows(), orderedWindows() or visibleWindows(). All three walk every
  * running process rather than every application: measured on one machine at one moment,
- * 1556 ms for 23 windows against 18 ms for the same 20 windows gathered per application.
+ * about 330 ms for 27 windows against 18 ms for the same windows gathered per application,
+ * and 1560 ms for orderedWindows(), which upstream's fix for issue #219 did not cover.
  * The difference is the 126 agents and daemons among the 143 processes, some of which
  * answer accessibility slowly.
  */
@@ -757,10 +758,15 @@ function forgetWindow(id, destroyed) {
     const record = tracked.get(id)
     if (!record) return
 
-    // Not removed when the window has been destroyed. Its element is invalid by then, and
-    // hs.ax.removeWatcher reports that as an error on the console rather than returning
-    // one, so asking would produce a line of noise for every window ever closed. The
-    // observer goes with the element.
+    // Not removed when the window has been destroyed. Its element is invalid by then and
+    // there is nothing to remove: the observer goes with the element.
+    //
+    // This also avoided a console line per closed window, because hs.ax.removeWatcher
+    // reported the invalid element as an error on the console rather than returning one.
+    // Upstream attempted to silence that in bb644bd, which this build has; whether it is
+    // gone has not been confirmed, since a destroyed element is needed to provoke it and
+    // this code no longer produces one. Skipping the call is right on its own terms, so it
+    // stays either way.
     if (!destroyed) {
         try {
             hs.ax.removeWatcher(record.element, WINDOW_NOTIFICATIONS(), record.handler)

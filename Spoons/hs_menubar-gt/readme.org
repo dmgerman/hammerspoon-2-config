@@ -1,0 +1,172 @@
+* hs_menubar-gt
+
+Reach the icons on the right of the macOS menu bar from the keyboard: the VPN, the
+clipboard manager, Bluetooth, the input source. Press one to open its menu, or go straight
+to an entry inside it without any menu appearing.
+
+This is a port of the Hammerspoon 1 =hs_menubar= Spoon, which offered a chooser of the
+icons themselves. Reaching the entries inside them is new.
+
+* Simple usage
+
+#+begin_src js   :exports both
+const mb = hs.loadSpoon("hs_menubar-gt")
+
+mb.choose()                    // choose an icon and open it
+mb.choose(true)                // also offer every entry inside every menu
+mb.extras()                    // what is in the menu bar now
+mb.entries()                   // every entry inside those menus
+mb.press("mb-nordvpn")         // open one by name
+mb.list()                      // the icons and their names, as lines
+mb.menu()                      // the same list as hs_menu-gt buttons
+#+end_src
+
+No keys are bound by default.
+
+* Names
+
+Every icon has a name, so it can be selected by typing rather than by locating it on
+screen.
+
+| Form                            | When                                          |
+|---------------------------------+-----------------------------------------------|
+| =mb-<application>=              | the application has one icon                  |
+| =mb-<application>-<n>=          | it has several; =n= counts from 1, left to right |
+| =mb-<application>-<title>=      | as well, when the icon's own title is usable  |
+| =mb-<application>-<entry>=      | an entry inside that icon's menu              |
+
+So =mb-nordvpn= is NordVPN's icon, =mb-nordvpn-disconnect-dmgvpn= is an entry in its menu,
+and =mb-control-center-bluetooth= is Bluetooth.
+
+The application's name is used rather than the icon's title because most titles cannot be
+typed, or change while the application runs. Measured on one machine: four applications reported an empty title,
+one reported none at all, three were a single emoji, and one was =↓37.8MB ↑17.1MB=, which
+changes every time its application polls the network. An icon's title is offered as a second name only when
+it consists of letters alone, which excludes both cases above.
+
+These names belong to this Spoon. They are deliberately *not* defined as =hs_interactive-gt=
+commands: doing so would mean scanning every process at load to find out what to define, and
+a command defined from that scan would name an application that may since have quit.
+
+* Opening an icon, and invoking an entry
+
+Opening an icon has the same effect as clicking it: its menu appears, and an entry is then
+selected with the mouse or the arrow keys.
+
+Invoking an entry is different. The entry's action runs and no menu appears, so
+=mb-deepl-capture-text-on-screen= starts the screen capture directly instead of opening
+DeepL's menu for you to choose it.
+
+** Menus that cannot be read in advance
+
+Some applications build their menu only when it is opened. Control Center and NordVPN are
+among them, as are several of Hammerspoon's own icons. Their entries cannot be listed, so
+those icons are offered on their own and opening them is all that is possible.
+
+** Two lists, because reading every menu is slow
+
+| Call            | Offers                       | Cost on one machine |
+|-----------------+------------------------------+---------------------|
+| =choose()=      | the icons                    | about 100 ms        |
+| =choose(true)=  | the icons and their entries  | about 3 s           |
+
+Reading one menu is inexpensive; reading every menu of every icon is not. The deep list is
+therefore a separate call and a separate command.
+
+* Hammerspoon's own icons
+
+They are listed, and they are opened by clicking where they are rather than through
+accessibility.
+
+The reason is a deadlock. =performAction("AXPress")= on an element belonging to the same
+process delivers the accessibility call to the main thread, which is the thread already
+executing the JavaScript that made the call. Opening a menu then enters a nested modal run
+loop, which does not return. Hotkeys and timers stop being serviced and the application has
+to be killed.
+
+A click does not deadlock: the event goes to the window server and is delivered back later,
+so the main thread is not blocked while the call is outstanding.
+
+Entries inside Hammerspoon's own menus are invoked through accessibility like any other.
+An entry performs its action without opening a menu, so no modal run loop is entered.
+
+* What counts as an icon
+
+An item is offered when it is enabled and has a size. Advertising =AXPress= is not enough:
+Control Center keeps an element for every module it could show — Focus, Screen Mirroring,
+Now Playing — whether or not that module is in the menu bar, and the ones that are not come
+back disabled, sized 0x0, parked off screen, still listing =AXPress=. Seventeen of its
+twenty-four items were these, and pressing one does nothing at all.
+
+* Functions
+
+** extras()
+
+Every icon in the menu bar, in menu bar order per application. Each is
+=({application, bundleID, label, index, ofApplication, element, name, alias, own})=.
+
+Nothing is cached and no watcher is installed, so the result describes the menu bar at the
+moment of the call.
+
+** entries()
+
+Every entry inside every readable menu, as
+=({application, bundleID, item, element, path, name, own})=. =path= names the entry and any
+submenus above it, outermost first.
+
+** choose([deep])
+
+Show a chooser and act on what is chosen. With =deep= true, menu entries are offered as
+well as the icons.
+
+** press(name)
+
+Open an icon, or invoke an entry, by name. The menu bar is scanned again to find it, because
+an application may have replaced its icon since the name was last read.
+
+** menu()
+
+The icons as =hs_menu-gt= buttons, each with its application's icon.
+
+** list()
+
+The icons and their names as lines, for reading in the console.
+
+* Settings
+
+| Setting                | Default | Meaning                                      |
+|------------------------+---------+----------------------------------------------|
+| =skipApplications=     | =[]=    | applications whose icons are never listed    |
+| =namePrefix=           | ="mb-"= | prefix for the generated names               |
+| =menuDepth=            | =2=     | levels of submenu to follow when reading     |
+| =chooserWidth=         | =0.3=   | chooser width, as a fraction of the screen   |
+| =rowsToDisplay=        | =14=    | rows visible at once                         |
+| =pressDelay=           | =0.2=   | seconds to wait after the chooser closes     |
+| =restoreMouse=         | =true=  | put the pointer back after clicking an icon  |
+| =restoreMouseDelay=    | =0.3=   | seconds before doing so                      |
+| =logClicks=            | =false= | log where each click lands                   |
+| =logTimings=           | =false= | log how long a scan took                     |
+
+=pressDelay= exists because a menu bar menu closes when another window takes the key window,
+and the chooser still holds it when a row is chosen. Pressing without the delay opens the
+menu, and the chooser's dismissal then closes it. Raise the delay if a menu still opens and
+closes immediately.
+
+Control Center accounts for about eight icons and most of the system ones. To shorten the
+list:
+
+#+begin_src js   :exports both
+mb.config.skipApplications.push("Control Center")
+#+end_src
+
+* Commands
+
+In this configuration, from =init.js=:
+
+| Command                     | Key   | Does                                  |
+|-----------------------------+-------+---------------------------------------|
+| =menubar-interactive=       | ⇧⌃⌘M  | choose an icon and open it            |
+| =menubar-interactive-deep=  | ⇧⌃⌘N  | choose an icon or any entry in a menu |
+
+Both set =runDelay= so they wait for the command chooser to close before opening their own;
+see the =hs_interactive-gt= readme for why.

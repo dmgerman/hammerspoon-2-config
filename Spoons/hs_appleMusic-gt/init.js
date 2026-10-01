@@ -282,6 +282,63 @@ function setVolume(level) {
     return wanted
 }
 
+// MARK: - The system's volume
+//
+// Distinct from everything above, which is Music's own volume: Music has a level of its
+// own and the output device has another, and turning one down does not touch the other.
+// Both are here because both are reached from the same place when something is playing.
+//
+// hs.audiodevice gives the output device's volume as a fraction of one; these take and
+// return a percentage, so that they read the same way as the Music functions beside them.
+
+/**
+ * The system's output volume, as a percentage.
+ *
+ * @returns {?number} 0 to 100, or null when there is no output device or it has no
+ *          adjustable volume — some do not, HDMI among them.
+ */
+function systemVolume() {
+    const device = hs.audiodevice.defaultOutputDevice()
+    if (!device) return null
+
+    const fraction = device.volume
+    if (fraction === null || fraction === undefined) return null
+    return Math.round(Number(fraction) * 100)
+}
+
+/**
+ * Set the system's output volume.
+ *
+ * @param {number} percent 0 to 100. Values outside that are clamped.
+ * @returns {?number} The volume set, or null when it could not be set.
+ */
+function systemVolumeSet(percent) {
+    const device = hs.audiodevice.defaultOutputDevice()
+    if (!device) {
+        alert("No output device")
+        return null
+    }
+
+    const wanted = Number(percent)
+    if (!Number.isFinite(wanted)) {
+        alert(`Illegal volume [${percent}]`)
+        return null
+    }
+
+    const clamped = Math.max(0, Math.min(100, Math.round(wanted)))
+    device.volume = clamped / 100
+
+    // Read back rather than reporting what was asked for: a device that will not take a
+    // volume accepts the assignment silently and keeps the one it had.
+    const now = systemVolume()
+    if (now === null) {
+        alert(`${device.name} has no adjustable volume`)
+        return null
+    }
+    alert(`System volume ${now}`)
+    return now
+}
+
 /**
  * Change the volume by `delta`, which may be negative.
  *
@@ -914,6 +971,8 @@ module.exports = {
     showVolume,
     setVolume,
     adjustVolume,
+    systemVolume,
+    systemVolumeSet,
     // Albums.
     readAlbums,
     pickRandomAlbum,

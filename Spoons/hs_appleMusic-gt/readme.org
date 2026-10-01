@@ -155,6 +155,27 @@ Apple Music's own volume, 0 to 100, separate from the system's.
 | =setVolume(level)=   | Set it. Values outside 0 to 100 are clamped.                   |
 | =adjustVolume(d)=    | Change it by =d=, which may be negative, and show the result.  |
 
+** The system's volume
+
+The output device's volume, which is not Music's. Music has one level and the output device
+has another; setting one does not change the other. Both are in this Spoon because both are
+used while something is playing.
+
+| Method                      | Does                                                  |
+|-----------------------------+-------------------------------------------------------|
+| =systemVolume()=            | The output device's volume as 0 to 100, or null.      |
+| =systemVolumeSet(percent)=  | Set it. Values outside 0 to 100 are clamped.          |
+
+=hs.audiodevice= expresses volume as a fraction of one. These take and return a percentage,
+matching the Music methods above.
+
+=systemVolumeSet= reads the volume back after setting it, and reports the value it read. A
+device with no adjustable volume, such as HDMI output, accepts the assignment without
+changing its level, so reporting the requested value would be wrong.
+
+Both return null when there is no default output device, or when that device has no
+adjustable volume.
+
 * Auto-play
 
 Starts a random album from the list whenever Music reports =stopped=. A paused Music is

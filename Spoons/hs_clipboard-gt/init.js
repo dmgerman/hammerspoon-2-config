@@ -35,6 +35,26 @@ const config = {
 
     // How many entries to keep, and how much of one.
     historySize: 100,
+    // Copied images, counted separately from the text entries so that a run of
+    // screenshots cannot push the text out of the history. Each one is a PNG in
+    // clipboardDir; the oldest is deleted as newer ones arrive.
+    imageHistorySize: 10,
+
+    // The selected image, drawn beside the chooser at a size worth looking at. The row's
+    // own thumbnail is only a few points high, which is enough to tell two screenshots
+    // apart but not enough to read one.
+    showPreview: true,
+    // Largest the preview may be, as a fraction of the usable screen height. A maximum,
+    // not a target: a smaller image is drawn at its own size rather than enlarged.
+    previewHeightRatio: 0.5,
+    // Gap between the preview and the chooser, in points.
+    previewGap: 12,
+    // How far down the screen the preview sits when the chooser's own position cannot be
+    // read, as a fraction of screen height.
+    previewTopRatio: 0.12,
+    // How often the selected row is read while the chooser is open. hs.chooser reports no
+    // callback for the selection moving, so it is polled.
+    previewPollSeconds: 0.15,
     maxEntrySize: 4990,
 
     // Characters of an entry shown in the chooser. The whole entry is copied when it is
@@ -80,7 +100,14 @@ const config = {
     menubarShow: true,
     menubarTitle: "📋",
 
-    historyFile: `${hs.appinfo.configDir}/logs/clipboard.json`
+    // Where the history and the copied images live. The images are files, so they need a
+    // directory of their own rather than a corner of logs/, and the history moved in
+    // beside them so that everything this Spoon keeps is in one place.
+    clipboardDir: `${hs.appinfo.configDir}/clipboard`,
+    historyFile: `${hs.appinfo.configDir}/clipboard/clipboard.json`,
+    // Where a version before this one kept the history. Moved on the first start that
+    // finds it.
+    historyFileWas: `${hs.appinfo.configDir}/logs/clipboard.json`
 }
 
 // MARK: - State
@@ -204,6 +231,27 @@ function passwordLike(text) {
     return passwordEntropy(text) >= config.passwordEntropyThreshold
 }
 
+// The preview canvas beside the chooser, the row it is showing, and the timer that reads
+// the selection. Held so they cannot be collected before they are used again.
+let preview = null
+let previewRow = null
+let previewTimer = null
+
+// The last image written back to the pasteboard by this Spoon, so that the change it
+// causes is not stored again. Compared by size, which is enough to tell a fresh copy of
+// something else from the image just pasted.
+let lastImageWritten = null
+let lastImageWrittenSize = null
+
+/** Whether the image on the pasteboard is not the one this Spoon last wrote. */
+function pasteboardImageIsNew() {
+    if (!lastImageWrittenSize) return true
+    const image = hs.pasteboard.readImage()
+    if (!image || !image.size) return true
+    return Math.round(image.size.w) !== lastImageWrittenSize.w ||
+        Math.round(image.size.h) !== lastImageWrittenSize.h
+}
+
 // MARK: - Persistence
 
 function historyLoad() {
@@ -229,7 +277,7 @@ function historyLoad() {
 // also scrubs any that an earlier version of the Spoon, or of its v1 ancestor, wrote.
 function historySave() {
     const items = config.passwordsHide
-        ? history.filter((entry) => !passwordLike(entry.content))
+        ? history.filter((entry) => entry.type === "image" || !passwordLike(entry.content))
         : history
     hs.fs.write(config.historyFile,
         JSON.stringify({pasteOnSelect: pasteOnSelect, items: items}, null, 2), false)
@@ -237,23 +285,69 @@ function historySave() {
 
 // MARK: - The history itself
 
-// Discards malformed entries, collapses duplicates and applies the size cap. The first
+// Discards malformed entries, collapses duplicates and applies the size caps. The first
 // of a set of duplicates wins, so the most recent copy keeps its place at the top.
+//
+// Text and images are counted separately: a burst of screenshots would otherwise evict
+// the text history, and the two are not interchangeable. Order is preserved across both,
+// so the list still reads newest first whatever the entries are.
+//
+// An image that falls off the end takes its file with it; see imagesSweep().
 function historyPrune(list) {
     const result = []
     const seen = new Set()
+    let texts = 0
+    let images = 0
 
     for (const entry of list) {
-        if (result.length >= config.historySize) break
-        if (!entry || entry.type !== "text" || typeof entry.content !== "string") continue
+        if (!entry) continue
+
+        if (entry.type === "image") {
+            if (images >= config.imageHistorySize) continue
+            if (typeof entry.path !== "string" || !hs.fs.exists(entry.path)) continue
+            images += 1
+            result.push({
+                type: "image",
+                path: entry.path,
+                width: entry.width || 0,
+                height: entry.height || 0
+            })
+            continue
+        }
+
+        if (entry.type !== "text" || typeof entry.content !== "string") continue
+        if (texts >= config.historySize) continue
 
         const hash = hs.hashing.md5(entry.content)
         if (config.deduplicate && seen.has(hash)) continue
 
         seen.add(hash)
+        texts += 1
         result.push({type: "text", content: entry.content})
     }
     return result
+}
+
+/**
+ * Delete the image files in clipboardDir that no entry refers to any more.
+ *
+ * Called after the history changes, so the directory holds what the history holds and no
+ * more. A file that will not go is left for the next sweep.
+ *
+ * @returns {number} How many files were deleted.
+ */
+function imagesSweep() {
+    const wanted = new Set(history.filter((e) => e.type === "image").map((e) => e.path))
+    const names = hs.fs.list(config.clipboardDir) || []
+    let removed = 0
+
+    for (const name of names) {
+        if (!/\.png$/.test(name)) continue
+        const path = `${config.clipboardDir}/${name}`
+        if (wanted.has(path)) continue
+        if (hs.fs.deletePath(path)) removed += 1
+    }
+    return removed
 }
 
 // Cuts an over-long entry at the last blank line that fits, and failing that at the
@@ -278,8 +372,68 @@ function pasteboardIgnored() {
     return (hs.pasteboard.types() || []).some((type) => config.ignoredIdentifiers.includes(type))
 }
 
+/** Whether the pasteboard is offering an image, by type rather than by guessing. */
+function pasteboardHasImage() {
+    for (const type of ["public.png", "public.tiff", "public.jpeg"]) {
+        try {
+            if (hs.pasteboard.hasType(type)) return true
+        } catch (e) { /* try the next */ }
+    }
+    return false
+}
+
+/**
+ * Store the image on the pasteboard as a file, and put an entry at the top of the history.
+ *
+ * The file is named for the time it was copied, which sorts and reads well in a directory
+ * listing, and makes two copies in the same second the only collision to worry about.
+ */
+function imageCapture() {
+    const image = hs.pasteboard.readImage()
+    if (!image) return false
+
+    hs.fs.mkdir(config.clipboardDir)
+
+    const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..+$/, "")
+    const path = `${config.clipboardDir}/${stamp}.png`
+
+    if (!image.saveToFile(path)) {
+        console.error(`[hs_clipboard-gt] could not write ${path}`)
+        return false
+    }
+
+    const size = image.size
+    history.unshift({
+        type: "image",
+        path: path,
+        width: size ? Math.round(size.w) : 0,
+        height: size ? Math.round(size.h) : 0
+    })
+    history = historyPrune(history)
+    historySave()
+    imagesSweep()
+
+    // Remembered so that writing this image back to the pasteboard, which arrives here as
+    // a change of its own, is not stored a second time.
+    lastImageWritten = path
+
+    if (config.copiedAlert) {
+        const dimensions = size ? `${Math.round(size.w)}x${Math.round(size.h)}` : "an image"
+        hs.ui.alert(`Copied ${dimensions} image`).duration(config.alertDuration).show()
+    }
+    return true
+}
+
 function pasteboardCapture() {
     if (pasteboardIgnored()) return
+
+    // An image the Spoon itself just wrote back arrives here as a change; nothing was
+    // copied, so there is nothing to store or announce.
+    if (pasteboardHasImage()) {
+        if (lastImageWritten && !pasteboardImageIsNew()) return
+        imageCapture()
+        return
+    }
 
     const content = hs.pasteboard.readString()
     if (content === null || content === undefined || content === "") return
@@ -314,6 +468,8 @@ function entriesPaste(row, delimiter) {
     const entries = history.slice(0, row + 1).reverse()
     windowRestore(() => {
         for (const entry of entries) {
+            // An image cannot be typed, so it is passed over rather than stopping the run.
+            if (entry.type === "image") continue
             hs.eventtap.keyStrokes(entry.content)
             hs.eventtap.keyStrokes(delimiter)
         }
@@ -420,6 +576,171 @@ function revealKeysDisable() {
     if (revealAllHotkey) revealAllHotkey.disable()
 }
 
+// MARK: - The preview
+//
+// The selected image, drawn on a canvas to the left of the chooser. A row's own image is a
+// few points high, which distinguishes two screenshots but does not let you read either.
+//
+// The same approach as the window preview in hs_selectWindow-gt, and the second use of it.
+// If a third appears it is worth extracting: the sizing, the placement and the polling are
+// not specific to what the picture is of.
+
+const HAMMERSPOON_BUNDLE_ID = "net.tenshu.Hammerspoon-2"
+
+/**
+ * Where the chooser is, so the preview can sit beside it.
+ *
+ * Its width and left edge follow from hs.chooser centring a window of the configured
+ * width. Its vertical position does not, and hs.chooser reports no frame, so it is read
+ * from Hammerspoon's own window list: the chooser is the window whose left edge and width
+ * match the computed ones, which separates it from the console and from this canvas.
+ *
+ * Asking one application for its windows costs about 10ms.
+ */
+function chooserGeometry(area) {
+    const width = area.w * (chooser && chooser.width ? chooser.width : 0.5)
+    const left = area.x + (area.w - width) / 2
+    let top = area.y + area.h * config.previewTopRatio
+
+    try {
+        const app = hs.application.matchingBundleID(HAMMERSPOON_BUNDLE_ID)
+        for (const window of (app ? app.allWindows || [] : [])) {
+            const frame = window.frame
+            if (!frame) continue
+            if (Math.abs(frame.x - left) <= 2 && Math.abs(frame.w - width) <= 2) {
+                top = frame.y
+                break
+            }
+        }
+    } catch (e) {
+        // The computed position stands.
+    }
+
+    return { left: left, width: width, top: top }
+}
+
+/** Where to draw a preview of this image, or null when there is nowhere sensible. */
+function previewFrame(image) {
+    const screen = hs.screen.main() || hs.screen.primary()
+    const reference = hs.screen.primary() || screen
+    if (!screen || !reference) return null
+
+    const area = screen.frame
+    const size = image.size
+    if (!size || !size.w || !size.h) return null
+
+    // A maximum rather than a target: a small image drawn at four times its size is a
+    // blurred rectangle, and says less than the same image drawn honestly.
+    let height = Math.min(area.h * config.previewHeightRatio, size.h)
+    let width = size.w * (height / size.h)
+
+    const geometry = chooserGeometry(area)
+    const available = (geometry.left - area.x) - config.previewGap * 2
+    if (available > 0 && width > available) {
+        height = height * (available / width)
+        width = available
+    }
+
+    const left = geometry.left - config.previewGap - width
+    const top = geometry.top
+
+    // hs.screen measures y downwards from the top of the primary display and a canvas
+    // upwards from its bottom.
+    return {
+        x: left,
+        y: (reference.fullFrame.y + reference.fullFrame.h) - (top + height),
+        w: width,
+        h: height
+    }
+}
+
+function previewHide() {
+    if (!preview) return
+    preview.destroy()
+    preview = null
+    previewRow = null
+}
+
+function previewDraw(image, row) {
+    previewHide()
+    if (!image) return
+
+    const frame = previewFrame(image)
+    if (!frame) return
+
+    preview = hs.canvas.create(frame)
+        .level("popUpMenu")
+        .ignoreMouseEvents(true)
+        .behaviorList(["canJoinAllSpaces", "stationary"])
+
+    preview.appendElements([
+        {
+            type: "rectangle",
+            action: "fill",
+            fillColor: { red: 0, green: 0, blue: 0, alpha: 0.55 },
+            frame: { x: 0, y: 0, w: frame.w, h: frame.h },
+            roundedRectRadii: { xRadius: 10, yRadius: 10 }
+        },
+        {
+            type: "image",
+            image: image,
+            frame: { x: 4, y: 4, w: frame.w - 8, h: frame.h - 8 },
+            imageScaling: "scaleProportionally",
+            imageAlignment: "center"
+        }
+    ])
+    preview.show()
+    previewRow = row
+}
+
+/** The history row the chooser has selected, or null. */
+function selectedRow() {
+    if (!chooser || !chooser.isVisible) return null
+    const contents = chooser.selectedRowContents(chooser.selectedRow)
+    return contents && contents.row !== undefined ? contents.row : null
+}
+
+/** Draw, redraw or take away the preview, according to what is selected now. */
+function previewUpdate() {
+    if (!config.showPreview) return
+    if (!chooser || !chooser.isVisible) {
+        previewHide()
+        return
+    }
+
+    const row = selectedRow()
+    if (row === null) {
+        previewHide()
+        return
+    }
+    if (row === previewRow) return
+
+    const entry = history[row]
+    if (!entry || entry.type !== "image") {
+        previewHide()
+        return
+    }
+
+    const image = HSImage.fromPath(entry.path)
+    if (!image) {
+        previewHide()
+        return
+    }
+    previewDraw(image, row)
+}
+
+function previewPollStart() {
+    previewPollStop()
+    if (!config.showPreview) return
+    previewTimer = hs.timer.doEvery(config.previewPollSeconds, () => previewUpdate())
+}
+
+function previewPollStop() {
+    if (!previewTimer) return
+    previewTimer.stop()
+    previewTimer = null
+}
+
 // MARK: - The chooser
 
 // Right-clicking a row offers what v1 put behind its own context menu. The row is fixed
@@ -441,6 +762,21 @@ function chooserChoices() {
     const choices = []
 
     history.forEach((entry, row) => {
+        if (entry.type === "image") {
+            // The picture itself is the row's image, so the entry is recognisable without
+            // reading anything. The chooser scales it to the row.
+            choices.push({
+                text: `${entry.width}x${entry.height} image`,
+                subText: entry.path.split("/").pop(),
+                image: HSImage.fromPath(entry.path),
+                action: "pasteImage",
+                data: entry.path,
+                row: row,
+                contextMenu: entryContextMenu(row)
+            })
+            return
+        }
+
         const masked = config.passwordsHide && passwordLike(entry.content)
         const revealed = revealAll || revealedRow === row
         const text = (masked && !revealed)
@@ -501,6 +837,27 @@ function chooserSelect(choice) {
         chooserRefresh()
         return
     }
+    previewPollStop()
+    previewHide()
+
+    if (choice.action === "pasteImage" && typeof choice.data === "string") {
+        const image = HSImage.fromPath(choice.data)
+        if (!image) {
+            hs.ui.alert("That image is no longer on disk").duration(2).show()
+            return
+        }
+        lastImageWritten = choice.data
+        lastImageWrittenSize = image.size
+            ? {w: Math.round(image.size.w), h: Math.round(image.size.h)}
+            : null
+        hs.pasteboard.writeImage(image)
+        if (previousWindow) previousWindow.focus()
+        if (pasteOnSelect) {
+            hs.timer.doAfter(config.pasteDelay, () => hs.eventtap.keyStroke(["cmd"], "v"))
+        }
+        return
+    }
+
     if (choice.action !== "paste" || typeof choice.data !== "string") return
 
     hs.pasteboard.writeString(choice.data)
@@ -515,7 +872,17 @@ function chooserSelect(choice) {
 function start() {
     if (chooser) return module.exports
 
-    hs.fs.mkdir(`${hs.appinfo.configDir}/logs`)
+    hs.fs.mkdir(config.clipboardDir)
+
+    // An earlier version kept the history under logs/. Moved, rather than read in place,
+    // so that everything this Spoon owns ends up in one directory.
+    if (!hs.fs.exists(config.historyFile) && hs.fs.exists(config.historyFileWas)) {
+        if (hs.fs.move(config.historyFileWas, config.historyFile)) {
+            console.log(`[hs_clipboard-gt] history moved to ${config.historyFile}`)
+        } else {
+            console.error(`[hs_clipboard-gt] could not move ${config.historyFileWas}`)
+        }
+    }
     historyLoad()
     // Rewrite at once, so that anything password-like left on disk by an earlier run is
     // scrubbed whether or not something is copied this session.
@@ -524,10 +891,15 @@ function start() {
     chooser = hs.chooser.create()
     chooser.placeholder = "Clipboard history"
     chooser.onSelect = chooserSelect
-    chooser.onShow = () => revealKeysEnable()
+    chooser.onShow = () => {
+        revealKeysEnable()
+        previewPollStart()
+    }
     chooser.onHide = () => {
         revealKeysDisable()
         revealReset()
+        previewPollStop()
+        previewHide()
         // Rebuild at once, so a revealed entry is not left in the chooser's own list.
         chooserRefresh()
     }
@@ -552,6 +924,8 @@ function start() {
 }
 
 function stop() {
+    previewPollStop()
+    previewHide()
     if (watcher) {
         hs.pasteboard.removeWatcher(watcher)
         watcher = null
@@ -599,7 +973,9 @@ function historyToggle() {
 
 // Reading accessors, for commands and for the console.
 function historyEntries() {
-    return history.map((entry) => entry.content)
+    return history.map((entry) => entry.type === "image"
+        ? `[image ${entry.width}x${entry.height}] ${entry.path}`
+        : entry.content)
 }
 
 function pasteOnSelectEnabled() {

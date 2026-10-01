@@ -219,6 +219,52 @@ Each is reached through the Spoon object, as =interactive.readers.window= and so
 Rows in the window chooser read =Application — Title=, so typing either finds the
 window.
 
+** A number within a range, offering the value it has now
+
+=readers.number.prompted= accepts any number, and a parameter's =default= is a fixed value
+written when the command is defined. A command that sets a percentage therefore has to check
+the bounds itself, after the prompt has already been answered, and cannot offer the setting's
+current value, which is only known when the prompt opens.
+
+=readers.number.ranged= is a factory for both. It is given =min=, =max=, and =current= — a
+function returning the value to offer, which may be omitted and may return null.
+
+#+begin_src js   :exports both
+interactive.define({
+    name: "system-volume",
+    doc:  "Set the system's output volume, as a percentage.",
+    interactive: [{
+        name: "volume (0-100)",
+        reader: interactive.readers.number.ranged({
+            min: 0,
+            max: 100,
+            current: () => music.systemVolume()
+        })
+    }],
+    fn: (percent) => music.systemVolumeSet(percent)
+})
+#+end_src
+
+A value outside the range is refused — /volume (0-100): 150 is outside 0 to 100/ — and the
+command is cancelled, rather than the value being silently clamped.
+
+Unlike the readers above, this one is a function to call rather than a variant to name. It
+returns a reader, so it goes in =reader:= exactly as =readers.number.prompted= does.
+
+** Prompts bring Hammerspoon forward
+
+=ask()= activates Hammerspoon before showing a prompt, and puts back whatever was in front
+afterwards. Commands need do nothing about it, but it is worth knowing why it happens.
+
+=hs.ui.textPrompt= is a plain =NSWindow=, and a plain window cannot take keyboard focus
+while its application is in the background: it becomes key within Hammerspoon, which is not
+frontmost when a command runs from a key or from the command chooser, and macOS signals that
+by bouncing the dock icon instead of giving the window focus. The prompt appears and cannot
+be typed into.
+
+=hs.chooser= does not have the problem because its window is an =NSPanel= carrying
+=.nonactivatingPanel=, which is what lets a background application's panel accept keys.
+
 *** Narrowing what a reader offers
 
 A reader is given the whole parameter, so a parameter may carry options for it. Offered by

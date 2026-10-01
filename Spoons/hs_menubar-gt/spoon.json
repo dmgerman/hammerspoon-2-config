@@ -1,0 +1,7 @@
+{
+    "name": "hs_menubar-gt",
+    "version": "0.1",
+    "author": "dmg <dmg@turingmachine.org>",
+    "license": "MIT - https://opensource.org/licenses/MIT",
+    "description": "Reach the macOS menu bar extras from the keyboard. A port of hs_menubar."
+}

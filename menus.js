@@ -141,8 +141,9 @@ function applicationsMenu() {
 function windowSwitcherMenu() {
     // From hs_windowfilter-gt, which already tracks every window and holds its title,
     // application and flags. hs.window.allWindows() walks every running process instead,
-    // and blocks for as long as the slowest of them takes to answer -- measured at 52ms
-    // with the machine quiet and over 1.5 seconds with a video meeting running.
+    // so its cost is set by the slowest of them rather than by the number of windows:
+    // about 330ms here since upstream reduced the accessibility timeout for issue #219,
+    // and about 1540ms before that. Asking the tracker costs 1ms.
     const filter = hs.spoons["hs_windowfilter-gt"]
     if (!filter) return []
 

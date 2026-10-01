@@ -1,0 +1,7 @@
+{
+    "name": "hs_kitty-gt",
+    "version": "0.1",
+    "author": "dmg <dmg@turingmachine.org>",
+    "license": "MIT - https://opensource.org/licenses/MIT",
+    "description": "Switch between kitty's tabs, and create them, from the keyboard. A port of hs_kitty."
+}

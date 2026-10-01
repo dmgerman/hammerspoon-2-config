@@ -86,6 +86,27 @@ Switch straight to the window used before the current one. No chooser is shown.
 
 ** selectPreviousApplicationWindow()
 
+Go straight to the previously used window of the focused application.
+
+** selectApplicationByBundle(bundleID)
+
+Switch to an application's current window, or back again when already there.
+
+#+begin_src js   :exports both
+sw.selectApplicationByBundle("org.gnu.Emacs")
+#+end_src
+
+Pressing the same key twice returns to the window that was in use before, so one key per
+application switches between two applications rather than only reaching one.
+
+"Back again" is the most recently used window that is *not* that application's, rather than
+simply the previous window. Otherwise an application with two windows would toggle between
+its own, which is what =selectPreviousApplicationWindow()= is for.
+
+Matched on bundle identifier rather than on name: a name can be changed by a localisation or
+shared by two applications, while the identifier is what the application is. An application
+that is not running, or has no window yet tracked, is launched or brought forward.
+
 The same, restricted to the focused application's windows. Useful for moving between two
 windows of one editor or browser.
 

@@ -20,10 +20,14 @@
 // order they were last focused.
 //
 // Asking hs.window instead is what made this slow. allWindows(), orderedWindows() and
-// visibleWindows() each walk every running process rather than every application: 1556 ms
-// for 23 windows on one machine, against 18 ms per application, against nothing at all for
-// asking the tracker. Their front-to-back order also leaves out minimized windows and
-// windows of a hidden application, which a switcher is precisely for.
+// visibleWindows() each walk every running process rather than every application. Upstream
+// reduced the accessibility timeout for issue #219, so allWindows() and visibleWindows()
+// now cost about 330 ms for 27 windows here rather than about 1540 ms; orderedWindows() was
+// not covered and still costs about 1560 ms. Per application the same windows take 18 ms,
+// and asking the tracker takes 1 ms.
+//
+// Their front-to-back order also leaves out minimized windows and windows of a hidden
+// application, which a switcher is precisely for.
 //
 // Five of the Hammerspoon 1 Spoon's bindings are not ported: all_windows_ws,
 // app_windows_ws, previous_window_ws, previous_app_window_ws and
@@ -143,7 +147,7 @@ function startTrackingFocus() {
     // Seed with what is open now, so the order is useful before anything has been focused.
     // Beyond the focused window below, the seeding order is arbitrary: the tracker holds
     // its windows by id rather than front to back. One focus change corrects it, and
-    // reading a front-to-back order costs a second and a half. See switchableRecords().
+    // reading a front-to-back order still costs about 1560 ms. See switchableRecords().
     for (const record of filter.records()) noteFocused(record.state.id)
 
     // The focused window belongs at the front. Taken from the tracker, which knows which
@@ -176,8 +180,11 @@ function recordsByUse(records) {
  *
  * Enumerating instead is what made this Spoon slow: hs.window.allWindows(),
  * orderedWindows() and visibleWindows() all walk every running process rather than every
- * application — 1556 ms for 23 windows on one machine, against 18 ms for the same windows
- * gathered per application, and none at all for asking the tracker.
+ * application. Upstream reduced the accessibility timeout for issue #219, so allWindows()
+ * and visibleWindows() now measure about 330 ms for 27 windows on one machine rather than
+ * about 1540 ms; orderedWindows() was not covered and still measures about 1560 ms.
+ * Against 18 ms for the same windows gathered per application, and 1 ms for asking the
+ * tracker.
  *
  * @returns {Array} `{window, state}` objects, in no particular order.
  */
@@ -246,7 +253,7 @@ function firstRecordPerApplication() {
  *
  * Hammerspoon 1 read the chooser's own y by searching hs.window.allWindows() for
  * Hammerspoon's "Chooser" window. hs.chooser exposes no frame here, and that search costs a
- * second and a half on this machine, so the position is computed from the screen and the
+ * about 1560 ms on this machine, so the position is computed from the screen and the
  * chooser's width fraction instead. config.thumbnailTopRatio sets the height it sits at.
  */
 function thumbnailFrame(image) {
@@ -647,12 +654,24 @@ function focusWindowById(id) {
     const helper = hs.spoons ? hs.spoons["hs_window-gt"] : null
     if (helper && typeof helper.focusWindow === "function") return helper.focusWindow(window)
 
+    // Bring the application forward first, then focus the window. Activating afterwards
+    // makes macOS focus whichever window it considers main — the one on the screen in use
+    // — which discards the focus. AXFrontmost rather than launchOrFocus, which raises every
+    // window the application has. See focusWindow() in hs_window-gt, which this mirrors.
+    try {
+        const application = window.application
+        const element = application ? application.axElement() : null
+        if (element && typeof element.setAttributeValueValue === "function") {
+            element.setAttributeValueValue("AXFrontmost", true)
+        }
+    } catch (e) {
+        log(`could not set AXFrontmost: ${e}`)
+    }
+
     window.focus()
     // raise() as well: focus() alone will not leave a full screen space for another window
     // of the same application. See focusWindow() in hs_window-gt.
     window.raise()
-    const bundleID = window.application ? window.application.bundleID : null
-    if (bundleID) hs.application.launchOrFocus(bundleID)
     return true
 }
 
@@ -687,6 +706,55 @@ function selectPreviousWindow() {
         return false
     }
     return focusWindowById(records[1].state.id)
+}
+
+/**
+ * Switch to an application's current window, or back again when already there.
+ *
+ * Pressing the same key twice returns you to what you were doing, which makes one key per
+ * application a way of moving between two of them rather than only of reaching one.
+ *
+ * Matched on bundle identifier rather than on name: a name can be changed by a localisation
+ * or shared by two applications, while the identifier is what the application is.
+ *
+ * "Back again" is the most recently used window that is *not* this application's, rather
+ * than simply the previous window. Otherwise an application with two windows would toggle
+ * between its own, which is what selectPreviousApplicationWindow() is for.
+ *
+ * An application that is not running, or is running with no window yet tracked, is launched
+ * or brought forward.
+ *
+ * @param {string} bundleID For example "com.apple.Safari".
+ * @returns {boolean} Whether anything was switched to.
+ */
+function selectApplicationByBundle(bundleID) {
+    if (!bundleID) {
+        hs.ui.alert("No bundle identifier given").duration(2).show()
+        return false
+    }
+
+    const ordered = allRecords()
+    const theirs = ordered.filter((record) => record.state.bundleID === bundleID)
+
+    if (!theirs.length) {
+        // Nothing tracked for it. launchOrFocus starts it or brings it forward, and goes
+        // through NSWorkspace, which is not subject to the restriction that stops an
+        // application that is not frontmost activating another.
+        hs.application.launchOrFocus(bundleID)
+        return true
+    }
+
+    const current = ordered.find((record) => record.state.focused)
+    if (current && current.state.bundleID === bundleID) {
+        const away = ordered.find((record) => record.state.bundleID !== bundleID)
+        if (!away) {
+            hs.ui.alert("No window outside this application").duration(2).show()
+            return false
+        }
+        return focusWindowById(away.state.id)
+    }
+
+    return focusWindowById(theirs[0].state.id)
 }
 
 /** Go straight to the previously used window of the focused application. */
@@ -765,6 +833,7 @@ module.exports = {
     selectApp,
     selectPreviousWindow,
     selectPreviousApplicationWindow,
+    selectApplicationByBundle,
     order,
     timings,
     thumbnailState,

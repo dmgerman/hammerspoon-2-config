@@ -1,0 +1,159 @@
+* hs_kitty-gt
+
+Switch between kitty's tabs by name, and create tabs that run something.
+
+kitty holds several terminals in one application, and all of its tabs share one window. A
+window switcher therefore offers "kitty" as a single entry. This Spoon asks kitty for its
+tabs, so an individual tab can be selected by name.
+
+This is a port of the Hammerspoon 1 =hs_kitty= Spoon, itself a port of =kitty.el=, reduced
+to the parts concerned with tabs.
+
+* Simple usage
+
+#+begin_src js   :exports both
+const kitty = hs.loadSpoon("hs_kitty-gt")
+
+kitty.chooseTab()                       // pick a tab from a chooser
+kitty.tabs()                            // what is open, most recently used first
+kitty.focusTab("neon")                  // by title
+kitty.newTab("logs", "tail -f /var/log/system.log")
+kitty.goToTab("neon", "autossh neon")   // focus it, creating it if it is not there
+kitty.list()                            // the tabs as lines, for the console
+#+end_src
+
+Every function that talks to kitty returns a promise. See /Everything is asynchronous/
+below.
+
+* The chooser
+
+Tabs are listed most recently used first, so the tab you want is usually first or second.
+Each row shows the tab's title, which OS window it is in when there is more than one, and
+the foreground processes running in it.
+
+Typing filters on the title and on that line beneath it.
+
+When kitty is already the frontmost application, the selection starts on the *second* row,
+because the first row is the tab already in use.
+
+* Creating tabs
+
+=newTab(title, command)= takes a title and a command line and nothing more. Which particular
+tabs a setup wants is defined in a configuration rather than in this Spoon.
+
+#+begin_src js   :exports both
+// In init.js: a tab holding an ssh tunnel, created on the first press and reached on later
+// ones.
+interactive.define({
+    name: "kitty-tab-neon",
+    doc:  "Switch to the neon tab, opening the tunnel if it is not there.",
+    fn:   () => kitty.goToTab("neon", "autossh neon")
+})
+#+end_src
+
+A command is run through =/bin/sh=, so a pipeline or an =&&= works. The tab is created with
+=--hold=, so it remains open after the command exits and its output can still be read. A tab
+that closed on exit would remove any error message with it.
+
+* Everything is asynchronous
+
+The substantial difference from version 1. That Spoon used =hs.execute()=, which runs a
+command and returns its output; Hammerspoon 2 has no =hs.execute=, so commands run under
+=hs.task= and every function here returns a promise.
+
+The consequence is that the chooser cannot be built and shown in one call: kitty has to
+answer first. On one machine =kitty @ ls= takes about 70 ms, so the chooser appears about
+that long after the key is pressed.
+
+The task object is held in a set until it terminates. An =hs.task= with nothing referring to
+it can be collected while its child is still running, and its callback then never fires:
+the promise neither resolves nor rejects, and nothing is logged.
+
+* Talking to kitty
+
+Through kitty's remote control interface, =kitty @ --to <socket> <command>=. The socket is
+found in this order:
+
+1. =$KITTY_LISTEN_ON=, if Hammerspoon happens to have it.
+2. The newest file matching =config.socketGlob= that is *actually a socket*.
+
+The second is what applies in practice. =$KITTY_LISTEN_ON= is set in the shells kitty
+starts, and Hammerspoon does not inherit it — =hs.appinfo.environment= holds the environment
+Hammerspoon itself was launched with, which is Finder's or Xcode's.
+
+Each candidate is tested with =test -S= rather than matched on name alone. Anything called
+=/tmp/kitty-something= matches the pattern, and connecting to a regular file fails with
+"socket operation on non-socket".
+
+The socket is remembered until a command fails, at which point it is looked for again. A
+kitty that has been restarted is therefore found on the next call rather than reported as
+unreachable.
+
+* Functions
+
+** tabs()
+
+=Promise<{tabs, error}>=. Each tab is
+=({id, title, active, osWindowId, osWindowIndex, osWindowCount, processes, lastFocusedAt})=,
+most recently used first across every OS window.
+
+The ordering comes from the greatest =last_focused_at= of the tab's windows. kitty's own
+=active_tab_history= is not used: it does not put the tab in use at either end of its list.
+
+** chooseTab()
+
+Show the chooser and switch to what is chosen.
+
+** focusTab(title)
+
+Focus the tab with exactly this title. False when no tab has it, or when more than one does.
+
+** newTab(title, [command])
+
+Create a tab, optionally running something in it.
+
+** goToTab(title, [command])
+
+Focus that tab, creating it if it does not exist. This is the function to bind to a key for
+a tab that should always be available.
+
+** running()
+
+=Promise<boolean>=: whether kitty is running and answering.
+
+** list()
+
+=Promise<string[]>=: the tabs and what is running in them, for the console.
+
+* Settings
+
+| Setting                       | Default                     | Meaning                                  |
+|-------------------------------+-----------------------------+------------------------------------------|
+| =kittyBin=                    | =/opt/homebrew/bin/kitty=   | kitty's binary                           |
+| =socketGlob=                  | =/tmp/kitty-*=              | where to look for the control socket     |
+| =rowsToDisplay=               | =14=                        | rows visible at once                     |
+| =chooserWidth=                | =0.4=                       | chooser width, as a fraction of the screen |
+| =skipCurrentTabWhenFrontmost= | =true=                      | start below the current tab              |
+| =startRow=                    | =1=                         | which row to start on then; counts from 0 |
+| =logCommands=                 | =false=                     | log every kitty command and its duration |
+
+* Commands
+
+In this configuration, from =init.js=:
+
+| Command                 | Key   | Does                                      |
+|-------------------------+-------+-------------------------------------------|
+| =kitty-tab-interactive= | ⌘⌃⌥K  | choose a tab and switch to it             |
+| =kitty-tab-new=         |       | create a tab, asking for a title          |
+| =kitty-tab-list=        |       | list the tabs to the console              |
+| =kitty-tab-neon=        |       | switch to =neon=, opening the tunnel      |
+
+=⌥K= is separate and belongs to =hs_selectWindow-gt=: it switches to kitty as an
+application, and pressing it a second time returns to the previous application.
+
+* Not ported
+
+=executeInTab=, =sendTextToTabId=, the process inspection, =newOsWindow=, OS window
+switching, and the =connectToNeon= / =neLocal= / =neRemote= ssh layer. The last of those is
+specific to particular machines, and a tab holding a tunnel is reachable through
+=goToTab= instead.

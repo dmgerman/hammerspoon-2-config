@@ -42,6 +42,64 @@ Right-clicking an entry opens a menu that acts on that row:
 | Move entry down                     | |
 | Invert order above                  | reverses the order of everything from that row up to the newest entry |
 
+* Images
+
+A copied image is stored as well as copied text: a window screenshot, a picture from a
+browser, or anything else the pasteboard offers as PNG, TIFF or JPEG.
+
+An image entry's row shows the image as its icon and its dimensions as its text. That icon
+is a few points high, so the selected image is also drawn beside the chooser at up to half
+the screen's height. Moving onto an image row draws the preview; moving off it removes the
+preview.
+
+Selecting an image entry writes the image to the pasteboard.
+
+** Where images are kept
+
+In =clipboard/=, beside the history. One PNG per image, named for the time it was copied:
+
+#+begin_example
+clipboard/clipboard.json          the history
+clipboard/20260917T165612.png     a copied image
+#+end_example
+
+An earlier version kept the history in =logs/clipboard.json=. It is moved into =clipboard/=
+on the first start that finds it there.
+
+** Two limits, counted separately
+
+| Setting              | Default | Counts        |
+|----------------------+---------+---------------|
+| =historySize=        | =100=   | text entries  |
+| =imageHistorySize=   | =10=    | image entries |
+
+The limits are separate so that copying several images does not evict text entries. The list
+is still ordered newest first across both kinds.
+
+An image that falls outside its limit has its file deleted, so the directory contains
+exactly the images the history refers to.
+
+** Image entries in the other operations
+
+/Paste all up to here/ skips image entries and continues with the rest, because an image
+cannot be typed. =historyEntries()= returns =[image 1462x899] /path/to/file.png= for an
+image entry rather than its contents.
+
+** Settings for the preview
+
+| Setting               | Default | Meaning                                           |
+|-----------------------+---------+---------------------------------------------------|
+| =showPreview=         | =true=  | draw the selected image beside the chooser        |
+| =previewHeightRatio=  | =0.5=   | maximum preview height, as a fraction of the screen's height |
+| =previewGap=          | =12=    | points between the preview and the chooser        |
+| =previewPollSeconds=  | =0.15=  | how often the selected row is read                |
+
+The height is a maximum, not a target. An image shorter than that is drawn at its own size
+rather than scaled up, because scaling a small image up reduces its detail.
+
+The selected row is polled because =hs.chooser= provides no callback for the selection
+changing.
+
 * Passwords
 
 An entry that looks like a password is shown as =[hidden - 16 chars]=, is kept for the

@@ -165,8 +165,6 @@ Waterboys|This is the Sea
 https://music.apple.com/ca/album/%C3%A1g%C3%A6tis-byrjun/1447442814 # Sigur Rós — Ágætis Byrjun
 # Talk Talk|Spirit of Eden
 https://music.apple.com/ca/album/spirit-of-eden/701395363 # Talk Talk — Spirit of Eden
-# Talk Talk|Laughing Stock
-https://music.apple.com/ca/album/laughing-stock/1444218854 # Talk Talk — Laughing Stock
 # Boards of Canada|Music Has the Right to Children
 https://music.apple.com/ca/album/music-has-the-right-to-children/281116024 # Boards of Canada — Music Has the Right to Children
 # Brian Eno|Ambient 1: Music for Airports
@@ -208,3 +206,19 @@ https://music.apple.com/ca/album/replica/1714487173 # Oneohtrix Point Never — 
 Moby|Play
 Moby|18
 Airospace|You're a Liar and You Suck, Who Would Love You?
+
+# Julianna Barwick|Nepenthe
+https://music.apple.com/ca/album/nepenthe/659413787 # Julianna Barwick — Nepenthe
+
+# A Winged Victory for the Sullen|A Winged Victory for the Sullen
+https://music.apple.com/ca/album/a-winged-victory-for-the-sullen/443010643 # A Winged Victory for the Sullen — A Winged Victory for the Sullen
+
+# Stars of the Lid|And Their Refinement of the Decline
+https://music.apple.com/ca/album/and-their-refinement-of-the-decline/218111332 # Stars of the Lid — And Their Refinement of the Decline
+
+# Max Richter|The Blue Notebooks
+https://music.apple.com/ca/album/the-blue-notebooks-15-years/1368089903 # Max Richter — The Blue Notebooks
+
+# Jóhann Jóhannsson|Fordlândia
+https://music.apple.com/ca/album/fordl%C3%A2ndia-bonus-track-version/293921148 # Jóhann Jóhannsson — Fordlândia
+

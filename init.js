@@ -185,6 +185,54 @@ interactive.use("hs_network-gt", {
     }
 });
 
+// kitty's tabs, which macOS window switching cannot see into: every tab is the same
+// window. A port of the hs_kitty Spoon in ~/.hammerspoon, reduced to the parts about tabs.
+//
+// The Spoon creates a tab from a title and a command and knows nothing else about them.
+// Which tabs are worth a key belongs here.
+interactive.use("hs_kitty-gt", {
+    commands: (interactive, kitty) => {
+        interactive.define({
+            name: "kitty-tab-interactive",
+            doc: "Choose one of kitty's tabs and switch to it.",
+            // Opens a chooser, so it waits for the command chooser to close first.
+            runDelay: 0.05,
+            fn: () => kitty.chooseTab()
+        });
+
+        interactive.define({
+            name: "kitty-tab-new",
+            doc: "Create a kitty tab with a title.",
+            interactive: [{ name: "title", reader: interactive.readers.string.prompted }],
+            fn: (title) => kitty.newTab(title)
+        });
+
+        interactive.define({
+            name: "kitty-tab-list",
+            doc: "List kitty's tabs and what is running in them, to the console.",
+            fn: () => kitty.list().then((rows) => {
+                for (const row of rows) console.log(row);
+                return `${rows.length} tabs`;
+            })
+        });
+
+        // Tabs I always want, each reached by name and created on the first press. The
+        // Spoon takes a title and a command; which tabs exist is this configuration's
+        // business.
+        const tab = (name, title, doc, command) => interactive.define({
+            name: name,
+            doc: doc,
+            fn: () => kitty.goToTab(title, command)
+        });
+
+        tab("kitty-tab-neon", "neon", "Switch to the neon tab, opening the tunnel if it is not there.",
+            "autossh neon");
+    },
+    keys: {
+        "cmd-ctrl-alt k": "kitty-tab-interactive"
+    }
+});
+
 // The icons on the right of the menu bar, pressed from the keyboard. A port of the
 // hs_menubar Spoon in ~/.hammerspoon.
 //
@@ -351,7 +399,7 @@ interactive.use("hs_emacs-gt", {
 
         interactive.define({
             name: "emacs-edit-selection",
-            doc: "Edit the selected text in Emacs, and paste the result back.",
+            doc: "Edit the selected text in Emacs, and paste the result back``.",
             fn: () => emacs.editSelection()
         });
 
@@ -360,6 +408,35 @@ interactive.use("hs_emacs-gt", {
             doc: "Edit the whole of the focused text field in Emacs.",
             fn: () => emacs.editAll()
         });
+
+        // Two of my own, carried over from emh:emacs_tab_jump and emh:claude_manager in
+        // ~/.hammerspoon/dmg-functions.lua. Both name elisp that lives in my Emacs
+        // configuration rather than anything Hammerspoon provides, which is why they are
+        // defined here and not in hs_emacs-gt.
+        interactive.define({
+            name: "emacs-tab-manager",
+            doc: "Choose from the browser's tabs and bookmarks in Emacs.",
+            // The argument says whether a browser is what asked. Called from Chrome it
+            // passes t, so the chooser opens in a frame over the browser rather than
+            // taking Emacs's own frame; from anywhere else, nil.
+            fn: () => {
+                const front = hs.application.frontmost();
+                const fromChrome = front && front.bundleID === "com.google.Chrome";
+                return emacs.executeAndRaise(
+                    `(dmg-www-url-jump-in-frame ${fromChrome ? "t" : "nil"})`);
+            }
+        });
+
+        interactive.define({
+            name: "emacs-claude-manager",
+            doc: "Choose from the Claude sessions running in kitty, from Emacs.",
+            fn: () => emacs.executeAndRaise("(kitty-gt-claude-sessions)")
+        });
+    },
+    // The two chords these had in ~/.hammerspoon before they were withdrawn there.
+    keys: {
+        "cmd-ctrl .": "emacs-tab-manager",
+        "cmd-ctrl '": "emacs-claude-manager"
     }
 });
 
@@ -385,6 +462,22 @@ interactive.use("hs_appleMusic-gt", {
         });
         command("appleMusic-add-current-album", "Add the album playing to the list.", () => music.addCurrentAlbum());
         command("appleMusic-toggle-auto-play", "Turn auto-play on or off.", () => music.toggleAutoPlay());
+
+        // The system's output volume, not Music's own. The prompt opens showing the volume
+        // now, and refuses anything outside 0 to 100 rather than clamping it silently.
+        interactive.define({
+            name: "system-volume",
+            doc: "Set the system's output volume, as a percentage.",
+            interactive: [{
+                name: "volume (0-100)",
+                reader: interactive.readers.number.ranged({
+                    min: 0,
+                    max: 100,
+                    current: () => music.systemVolume()
+                })
+            }],
+            fn: (percent) => music.systemVolumeSet(percent)
+        });
 
         interactive.define({
             name: "appleMusic-adjust-volume",
@@ -765,6 +858,9 @@ interactive.use("hs_window-gt", {
                 return true;
             }
         });
+    },
+    keys: {
+        "alt m": "window-maximize"
     }
 });
 
@@ -814,6 +910,25 @@ interactive.use("hs_selectWindow-gt", {
             doc: "Switch to the previously used window of the focused application.",
             fn: () => switcher.selectPreviousApplicationWindow()
         });
+
+        // One command per application I move between often, each pressed twice to come
+        // back: the second press goes to the most recently used window outside that
+        // application. Matched on bundle identifier, so a renamed or localised application
+        // is still found.
+        const application = (name, title, bundleID) => interactive.define({
+            name: name,
+            doc: `Switch to ${title}, or back to the previous window when already there.`,
+            fn: () => switcher.selectApplicationByBundle(bundleID)
+        });
+
+        application("window-select-emacs", "Emacs", "org.gnu.Emacs");
+        application("window-select-kitty", "kitty", "net.kovidgoyal.kitty");
+        application("window-select-chrome", "Google Chrome", "com.google.Chrome");
+    },
+    keys: {
+        "alt e": "window-select-emacs",
+        "alt k": "window-select-kitty",
+        "alt c": "window-select-chrome"
     }
 });
 
