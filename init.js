@@ -1035,6 +1035,159 @@ interactive.use("hs_selectWindow-gt", {
     }
 });
 
+// Dictation. A port of the hs_whisperDictation spoon in ~/.hammerspoon, carrying over what
+// dmg_load_whisper_dictation() set there.
+//
+// The recorder is the streaming one, which cuts the audio at pauses and hands each chunk
+// over while you are still talking, and the transcriber is a local whisper.cpp server with
+// the model already in memory. The Spoon starts that server itself when nothing answers on
+// the port.
+//
+// This needs microphone permission, in System Settings → Privacy & Security → Microphone.
+// Without it macOS does not refuse to record: it hands over samples replaced with zero and
+// says nothing, so the only symptom would be that nothing is ever transcribed. The Spoon
+// checks before recording and says so instead.
+interactive.use("hs_whisper-gt", {
+    config: {
+        languages: ["en", "ja", "es"],
+        recorder: "streaming",
+        transcriber: "whisperserver",
+
+        monitorUserActivity: true,
+        pasteWithEmacsYank: true,
+
+        // The Python that numpy, sounddevice, scipy, torch and torchaudio are installed
+        // for, which is not the system one.
+        streamingPythonPath: `${hs.fs.homeDirectory()}/.config/dmg/python/bin/python3`,
+        streamingSilenceThreshold: 3.0,
+        streamingMinChunkDuration: 5.0,
+
+        whisperserverCmd: `${hs.fs.homeDirectory()}/.emacs.d/modules/whisper-cli/build/bin/whisper-server`,
+        whisperserverModelPath: "/usr/local/whisper/ggml-model.bin",
+
+        // Each filter reads the transcription on stdin and writes the replacement to
+        // stdout. The abbreviation is shown in the menu bar while that filter is active.
+        filters: [
+            {
+                name: "clean", abbrev: "clr",
+                cmd: `${hs.fs.homeDirectory()}/bin/llm/query-model.py filter ` +
+                    `-p 'Correct the grammar and formatting of this text, only respond with the corrected text'`
+            },
+            {
+                name: "list", abbrev: "lst",
+                cmd: `${hs.fs.homeDirectory()}/bin/llm/query-model.py filter ` +
+                    `-p 'Format this text as an org-mode checklist of items, only respond with the list of items, in plain text; do not add any text nor headers'`
+            },
+            {
+                name: "Answer question", abbrev: "ans",
+                cmd: `${hs.fs.homeDirectory()}/bin/llm/query-model.py answer`
+            },
+            {
+                name: "chatGPT answer question", abbrev: "askChat",
+                cmd: `${hs.fs.homeDirectory()}/bin/chatgpt-answer-question.py`
+            },
+            {
+                name: "chatGPT clean", abbrev: "cleanChat",
+                cmd: `${hs.fs.homeDirectory()}/bin/chatgpt-filter.py ` +
+                    `'Correct the grammar and formatting of this text, only respond with the corrected text'`
+            }
+        ]
+    },
+    commands: (interactive, whisper) => {
+        // Dictating into whatever has focus is the ordinary case, so it gets the plain
+        // name. The clipboard one says in its name that it goes somewhere else.
+        interactive.define({
+            name: "whisper-transcribe-toggle",
+            doc: "Start dictating, or stop and paste what was said where the cursor is.",
+            fn: () => whisper.transcribeToggle(true)
+        });
+
+        interactive.define({
+            name: "whisper-transcribe-to-clipboard-toggle",
+            doc: "Start dictating, or stop and copy what was said to the clipboard.",
+            fn: () => whisper.transcribeToggle()
+        });
+
+        interactive.define({
+            name: "whisper-transcribe-abort",
+            doc: "Abandon the dictation in progress, leaving the clipboard alone.",
+            fn: () => whisper.transcribeAbort()
+        });
+
+        // These three open a chooser, so they wait for the command chooser to close first.
+        // Created while that one is still closing, their own chooser does not hold the key
+        // window and the next thing to draw takes it away.
+        interactive.define({
+            name: "whisper-transcribe-again",
+            doc: "Transcribe a recent recording again, to try another language or transcriber.",
+            runDelay: 0.05,
+            fn: () => whisper.transcribeAgain()
+        });
+
+        interactive.define({
+            name: "whisper-language-select",
+            doc: "Choose which language to transcribe as.",
+            runDelay: 0.05,
+            fn: () => whisper.languageSelect()
+        });
+
+        interactive.define({
+            name: "whisper-filter-select",
+            doc: "Choose what to pass the transcription through before it reaches the clipboard.",
+            runDelay: 0.05,
+            fn: () => whisper.filterSelect()
+        });
+
+        interactive.define({
+            name: "whisper-language-next",
+            doc: "Move to the next configured transcription language.",
+            fn: () => whisper.languageNext()
+        });
+
+        interactive.define({
+            name: "whisper-diagnose",
+            doc: "Print to the console what the dictation Spoon is doing and what it is using.",
+            fn: () => whisper.diagnose()
+        });
+
+        interactive.define({
+            name: "whisper-debug-enable",
+            doc: "Log every step of a dictation. Follow with whisper-server-restart to " +
+                "make the streaming server verbose too.",
+            fn: () => whisper.debugSet(true)
+        });
+
+        interactive.define({
+            name: "whisper-debug-disable",
+            doc: "Stop logging every step of a dictation.",
+            fn: () => whisper.debugSet(false)
+        });
+
+        interactive.define({
+            name: "whisper-server-restart",
+            doc: "Restart the streaming recorder's Python server, to pick up a changed " +
+                "microphone or to recover one that has got stuck.",
+            fn: () => whisper.serverRestart()
+        });
+
+        interactive.define({
+            name: "whisper-recordings-prune",
+            doc: "Delete all but the most recent recordings.",
+            fn: () => whisper.recordingsPrune()
+        });
+    },
+    // The two chooser chords are the ones the version 1 configuration used for this Spoon,
+    // so they have to be given up there first: a hotkey is registered system-wide, and with
+    // both running whichever registered first wins. Comment out
+    // dmg_load_whisper_dictation() in dmg-functions.lua.
+    keys: {
+        "cmd-ctrl return": "whisper-transcribe-toggle",
+        "cmd-ctrl-alt return": "whisper-transcribe-to-clipboard-toggle",
+        "cmd-ctrl-alt ;": "whisper-language-select",
+        "cmd-ctrl-alt f": "whisper-filter-select"
+    }
+});
+
 interactive.define({
     name: "paste",
     doc: "Send cmd-v to the focused application.",

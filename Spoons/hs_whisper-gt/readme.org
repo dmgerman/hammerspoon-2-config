@@ -1,0 +1,435 @@
+* hs_whisper-gt
+
+Dictation with a local Whisper. Press a key, speak, press it again, and the text is typed
+into whatever had focus — or put on the clipboard, if that is the key you pressed.
+
+Everything runs on this machine. The audio is never sent anywhere; only a filter can send
+the text anywhere, and only one you configured yourself.
+
+This is a port of the Hammerspoon 1 /hs_whisperDictation/ spoon to Hammerspoon 2 and
+JavaScript.
+
+* Simple usage
+
+#+begin_src js   :exports both
+const whisper = hs.loadSpoon("hs_whisper-gt")
+
+whisper.config.languages = ["en"]
+whisper.config.recorder = "sox"
+whisper.config.transcriber = "whisperkit"
+
+whisper.bindHotkeys({
+    transcribeToggle:            [["cmd", "ctrl"], "return"],
+    transcribeToClipboardToggle: [["cmd", "ctrl", "alt"], "return"],
+    languageSelect:              [["cmd", "ctrl", "alt"], ";"]
+})
+
+whisper.start()
+#+end_src
+
+Install what that needs with =brew install sox whisperkit-cli=.
+
+=transcribeToggle= types the text into whatever had focus. =transcribeToClipboardToggle=
+puts it on the clipboard instead, to be pasted wherever you want it. Both start and stop the
+same way: press once to begin, press again to transcribe what was said.
+
+A =🎤 (en)= item appears in the menu bar; clicking it starts and stops a recording, as the
+key does. While recording it counts the seconds, and while transcribing it shows =⏳=.
+
+** Microphone permission
+
+Hammerspoon 2 needs microphone permission, in *System Settings → Privacy & Security →
+Microphone*. Without it macOS does not refuse to record: it hands over samples that have
+been replaced with zero, with no error of any kind, and the only symptom is that nothing is
+ever transcribed. So the Spoon checks the permission before it records and says so rather
+than recording silence.
+
+=config.monitorUserActivity= additionally needs *Accessibility*, because it watches for
+typing with an event tap. Without it the Spoon still dictates; it just cannot tell whether
+you moved on while it was recording, so it will not guard auto-paste.
+
+* Recording and transcribing
+
+Two recorders and three transcribers, each chosen by name.
+
+** Recorders
+
+| Name        | What it does                                           | When to use it            |
+|-------------+--------------------------------------------------------+---------------------------|
+| =sox=       | Records one file for the whole session                 | Simple and reliable       |
+| =streaming= | A Python server with voice-activity detection, cutting | Long dictations: the text |
+|             | the audio at pauses and handing over each chunk        | starts arriving sooner    |
+
+=sox= needs =brew install sox=.
+
+*** Chunking
+
+=streaming= watches for pauses and cuts the recording at them, so a long dictation becomes
+several chunks instead of one. Each chunk is sent to the transcriber as soon as it is cut,
+while you carry on speaking, and the results are joined in order at the end. This is what
+makes =whisperserver= worth running: the model is already in memory, so a sentence comes
+back while you are still saying the next one, rather than everything being transcribed after
+you stop.
+
+Each chunk's text is shown as it arrives, and the menu bar counts them —
+=⏳ 2/3 (en)= means two of three chunks are done. A dictation short enough to produce a
+single chunk shows no per-chunk text, because it would only repeat what is about to be
+typed or copied.
+
+#+begin_src js   :exports both
+whisper.config.streamingSilenceThreshold = 3.0   // seconds of silence that ends a chunk
+whisper.config.streamingMinChunkDuration = 5.0   // never cut a chunk shorter than this
+whisper.config.streamingMaxChunkDuration = 600.0 // cut anyway after this long
+whisper.config.chunkAlertSeconds = 3             // how long each chunk's text is shown, 0 for none
+#+end_src
+
+A pause only ends a chunk if it is longer than =streamingSilenceThreshold= /and/ the chunk
+so far is longer than =streamingMinChunkDuration=. With the values above, pausing for two
+seconds between sentences will not split them, and neither will a pause four seconds in.
+Lower both if you want the text to come back in smaller pieces.
+
+=sox= does not chunk: it records one file and transcribes it once you stop.
+
+=streaming= needs =pip install numpy sounddevice scipy torch torchaudio=, and
+=config.streamingPythonPath= pointing at the Python those are installed for. Check it with:
+
+#+begin_src sh   :exports both
+python3 whisper_stream.py --check-deps
+#+end_src
+
+** Transcribers
+
+| Name            | What it is                       | Speed  | Best for                       |
+|-----------------+----------------------------------+--------+--------------------------------|
+| =whisperkit=    | whisperkit-cli, on the Apple     | Fast   | Apple Silicon                  |
+|                 | Neural Engine                    |        |                                |
+| =whispercli=    | whisper.cpp's whisper-cli, on    | Slower | Any Mac                        |
+|                 | CPU or GPU                       |        |                                |
+| =whisperserver= | A local whisper.cpp HTTP server  | Fast   | Dictating often: the model     |
+|                 | with the model already in memory |        | stays loaded between sessions  |
+
+#+begin_src sh   :exports both
+brew install whisperkit-cli          # whisperkit
+brew install whisper-cpp             # whispercli, plus a model to point at
+#+end_src
+
+=whisperserver= talks to a server that is already running. Set =whisperserverCmd= and
+=whisperserverModelPath= as well and the Spoon will start one when nothing answers, and stop
+it again when the Spoon stops.
+
+** Falling back
+
+A recorder or transcriber that cannot be used does not leave the Spoon dead. =streaming=
+falls back to =sox=, and =whisperkit= and =whisperserver= fall back to =whispercli=. The
+fallback is reported, so it is clear which one is actually in use; =whisper-diagnose= also
+says.
+
+* Filters
+
+A filter passes the transcription through something before it reaches the clipboard: fix the
+grammar, translate it, make a list of it, answer it.
+
+#+begin_src js   :exports both
+whisper.config.filters = [
+    {name: "Fix grammar", abbrev: "CLN", cmd: "~/bin/llm/query-model.py filter -p 'Correct the grammar, answering with the corrected text only'"},
+    {name: "Answer it",   abbrev: "ANS", cmd: "~/bin/llm/query-model.py answer"},
+    {name: "Trim spaces",                fn: (text) => text.replace(/\s+$/, "")}
+]
+
+whisper.bindHotkeys({filterSelect: [["cmd", "ctrl", "alt"], "f"]})
+#+end_src
+
+Each entry needs =name= and either:
+
+- =cmd= — a shell command reading the text on its standard input and writing the result to
+  its standard output. It runs under =/bin/zsh -l=, so the PATH is the one you would have at
+  a prompt.
+- =fn= — a function taking the text and returning the replacement.
+
+=fn= wins if an entry has both. =abbrev= is optional and is shown in the menu bar while that
+filter is active, as =🎤 (en) [CLN]=.
+
+=filterSelect= opens the chooser; the filter chosen there stays active for every later
+dictation until it is changed, and /No Filter/ clears it.
+
+A filter that fails — no such command, a non-zero exit, no output, a function that throws or
+returns something that is not a string — is reported and the unfiltered text is used
+instead. Losing a dictation because a grammar filter broke would be the worse failure.
+
+A filter is the one part of this Spoon that can send your words off the machine. One calling
+a cloud API sends every dictation you pass through it to that service.
+
+* Where the text goes
+
+Two bindings over the same recording, differing only in what happens to the transcription:
+
+#+begin_src js   :exports both
+whisper.config.monitorUserActivity = true
+
+whisper.bindHotkeys({
+    transcribeToggle:            [["cmd", "ctrl"], "return"],        // type it
+    transcribeToClipboardToggle: [["cmd", "ctrl", "alt"], "return"]  // copy it
+})
+#+end_src
+
+=transcribeToggle= writes the text into the application that had focus when you started, by
+sending the paste keystroke. =transcribeToClipboardToggle= puts it on the clipboard and
+stops there.
+
+With =monitorUserActivity= the typing is abandoned, and the text left on the clipboard
+instead, if while recording you typed =config.activityKeyLimit= keys or more, clicked
+anything, or changed application — on the assumption that you are now doing something else
+and do not want text appearing under the cursor. This needs Accessibility permission, as
+above; without it the text still arrives, it is just not guarded.
+
+=config.pasteWithEmacsYank= types into Emacs with =ctrl-y= rather than =⌘V=.
+
+* Methods
+
+Every method returns the Spoon, so calls can be chained.
+
+** transcribeToggle(callbackOrPaste)
+
+Start recording, or stop and transcribe if already recording.
+
+Called with nothing, the transcription goes to the clipboard. Pass =true= to have it typed
+into the application that had focus instead, or a function to be given the text, in which
+case neither happens:
+
+#+begin_src js   :exports both
+whisper.transcribeToggle()                                  // to the clipboard
+whisper.transcribeToggle(true)                              // typed where the cursor is
+whisper.transcribeToggle((text) => console.log(text))       // to your own code
+#+end_src
+
+The two hotkey actions, =transcribeToggle= and =transcribeToClipboardToggle=, are the second
+and first of these.
+
+** transcribeBegin(callbackOrPaste) / transcribeEnd()
+
+The two halves of the toggle, for binding a key that records while it is held.
+
+** transcribeAbort()
+
+Abandon the recording or transcription in progress and go back to idle, leaving the
+clipboard alone. Does nothing when idle.
+
+** transcribeAgain(callback)
+
+Offer the recent recordings and transcribe the chosen one again — for a dictation that came
+back wrong, to try another language or another transcriber without saying it all again.
+
+=config.retranscribeCount= is how many are offered. =config.retranscribeTranscriber= names
+one to use instead of the current one, or =null= for the current one.
+
+** recordingTranscribe(audioFile, callback)
+
+Transcribe one named recording, without the chooser.
+
+** languageGet() / languageSet(lang) / languageSelect() / languageNext()
+
+The language being asked for, which must be one of =config.languages=. =languageSelect=
+opens a chooser; =languageNext= moves through the list.
+
+#+begin_src js   :exports both
+whisper.config.languages = ["en", "ja", "es"]
+whisper.languageSet("ja")
+#+end_src
+
+** filterSelect()
+
+Open the filter chooser; see /Filters/ above.
+
+** recordingsList() / recordingsPrune()
+
+The recordings in =config.tempDir=, newest first, and a prune down to the newest
+=config.recordingsKeep= of them. Pruning also happens at =start()=. Set =recordingsKeep= to
+=0= to keep every recording ever made, as version 1 did.
+
+** debugSet(enable) / serverRestart() / diagnose()
+
+=debugSet(true)= logs in detail, and makes the next start of the streaming server pass
+=--verbose= so it reports audio levels. =serverRestart()= restarts that server, to pick that
+up or to recover one that has got stuck. =diagnose()= prints a snapshot — state, the
+backends actually in use, the session, the input device, both permissions, how many
+recordings there are — to the console.
+
+#+begin_src js   :exports both
+whisper.debugSet(true)
+whisper.serverRestart()
+whisper.diagnose()
+#+end_src
+
+** isRecording() / state()
+
+Whether a recording is in progress, and the state machine's state: =IDLE=, =RECORDING=,
+=TRANSCRIBING= or =ERROR=.
+
+** bindHotkeys(mapping) / start() / stop()
+
+=bindHotkeys= takes any of =transcribeToggle=, =transcribeToClipboardToggle=,
+=languageSelect=, =languageNext=, =filterSelect=, =transcribeAgain= and =transcribeAbort=,
+each holding =[[modifiers], key]=. All are optional. =transcribeToggle= and
+=transcribeToClipboardToggle= both call =transcribeToggle()=, with and without the argument
+that says to type the text.
+
+=start()= puts the menu bar item up and returns at once; the recorder and transcriber are
+chosen in the background, because checking them means running commands and none of that may
+block Hammerspoon. A key pressed in that window is answered rather than ignored.
+
+* Settings
+
+All on =config=.
+
+#+begin_src js   :exports both
+languages: ["en"]            // offered by languageSelect; the first is selected at startup
+recorder: "sox"              // "sox" | "streaming"
+transcriber: "whispercli"    // "whispercli" | "whisperkit" | "whisperserver"
+
+tempDir: "/tmp/whisper_dict" // where recordings are written
+recordingsKeep: 50           // recordings to keep there, 0 for all
+timeoutSeconds: 1800         // stop recording after this long, 0 for no limit
+indicatorShow: true          // the sound wave in the middle of the screen while recording
+chunkAlertSeconds: 3         // how long each chunk's text is shown, 0 for none
+
+monitorUserActivity: false   // guard auto-paste; needs Accessibility
+activityKeyLimit: 2          // keystrokes while recording that count as having moved on
+autoPasteDelay: 0.1
+pasteWithEmacsYank: false    // ctrl-y into Emacs rather than ⌘V
+
+filters: []
+retranscribeTranscriber: null
+retranscribeCount: 10
+#+end_src
+
+Per backend:
+
+#+begin_src js   :exports both
+soxCmd: "/opt/homebrew/bin/sox"
+soxAudioInputDevice: null              // null for the system default
+
+streamingPythonPath: "/usr/bin/python3"
+streamingAudioInputDevice: null
+streamingSilenceThreshold: 2.0         // seconds of silence that ends a chunk
+streamingMinChunkDuration: 3.0
+streamingMaxChunkDuration: 600.0
+
+whisperkitCmd: "/opt/homebrew/bin/whisperkit-cli"
+whisperkitModel: "large-v3"
+
+whispercliCmd: "/opt/homebrew/bin/whisper-cli"
+whispercliModelPath: "/usr/local/whisper/ggml-large-v3.bin"
+
+whisperserverHost: "127.0.0.1"
+whisperserverPort: 8080
+whisperserverCurlCmd: "/usr/bin/curl"
+whisperserverCmd: null                 // set these two to start a server when none answers
+whisperserverModelPath: null
+whisperserverStartupTimeout: 10
+#+end_src
+
+A setting is one key, never a nested object, because =hs_interactive-gt='s =use()= applies
+=config= with =Object.assign=. That is a shallow merge, so setting one key of a nested
+object would silently replace the whole object and discard every other default in it.
+
+* Troubleshooting
+
+Start with =whisper-diagnose=, or =whisper.diagnose()=. It reports both permissions, which
+backends are actually in use rather than which were asked for, and whether any task or timer
+is being leaked.
+
+** Nothing is transcribed, and there is no error
+
+Almost always microphone permission; see above. =diagnose()= reports it. A recording that
+really is silent is caught before it is transcribed, with a message naming the input device
+and saying which of the two causes the amplitude points at.
+
+** The microphone is connected but delivers silence
+
+In order, least invasive first:
+
+1. Unplug the microphone and plug it back in. On macOS 26 a USB audio device can get into a
+   state where it enumerates but delivers silence to some clients — notably Python's
+   =sounddevice=, through PortAudio — and a physical replug clears it.
+2. =sudo killall corespeechd=, which restarts the speech-recognition daemon.
+3. =sudo killall coreaudiod=, which resets system-wide audio. Every application using audio
+   hiccups, so only if the first two did not help.
+
+** The streaming server will not start
+
+First, the Python dependencies:
+
+#+begin_src sh   :exports both
+python3 whisper_stream.py --check-deps
+#+end_src
+
+There is no port to check, because the server speaks over its own standard input and output
+rather than over TCP: Hammerspoon 2 has no socket module, and a pipe turns out to be the
+better of the two anyway — nothing to find free, nothing left listening, and the server
+exits with Hammerspoon.
+
+The failure worth knowing is the microphone one, because it does not look like a permission
+problem. With =debugSet(true)= the server gets as far as
+
+: whisper_stream: {"status": "listening", "transport": "stdio"}
+: whisper_stream: Using cache found in .../snakers4_silero-vad_master
+
+and then says nothing more. The next thing it would send is =server_ready=, which comes
+straight after it opens the input stream — so stopping there means the open never returned.
+It does not fail and does not raise: macOS and PortAudio simply block. A server in that state
+also cannot be stopped by asking it or by =SIGTERM=, because its main thread never gets back
+to Python, and while it is there it holds the input device, so the next server to start
+blocks in the same place.
+
+Two things put it there: Hammerspoon 2 having no microphone permission, or another process
+still holding the device. The Spoon checks the permission before starting the server and
+refuses rather than hanging, and kills a server that has stopped answering, by pid, before
+starting another.
+
+** A command cannot be found
+
+#+begin_src sh   :exports both
+brew install sox whisperkit-cli whisper-cpp
+#+end_src
+
+Or set the =...Cmd= setting to where it actually is. A bare name is looked up on the PATH of
+a login shell; a path beginning with =/= is used as given.
+
+** Watching a dictation go through
+
+#+begin_src js   :exports both
+whisper.debugSet(true)
+whisper.serverRestart()    // only needed to make the streaming server verbose too
+#+end_src
+
+Then dictate and watch the console: each chunk with its file, size and peak amplitude, each
+transcriber invocation and what it returned, and with the streaming server the audio levels
+about once a second.
+
+* Differences from the Hammerspoon 1 spoon
+
+Behaviour that deliberately changed, beyond names and the language:
+
+- *Transcription no longer blocks Hammerspoon.* Version 1 deferred a blocking read by 10 ms
+  and called it asynchronous, so everything froze for the length of every transcription.
+- *A chunk that cannot be transcribed is reported, not pasted.* Version 1 wrote
+  ="[chunk 3: error - ...]"= in among the words, so the error reached the clipboard and from
+  there whatever you pasted into. Now only the chunks that worked are joined, and the loss
+  is reported.
+- *The dead-microphone check applies to both recorders.* It needs the peak amplitude, which
+  only the streaming recorder reported, so with =sox= it never ran at all. The =sox= recorder
+  now measures it, and the microphone permission is checked before recording either way.
+- *Recordings are pruned.* Nothing in version 1 ever deleted one, so =tempDir= held every
+  recording ever made.
+- *Each recording names its own files.* The streaming server was told a filename prefix once,
+  when it started, which was =warmup=: every later recording was named after the warmup, and
+  each session's chunks overwrote the previous session's. The prefix now goes with each
+  recording and carries the language and the time.
+- *=sox= is waited for rather than guessed at.* Version 1 terminated it and read the file
+  0.1 seconds later whether or not it had finished writing it.
+- *The transcribers' error output is kept out of the text.* Every command ended =2>&1= in
+  version 1, so a warning from the tool became part of the transcription.
+- *Paths are not pasted into shell strings.* Arguments go as a list, so a path containing a
+  quote cannot break the command.
+- =diagnose()= *works.* In version 1 it called a function that does not exist, and so failed
+  every time it was called.

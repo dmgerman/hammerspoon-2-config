@@ -1,0 +1,6 @@
+{
+    "name": "hs_whisper-gt",
+    "author": "Daniel German <dmg@turingmachine.org>",
+    "version": "1.0.0",
+    "description": "Dictation with a local Whisper: press a key, speak, press it again, and the text is on the clipboard or typed where the cursor is. Two recorders, three transcribers, and filters to pass the text through."
+}
