@@ -1,0 +1,7 @@
+{
+    "name": "hs_keyboard-gt",
+    "version": "0.1",
+    "author": "dmg <dmg@turingmachine.org>",
+    "license": "MIT - https://opensource.org/licenses/MIT",
+    "description": "Switch keyboard layouts and input methods by name. A port of the input method functions in hs_annoyances."
+}

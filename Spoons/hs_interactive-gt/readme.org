@@ -23,8 +23,9 @@ interactive: [
 #+end_src
 
 Commands are invoked by name. =commands-execute= presents a chooser listing every command
-with its docstring and runs the one selected, so a command needs no key binding to be
-reachable — which matters for the majority of commands, used too seldom to justify a
+with its docstring, and with the key that runs it when it has one, written as macOS
+writes it — =window-maximize   ⌃⌥⌘M=. It runs the command selected, so a command needs no
+key binding to be reachable — which matters for the majority of commands, used too seldom to justify a
 chord. A command may also be bound to a key, and is bound by name.
 
 Two further consequences follow from commands having names:
@@ -588,7 +589,9 @@ that name has been defined, the error is logged to the console.
 |-----------------------+--------------------------------------------------------|
 | =setKey(key, name)=   | Binds one key, replacing any binding it already has.   |
 | =unsetKey(key)=       | Removes a binding.                                     |
-| =whereIs(name)=       | The keys that run a command.                           |
+| =whereIs(name)=       | The keys that run a command, as written.               |
+| =keyLabels(name)=     | The same keys as macOS symbols, e.g. ="⌃⌥⌘X"=.         |
+| =keyLabel(binding)=   | One binding record as macOS symbols.                   |
 | =describeKey(key)=    | The command a key runs, with its docstring.            |
 | =bindings()=          | Every binding, sorted by key.                          |
 | =stop()=              | Destroys every binding. The commands remain defined.   |

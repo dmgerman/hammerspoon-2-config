@@ -18,7 +18,7 @@ Hammerspoon 1/).
 const wf = hs.loadSpoon("hs_windowfilter-gt")
 
 // Every visible window, whatever the application.
-wf.default.addWatcher("windowCreated", (event, window) => {
+wf.default.on("windowCreated", (event, window) => {
     console.log("appeared: " + window.title)
 })
 #+end_src
@@ -29,13 +29,13 @@ the default is too broad:
 #+begin_src js   :exports both
 const editors = wf.create({ allowApplications: ["Emacs", "Visual Studio Code"] })
 
-editors.addWatcher(["windowFocused", "windowTitleChanged"], (event, window, state) => {
+editors.on(["windowFocused", "windowTitleChanged"], (event, window, state) => {
     console.log(`${event}: ${state.application} — ${state.title}`)
 })
 #+end_src
 
 Nothing is watched until something subscribes. Loading this Spoon and never calling
-=addWatcher= costs nothing at all.
+=on= costs nothing at all.
 
 * Rules
 
@@ -116,7 +116,7 @@ snapshot of what the window looked like when the event was worked out. Use =stat
 than reading the window again: a window that has closed can no longer be read.
 
 #+begin_src js   :exports both
-f.addWatcher("windowDestroyed", (event, window, state) => {
+f.on("windowDestroyed", (event, window, state) => {
     // window.title would throw here; state.title still holds the title it had.
     console.log("closed: " + state.title)
 })
@@ -134,24 +134,34 @@ filter would receive events when windows start matching but not when they stop.
 
 * Methods
 
-** addWatcher(events, handler)
+** on(events, handler)
 
 Watch one event or an array of them. Call it again to add more handlers.
 
 #+begin_src js   :exports both
-f.addWatcher("windowFocused", onFocus)
-f.addWatcher(["windowCreated", "windowDestroyed"], onChange)
-f.addWatcher(wf.events, logEverything)          // wf.events is every event name
+f.on("windowFocused", onFocus)
+f.on(["windowCreated", "windowDestroyed"], onChange)
+f.on(wf.events, logEverything)          // wf.events is every event name
 #+end_src
 
-** removeWatcher([events], [handler])
+** off([events], [handler])
 
 Stop watching. With no arguments it removes every handler on the filter.
 
 #+begin_src js   :exports both
-f.removeWatcher("windowFocused", onFocus)       // that handler, that event
-f.removeWatcher("windowFocused")                // every handler for that event
-f.removeWatcher()                               // everything
+f.off("windowFocused", onFocus)       // that handler, that event
+f.off("windowFocused")                // every handler for that event
+f.off()                               // everything
+#+end_src
+
+** once(events, handler)
+
+Watch until the first of those events arrives, then unsubscribe. With an array, the whole
+subscription goes on the first event to arrive — the handler runs exactly once, not once
+per event named.
+
+#+begin_src js   :exports both
+f.once("windowCreated", (event, window, state) => console.log("the first one: " + state.title))
 #+end_src
 
 ** windows()
@@ -221,7 +231,7 @@ wf.config.moveDebounce = 0.2
 
 | Hammerspoon 1                   | Here                                        |
 |---------------------------------+---------------------------------------------|
-| =subscribe= / =unsubscribe=     | =addWatcher= / =removeWatcher=              |
+| =subscribe= / =unsubscribe=     | =on= / =off= / =once=                       |
 | =hs.window.filter.new(rules)=   | =wf.create(rules)=                          |
 | =setFilters=, =setAppFilter=    | =setApplicationFilter=                      |
 | Lua patterns in title rules     | regular expressions, strings or predicates  |
@@ -229,7 +239,9 @@ wf.config.moveDebounce = 0.2
 | =windowsVisible=, =windowsNotVisible= as filter names | rules on a filter you create |
 
 The subscription names follow the rest of Hammerspoon 2 — =hs.application=, =hs.screen= and
-=hs.ax= all use =addWatcher= — rather than the Hammerspoon 1 spelling.
+=hs.ax= all use =on= / =off= / =once= — rather than the Hammerspoon 1 spelling. Unlike those
+modules, =on= and =off= here also accept an array of event names, because a filter emits
+nineteen events and subscribing one handler to several at once is the common case.
 
 * Requirements
 

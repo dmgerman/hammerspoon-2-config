@@ -691,7 +691,7 @@ function start() {
     // primary screen the bar was built for can stop being the one it is drawn on.
     if (!screenWatcher) {
         screenWatcher = () => barReposition()
-        hs.screen.addWatcher(screenWatcher)
+        hs.screen.on("change", screenWatcher)
     }
     return module.exports
 }
@@ -700,7 +700,7 @@ function start() {
 function stop() {
     if (timerRunning) resetTimer()
     if (screenWatcher) {
-        hs.screen.removeWatcher(screenWatcher)
+        hs.screen.off("change", screenWatcher)
         screenWatcher = null
     }
     barShowing = false

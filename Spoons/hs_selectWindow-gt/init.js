@@ -137,8 +137,8 @@ function startTrackingFocus() {
     // Every window, including minimized ones: a minimized window is exactly what a switcher
     // is for, and its place in the order has to be remembered while it is out of sight.
     filter = windowfilter.create({ rejectApplications: config.skipApplications })
-    filter.addWatcher("windowFocused", (event, window, state) => noteFocused(state.id))
-    filter.addWatcher("windowDestroyed", (event, window, state) => {
+    filter.on("windowFocused", (event, window, state) => noteFocused(state.id))
+    filter.on("windowDestroyed", (event, window, state) => {
         const at = focusOrder.indexOf(state.id)
         if (at !== -1) focusOrder.splice(at, 1)
         thumbnails.delete(state.id)

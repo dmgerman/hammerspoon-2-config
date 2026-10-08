@@ -31,15 +31,87 @@ rather than keeping its Lua spelling.
 
 | What | Style | Examples |
 |------|-------|----------|
-| Functions and variables | `camelCase` | `attachKeyToWindow`, `mouseScreenCenterNext`, `forgetClosedWindows` |
+| Functions and variables | `camelCase` | `keyToWindowAttach`, `mouseScreenCenterNext`, `closedWindowsForget` |
 | Spoon `config` keys | `camelCase` | `attachModifiers`, `screenshotDir`, `historySize` |
 | Module-level constants | `UPPER_SNAKE` | `CANCEL`, `MUSIC_BUNDLE_ID`, `DELTA_PRESETS` |
 | Command names | `hyphenated`, Emacs Lisp style | `window-attach-to-key`, `mouse-screen-center-next` |
 | Spoon directories | `hs_<name>-gt` | `hs_window-gt` |
 
-No underscores in function names. A command name reads as a sentence of hyphenated words,
-usually `<subject>-<verb>-<qualifier>`: the subject first, so that related commands sort
-together in the chooser.
+No underscores in function names.
+
+### Subject first, action last
+
+This governs every identifier, not just commands. The subject leads and the action follows:
+`windowPrevious`, not `previousWindow`; `applicationWindowSelect`, not
+`selectApplicationWindow`. Related names then sort together wherever they are listed — in the
+chooser, in an editor's symbol list, in a file.
+
+| Wrong                      | Right                      |
+|----------------------------|----------------------------|
+| `previousWindow()`         | `windowPrevious()`         |
+| `selectApplicationWindow()`| `applicationWindowSelect()`|
+| `attachKeyToWindow()`      | `keyToWindowAttach()`      |
+| `forgetClosedWindows()`    | `closedWindowsForget()`    |
+| `toggleOnScreen()`         | `onScreenToggle()`         |
+| `newTab()`                 | `tabNew()`                 |
+
+A preposition stays with the subject it belongs to rather than being moved to the end:
+`keyToWindowAttach`, not `keyWindowToAttach` or `windowKeyAttach`. The whole subject phrase
+comes first and the action closes the name.
+
+### A command is named after the function it calls
+
+Because both follow the same order, a command name is just its function's name in hyphenated
+words, prefixed with the subject when the function name does not already carry it — the
+Spoon's own name usually supplies it.
+
+| Function          | Command                    |
+|-------------------|----------------------------|
+| `peek()`          | `menubar-peek`             |
+| `peekHide()`      | `menubar-peek-hide`        |
+| `windowPrevious()`| `window-previous`          |
+| `historyShow()`   | `clipboard-show`           |
+
+Dropping a word the Spoon's name already supplies is fine: `historyShow()` in
+`hs_clipboard-gt` is `clipboard-show`, not `clipboard-history-show`.
+
+**What may not change is the action.** A command may not claim to do something its function
+does not, and a name may not claim behaviour the code does not have. Both of these were
+wrong, for the same reason:
+
+| Wrong                 | Was bound to    | Actually did                  |
+|-----------------------|-----------------|-------------------------------|
+| `menubar-peek`        | `peekToggle()`  | toggled, while the name said show |
+| `menubar-peek-toggle` | `peekToggle()`  | hid itself after 4s, so not a toggle at all |
+
+Rename the function and the command together when either changes.
+
+### A command is named after the function it calls
+
+A command name is its function's name in hyphenated words, reordered so the subject comes
+first and prefixed with the subject when the function name does not carry it.
+
+| Function                   | Command                      |
+|----------------------------|------------------------------|
+| `peekToggle()`             | `menubar-peek-toggle`        |
+| `mouseScreenCenterNext()`  | `mouse-screen-center-next`   |
+| `previousWindow()`         | `window-previous`            |
+| `selectApplicationWindow()`| `window-select-in-application` |
+
+Reordering is expected and so is dropping a word the Spoon's own name already supplies:
+`historyShow()` in `hs_clipboard-gt` is `clipboard-show`, not `clipboard-history-show`.
+
+**What may not change is the verb.** A command may not claim to do something its function
+does not. The failure to watch for is a toggle named as though it only shows:
+
+| Wrong                          | Function           | Right                  |
+|--------------------------------|--------------------|------------------------|
+| `menubar-peek`                 | `peekToggle()`     | `menubar-peek-toggle`  |
+
+This is wrong twice over: it hides the toggle from anyone reading the chooser, and it breaks
+the link that makes a command findable from its code and its code findable from the chooser.
+
+Rename the function and the command together when either changes.
 
 ## Common Patterns
 
@@ -136,6 +208,78 @@ From the API index, key modules include:
 - `hs.http` - HTTP requests
 - `hs.json` - JSON parsing
 - `hs.geometry` - Geometric operations
+
+## Permissions
+
+Several APIs return nothing rather than failing when macOS has not authorized Hammerspoon 2.
+A silent `null` reads like "there is none of that" and sends you looking for a bug in the
+wrong place, so check the permission before concluding the API is broken.
+
+`hs.permissions` has a `check` and a `request` for each:
+
+| Permission      | Check                 | Needed for                                           |
+|-----------------|-----------------------|------------------------------------------------------|
+| Accessibility   | `checkAccessibility()`| `hs.ax`, `hs.window`, menu bar items, window control |
+| Location        | `checkLocation()`     | `ssid`, `bssid`, `countryCode`, `wlanChannel` in `hs.wifi` |
+| Screen Recording| `checkScreenRecording()` | `hs.screen.snapshot()`, window snapshots          |
+| Microphone      | `checkMicrophone()`   | audio input                                          |
+| Camera          | `checkCamera()`       | `hs.camera`                                          |
+| Notifications   | `checkNotifications()`| `hs.notify`                                          |
+
+macOS prompts only once per application. When a `request…()` shows nothing, the answer was
+given before and has to be changed by hand in **System Settings → Privacy & Security**.
+
+Two worth knowing:
+
+**Location.** macOS treats an SSID as location data. Without it `hs.wifi.currentNetwork()`
+returns `null`, which looks exactly like not being on a network. `hs_network-gt` documents
+both ways round this — granting the permission, or running a Shortcut instead.
+
+**Prefer the permission to a workaround that runs a Shortcut.** macOS shows the Shortcuts
+icon in the menu bar for as long as any Shortcut runs, so polling one makes that icon flash
+all day, and each run spawns a process. Measured: an SSID read once a minute put the
+indicator in 4 of 60 two-second scans.
+
+A Spoon depending on a permission should say so in its readme, next to the setting that needs
+it, and should still do something sensible without it. `hs_network-gt` falls back from the
+SSID to naming the interface.
+
+## Workarounds, and when to ask upstream
+
+When something cannot be done the obvious way, say so in the code rather than quietly routing
+around it, and then decide where the limitation actually lives. That decision is the useful
+one, because only one kind of limitation can be fixed by someone else.
+
+**Ask first: is this macOS or is this Hammerspoon 2?**
+
+| The limitation is in | Then | Example |
+|----------------------|------|---------|
+| macOS | No upstream fix exists. Document the workaround and why it is needed. | An SSID needs Location Services; `AXPress` on your own process deadlocks |
+| Hammerspoon 2's API | Candidate for an upstream issue. Work around it locally *and* raise it. | `hs.canvas` reports no right-click, because mouse delivery is a SwiftUI `DragGesture` |
+
+A macOS limitation is permanent and the workaround is the answer. A Hammerspoon 2 limitation
+is someone's backlog item, and the workaround is a cost being paid until it is fixed — worth
+raising even if the local workaround is fine, because the next person pays it too.
+
+Signs the thing you just wrote is a workaround worth recording:
+
+- it reimplements something the API looks like it should already do
+- it reaches outside the process — a shell command, a Shortcut, a screen capture — for
+  information the process could hold
+- it depends on a coordinate, a title, or a delay, instead of an identifier
+- its comment begins by explaining why the obvious call does not work
+
+**Before filing anything upstream, read `AI_POLICY.md` in the Hammerspoon 2 repository.** It
+is strict and it binds outside contributors:
+
+- all AI usage must be disclosed, naming the tool and the extent
+- the human must fully understand the code, unaided, before contributing
+- AI-drafted issues must be reviewed *and edited* by a human; the policy calls out verbosity
+  and noise specifically
+
+So an issue may be drafted here, but it is not ready to file until it has been cut down and
+understood. Check for an existing issue first, and state only what has been verified — do not
+claim a behaviour is a regression from Hammerspoon 1 without having checked Hammerspoon 1.
 
 ## Development Tips
 

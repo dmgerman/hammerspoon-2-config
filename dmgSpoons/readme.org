@@ -12,3 +12,4 @@ Spoons meant to be used by anyone are in =../Spoons/=.
 |----------------------------------+-------------------------------------------------------------|
 | [[file:hs_hass-gt/][hs_hass-gt]] | Home Assistant control: lights, scripts and the desk amplifiers, through =hass-cli=. Names the entities in one house. |
 | [[file:hs_url-gt/][hs_url-gt]]   | Routes every link opened on the system, by a table of patterns or by handing it to Emacs =browse-url=. Names particular sites and browsers. |
+| [[file:hs_keyboard-gt/][hs_keyboard-gt]] | Switches keyboard layouts and input methods by name. Names the Canadian layout and the Japanese input modes this machine has enabled. |

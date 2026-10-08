@@ -59,9 +59,13 @@ DeepL's menu for you to choose it.
 
 ** Menus that cannot be read in advance
 
-Some applications build their menu only when it is opened. Control Center and NordVPN are
-among them, as are several of Hammerspoon's own icons. Their entries cannot be listed, so
-those icons are offered on their own and opening them is all that is possible.
+Some applications build their menu only when it is opened. Control Center, NordVPN, Dropbox
+and Caffeine are among them. Their entries cannot be listed, so those icons are offered on
+their own and opening them is all that is possible — which works while the icon is on
+screen, and does not when it is not.
+
+Hammerspoon's own icons used to be in this group and no longer are: their menus are taken
+from what their Spoon registered rather than read from the screen. See below.
 
 ** Two lists, because reading every menu is slow
 
@@ -73,22 +77,92 @@ those icons are offered on their own and opening them is all that is possible.
 Reading one menu is inexpensive; reading every menu of every icon is not. The deep list is
 therefore a separate call and a separate command.
 
+* Why nothing is clicked
+
+An icon is pressed through accessibility, which takes the element and not a position. This
+matters more than it sounds.
+
+The menu bar holds more than the notch leaves room for. Measured here, on a 1800pt-wide
+display whose notch occupies x=790 to x=1010, leaving a 790pt strip on the right that
+sixteen icons already fill:
+
+| Where the icon was                           | Icons |
+|----------------------------------------------+-------|
+| On the right strip, visible                  |    16 |
+| Parked off screen by a menu bar manager      |     6 |
+| Under the notch                              |     2 |
+| Left of the notch, behind the window title   |     4 |
+| Crossing the notch and back as neighbours change |     2 |
+
+Thirteen of thirty had no pixel to click. Sampled every five seconds for two minutes,
+seventeen of the thirty moved 55pt each time Control Center's microphone indicator appeared
+or went away — further than most icons are wide, so a click aimed where an icon used to be
+lands on its neighbour and opens the wrong menu.
+
+Accessibility has none of these problems. An icon parked at x=-4668 presses exactly as well
+as one in plain sight.
+
+An icon is still found again by name at the moment it is pressed, rather than kept from the
+scan that listed it, because an application can replace its icon at any time and the element
+from the earlier scan is then dead.
+
 * Hammerspoon's own icons
 
-They are listed, and they are opened by clicking where they are rather than through
-accessibility.
-
-The reason is a deadlock. =performAction("AXPress")= on an element belonging to the same
-process delivers the accessibility call to the main thread, which is the thread already
-executing the JavaScript that made the call. Opening a menu then enters a nested modal run
+These cannot be pressed through accessibility. =performAction("AXPress")= on an element
+belonging to the same process delivers the call to the main thread, which is the thread
+already executing the JavaScript that made it. Opening a menu then enters a nested modal run
 loop, which does not return. Hotkeys and timers stop being serviced and the application has
 to be killed.
 
-A click does not deadlock: the event goes to the window server and is delivered back later,
-so the main thread is not blocked while the call is outstanding.
+Clicking was the way around that, and it fails for exactly the reasons above — four of
+Hammerspoon's own five icons were parked off screen, where a click cannot land. Worse than
+not landing: macOS clamps the pointer to the nearest screen, so a click meant for an icon at
+x=-4562 arrived in the top left corner and opened the Apple menu.
 
-Entries inside Hammerspoon's own menus are invoked through accessibility like any other.
-An entry performs its action without opening a menu, so no modal run loop is entered.
+So they are not reached through the screen at all. =hs.menubar= is wrapped, and whatever each
+Spoon passes to =setMenu= and =setClickCallback= is kept. Choosing one of these calls the
+function that Spoon supplied, directly: no menu opens, nothing is pressed, and where the icon
+sits never comes into it.
+
+This also reaches menus accessibility cannot read. An icon given a function rather than an
+array builds its menu only when opened, so it has no =AXMenu= until then and reads as empty.
+The function is held and simply called.
+
+An icon given a click callback instead of a menu — the clipboard's and one other — does its
+whole job in that callback, so choosing it calls the callback and nothing has to be on
+screen.
+
+** Choosing one of these icons
+
+Its menu is never opened, because opening a menu is the one thing that cannot be done: only a
+click could, and a click is what this Spoon is avoiding. Choosing one offers the entries
+inside it instead, which is the same set of actions the menu would have shown.
+
+They are offered whether or not the icon happens to be on screen. Clicking it while it is
+visible would work, but then what choosing it did would depend on where the notch had pushed
+it that minute, which is the thing this Spoon exists to stop mattering.
+
+** The app's own icon
+
+Hammerspoon 2 puts one icon in the menu bar itself — Reload Config, Settings, Open Console,
+Quit. It is made in Swift rather than by a Spoon, so there is no registered function to call
+and it is read through accessibility like anyone else's.
+
+Pressing an entry is safe even in this process: an entry performs its action and opens
+nothing, so no modal run loop is entered. It is opening a menu that deadlocks, and that never
+happens here.
+
+** Load this Spoon first
+
+=start()= installs the wrapping, and it has to be in place before any other Spoon creates an
+item. A Spoon loaded earlier registers its menu unrecorded, and its icon then falls back to
+being read through accessibility — which cannot see a menu built only on opening, and cannot
+reach an icon that is not on screen.
+
+In this configuration =hs_menubar-gt= is therefore the first =use()= in =init.js=.
+
+An icon whose menu is a plain array, such as Hammerspoon's own built-in one, is read through
+accessibility either way and does not depend on this.
 
 * What counts as an icon
 
@@ -111,18 +185,123 @@ moment of the call.
 ** entries()
 
 Every entry inside every readable menu, as
-=({application, bundleID, item, element, path, name, own})=. =path= names the entry and any
+=({application, bundleID, item, element, fn, path, name, own})=. =path= names the entry and any
 submenus above it, outermost first.
+
+One of the two carries the action. An entry read through accessibility has an =element= and a
+null =fn=; one of Hammerspoon's own, taken from the registry, has an =fn= and a null
+=element=.
+
+** instrument()
+
+Wrap =hs.menubar= so that what each Spoon gives its items is recorded. Called by =start()=,
+and safe to call twice. See "Load this Spoon first".
 
 ** choose([deep])
 
 Show a chooser and act on what is chosen. With =deep= true, menu entries are offered as
 well as the icons.
 
+** peek(), peekHide(), peekToggle()
+
+Draw the icons that cannot be seen in a strip below the menu bar, aligned right, for
+=peekSeconds= seconds. Clicking one does what choosing it from the chooser does.
+
+Each is drawn as its own title where it has one. Most of the hidden ones do have a title — a
+countdown, a bandwidth reading, an emoji — and for those the strip shows exactly what the menu
+bar would have.
+
+An icon with no title cannot be reproduced: there is no way to read the glyph an application
+draws into its own menu bar item. =HSImage= builds from a path, a name, an SF Symbol, an
+application bundle or a URL, and none of those is the item; =hs.window.snapshotForID()= could
+photograph the item's window, but nothing exposes the window ids of the menu bar. So the
+application's own icon stands in — and where the application has no icon either, its name
+does.
+
+*** Applications with no icon
+
+=HSImage.fromAppBundle()= cannot be asked whether an application has an icon. It resolves the
+bundle id, and if that succeeds it returns NSWorkspace's icon for the bundle, which for a
+bundle declaring no icon is the generic grey placeholder rather than nothing. Its fallback
+symbol does not apply either: that is only for a bundle id which cannot be resolved at all.
+
+Two applications here are in exactly that position. Fleet Desktop lives outside /Applications,
+at =/opt/orbit/bin/desktop/macos/stable=, and has no =Resources= directory at all;
+SystemUIServer is a faceless system agent. Both came back as the same grey placeholder, which
+says nothing about which item it is and is worse than no icon at all, because it looks like
+one.
+
+So the bundle's =Info.plist= is read, through =hs.plist=, and its icon used only when it
+declares =CFBundleIconFile= or =CFBundleIconName=. Otherwise a name is drawn instead, while
+Dropbox and Caffeine keep their icons. The answer is cached per bundle path, a bundle not
+growing an icon while it runs.
+
+*** Where the name comes from
+
+The application's name is not always the useful answer either. SystemUIServer hosts several of
+the system's menu extras at once, so naming one after the process that owns it makes Time
+Machine and the VPN both "SystemUIServer". The VPN says what it is in =AXDescription=; Time
+Machine reports no title, description, value or help at all.
+
+Its menu does say. A macOS menu extra almost always carries an entry naming itself, so that
+entry is read:
+
+| Entry in the menu              | Drawn as       |
+|--------------------------------+----------------|
+| =Open Time Machine Settings…=  | =Time Machine= |
+| =Wi-Fi Settings…=              | =Wi-Fi=        |
+| =Bluetooth Settings…=          | =Bluetooth=    |
+
+Only the top level of the menu is read, which is one cheap menu rather than the whole tree,
+and only for an item that has nothing better to offer. Where even that yields nothing the
+application's name is used, which is how =fleet-desktop= is drawn.
+
+A title is measured rather than given the width the icon has in the menu bar. AirDrop's item
+is 18pt wide because what it draws there is an icon, while the word "AirDrop" is three times
+that, and laying it out at 18pt clips it to "Air". A title is measured for height too, and
+both titles and icons are placed on the strip's centre line by their own size: text is drawn
+from the top of the frame it is given, so a full-height frame would sit every title higher
+than the icons beside it.
+
+What is clicked is neither the title nor the icon but an invisible target over each, the full
+height of the strip and the full width of its slot, so the space around a short title answers
+to the pointer as well.
+
+*** Why the strip is translucent rather than the menu bar's colour
+
+Copying the menu bar's colour was the alternative, and it is worse. The menu bar has no one
+colour: it is translucent over the desktop picture, and measured across this screen it ran
+from =#4F8CBC= on the left to =#89B1D0= further right. Any single colour taken from it is
+right in one place and wrong everywhere else, and it goes stale as soon as the wallpaper or
+the window underneath changes. Sampling it at all would need a screen capture, which means
+asking for Screen Recording.
+
+A translucent background takes on whatever is behind it, continuously and for free. Only the
+background carries the alpha; titles and icons are drawn over it at full opacity, so they stay
+legible whatever is behind. =peekBackground= is where to change it — the menu bar blurs what
+is behind it and a canvas cannot, so over a busy window a higher alpha reads better than a
+lower one.
+
+** hidden()
+
+The items that are in the menu bar but cannot be seen there. Two ways to qualify: parked off
+every screen, or left of the notch, where the application's own menus are drawn on top.
+
+Hammerspoon 2 does not expose NSScreen's safe area, so the notch is worked out rather than
+read. A menu bar taller than an ordinary one means there is one, and it is centred and about
+an eighth of the width — measured here, 220pt of 1800. =notchFraction= is set a little wider
+than that on purpose: guessing wide puts an icon in the strip that could have been seen
+anyway, while guessing narrow leaves one out of the strip that cannot be seen at all.
+
 ** press(name)
 
-Open an icon, or invoke an entry, by name. The menu bar is scanned again to find it, because
-an application may have replaced its icon since the name was last read.
+Open an icon, or invoke an entry, by name.
+
+The scan happens after =pressDelay=, immediately before the press, rather than when =press()=
+is called. What is pressed is therefore what is in the menu bar at that moment: the icons
+move about, and one found a fifth of a second earlier may since have slid under its
+neighbour. =press()= returns as soon as the press is scheduled, so =true= means scheduled
+rather than done; a name that no longer matches anything reports so in an alert.
 
 ** menu()
 
@@ -142,9 +321,18 @@ The icons and their names as lines, for reading in the console.
 | =chooserWidth=         | =0.3=   | chooser width, as a fraction of the screen   |
 | =rowsToDisplay=        | =14=    | rows visible at once                         |
 | =pressDelay=           | =0.2=   | seconds to wait after the chooser closes     |
-| =restoreMouse=         | =true=  | put the pointer back after clicking an icon  |
-| =restoreMouseDelay=    | =0.3=   | seconds before doing so                      |
-| =logClicks=            | =false= | log where each click lands                   |
+| =notchFraction=        | =0.13=  | how much of the width the notch covers       |
+| =peekSeconds=          | =4=     | how long the strip stays up; 0 to leave it   |
+| =peekHeight=           | =34=    | the strip's height                           |
+| =peekOffset=           | =6=     | between the menu bar and the strip           |
+| =peekTextSize=         | =14=    | size of the titles in the strip              |
+| =peekIconSize=         | =20=    | size of the icons in the strip               |
+| =peekGap=              | =12=    | between one icon and the next                |
+| =peekMargin=           | =8=     | between the strip and the right of the screen |
+| =peekPadding=          | =12=    | between the strip's edge and its contents    |
+| =peekBackground=       | black at 0.45 | the strip's colour, as =({red, green, blue, alpha})= |
+| =peekBorder=           | white at 0.25 | its outline, which a translucent panel needs |
+| =peekForeground=       | white   | the titles' colour                           |
 | =logTimings=           | =false= | log how long a scan took                     |
 
 =pressDelay= exists because a menu bar menu closes when another window takes the key window,
@@ -167,6 +355,14 @@ In this configuration, from =init.js=:
 |-----------------------------+-------+---------------------------------------|
 | =menubar-interactive=       | ⇧⌃⌘M  | choose an icon and open it            |
 | =menubar-interactive-deep=  | ⇧⌃⌘N  | choose an icon or any entry in a menu |
+| =menubar-peek-toggle=       | ⇧⌃⌘B  | show the icons that cannot be seen    |
 
-Both set =runDelay= so they wait for the command chooser to close before opening their own;
-see the =hs_interactive-gt= readme for why.
+The first two set =runDelay= so they wait for the command chooser to close before opening
+their own; see the =hs_interactive-gt= readme for why. =menubar-peek-toggle= draws rather
+than opening a chooser, so it has nothing to wait for.
+
+* Known rough edges
+
+An item with no title is drawn as its application's icon rather than the glyph it actually
+shows, because that glyph cannot be read. Where one application owns several untitled items
+they therefore look alike in the strip.

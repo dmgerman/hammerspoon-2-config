@@ -65,9 +65,9 @@ const config = {
     // `config.skipApplications.push("Control Center")` is the way to shorten the list if it
     // is longer than it is useful.
     //
-    // Hammerspoon's own items are listed, and are opened by clicking where they are rather
-    // than through accessibility. See clickElement(): pressing one through accessibility
-    // deadlocks Hammerspoon and it has to be killed.
+    // Hammerspoon's own items are listed too, and are reached through what their Spoon
+    // registered with hs.menubar rather than through accessibility or the screen. See
+    // instrument().
     skipApplications: [],
 
     // Prefix for the generated names.
@@ -89,22 +89,54 @@ const config = {
     // when a row is chosen. Raise this if a menu still opens and closes again.
     pressDelay: 0.2,
 
-    // Whether the pointer is put back where it was after clicking one of Hammerspoon's own
-    // items, and how long afterwards, in seconds. Set restoreMouse false to leave the
-    // pointer on the item, which is what happens when the menu bar is clicked by hand.
-    restoreMouse: true,
-    restoreMouseDelay: 0.3,
+    // How much of a screen's width the notch covers, as a fraction. Used to work out which
+    // items cannot be seen; see notchBandOf(), which explains why this is a guess and why
+    // the guess is deliberately a wide one.
+    notchFraction: 0.13,
 
-    // Log where each click lands. For working out why a menu did not open.
-    logClicks: false,
+    // The strip that shows the items which cannot be seen. See peek().
+    peekSeconds: 4,          // how long it stays up; 0 to leave it until something hides it
+    peekHeight: 34,
+    peekOffset: 6,           // between the bottom of the menu bar and the top of the strip
+    peekTextSize: 14,
+    peekIconSize: 20,
+    peekGap: 12,             // between one item and the next
+    peekMargin: 8,           // between the strip and the right edge of the screen
+    peekPadding: 12,         // between the strip's edge and the first and last item
+    // The strip's background is translucent so that it takes on whatever is behind it, which
+    // is what the menu bar itself does. Sampling the menu bar and copying the colour was the
+    // alternative and is worse: the menu bar is not one colour — measured across this screen
+    // it ran from #4F8CBC to #89B1D0, because it is translucent over the desktop picture — so
+    // any single colour copied from it is right in one place and wrong everywhere else, and
+    // it would go stale whenever the wallpaper or the window underneath changed.
+    //
+    // Only the background carries this alpha. The titles and icons are drawn over it at full
+    // opacity, so they stay legible whatever is behind.
+    peekBackground: { red: 0, green: 0, blue: 0, alpha: 0.45 },
+    peekBorder: { red: 1, green: 1, blue: 1, alpha: 0.25 },
+    peekForeground: { red: 1, green: 1, blue: 1, alpha: 1 },
 
     // Report how long a scan took.
     logTimings: false
 }
 
-// Held so they cannot be collected before they fire; see choose() and clickElement().
+// Held so it cannot be collected before it fires; see invokeEntryWhenClear().
 let pressTimer = null
-let restoreTimer = null
+
+// The chooser, held so it cannot be collected while it is on screen. See choose().
+let chooser = null
+
+// The strip, and the timer that takes it away again. See peek().
+let peekCanvas = null
+let peekTimer = null
+
+// Whether an application declares an icon of its own, by bundle path. Read from its
+// Info.plist once; a bundle does not grow an icon while it is running. See applicationIcon().
+const iconDeclared = new Map()
+
+// A menu bar taller than this means the screen has a notch. An ordinary one is 24pt; a
+// notched one here is 39pt.
+const NOTCHLESS_MENU_BAR = 30
 
 // This process, so that its own menu bar items can be told apart from everyone else's.
 const OWN_BUNDLE_ID = "net.tenshu.Hammerspoon-2"
@@ -230,7 +262,9 @@ function extras() {
             found.push({
                 application: name,
                 bundleID: application.bundleID || null,
-                // Opened by clicking rather than through accessibility; see clickElement().
+                // Where the application is, for reading its Info.plist. See applicationIcon().
+                bundlePath: application.bundlePath || null,
+                // Reached through the registry rather than accessibility; see instrument().
                 own: application.bundleID === OWN_BUNDLE_ID,
                 label: labelOf(element),
                 index: at + 1,
@@ -353,7 +387,13 @@ function entries() {
     const found = []
 
     for (const item of extras()) {
-        for (const entry of menuEntries(item.element)) {
+        // Hammerspoon's own are read from what their Spoon registered rather than through
+        // accessibility. That covers the menus which are only built when opened, and what it
+        // yields is invoked by calling a function, so nothing need be on screen.
+        const record = item.own ? recordForExtra(item) : null
+        const inside = record ? ownMenuEntries(record) : menuEntries(item.element)
+
+        for (const entry of inside) {
             const tail = entry.path.map(slug).filter((part) => part !== "").join("-")
             if (tail === "") continue
             found.push({
@@ -361,7 +401,8 @@ function entries() {
                 bundleID: item.bundleID,
                 own: item.own,
                 item: item,
-                element: entry.element,
+                element: entry.element || null,
+                fn: entry.fn || null,
                 path: entry.path,
                 name: `${item.name}-${tail}`
             })
@@ -379,89 +420,299 @@ function describeEntry(entry) {
     return `${describe(entry.item)}  ▸  ${entry.path.join("  ▸  ")}`
 }
 
+// MARK: - Hammerspoon's own items
+//
+// Everyone else's items are pressed through accessibility, which does not care where they
+// are. Hammerspoon's own cannot be: the call is delivered to the main thread, which is the
+// thread already running the JavaScript that made it, and opening a menu there enters a
+// nested modal run loop that never returns.
+//
+// Clicking where the item is was the way around that, and it only works while the item is
+// somewhere clickable. On a MacBook with a notch that is often nowhere. Measured here: of
+// thirty items, six were parked off screen by a menu bar manager, two sat under the notch
+// and four behind the window title, and two more crossed the notch and back as Control
+// Center's microphone indicator came and went. Thirteen of thirty had no pixel to click.
+//
+// So Hammerspoon's own items are not reached through the screen at all. hs.menubar is
+// wrapped, and whatever each Spoon passes to its items is kept here. Choosing one of these
+// entries calls the function that Spoon supplied, directly. No menu opens, nothing is
+// pressed, and where the item sits never comes into it.
+//
+// This also reaches menus accessibility cannot read. An item given a function rather than
+// an array builds its menu only when opened, so it has no AXMenu until then and reads as
+// empty; two items here were empty for that reason. The function is held here and is simply
+// called.
+//
+// instrument() must run before the Spoons that create items do, which is why this Spoon is
+// loaded first in init.js.
+
+// One record per item that still exists.
+const ownRecords = []
+let instrumented = false
+
+/** The record for an item, made if this is the first time it has been seen. */
+function recordFor(item) {
+    for (const record of ownRecords) {
+        if (record.item === item) return record
+    }
+    const record = { item: item, spec: null, click: null }
+    ownRecords.push(record)
+    return record
+}
+
+/**
+ * Wrap hs.menubar so that what each Spoon gives its items is kept.
+ *
+ * The prototype is patched rather than each item, so an item is covered however it was made
+ * and whenever. Safe to call twice; the second call does nothing.
+ */
+function instrument() {
+    if (instrumented) return false
+
+    let proto = null
+    try {
+        // Made only to reach the prototype every item shares, and destroyed at once.
+        const sample = hs.menubar.create(true)
+        proto = Object.getPrototypeOf(sample)
+        sample.destroy()
+    } catch (e) {
+        log(`could not instrument hs.menubar: ${e}`)
+        return false
+    }
+    if (!proto || typeof proto.setMenu !== "function") {
+        log("hs.menubar items do not have the methods this Spoon expects")
+        return false
+    }
+
+    const setMenu = proto.setMenu
+    proto.setMenu = function (menuOrFn) {
+        recordFor(this).spec = menuOrFn
+        return setMenu.call(this, menuOrFn)
+    }
+
+    const setClickCallback = proto.setClickCallback
+    proto.setClickCallback = function (fn) {
+        recordFor(this).click = fn
+        return setClickCallback.call(this, fn)
+    }
+
+    // So a destroyed item stops being offered. A Spoon that reloads makes new items, and the
+    // records for the old ones would otherwise pile up and name entries that do nothing.
+    const destroy = proto.destroy
+    proto.destroy = function () {
+        for (let at = ownRecords.length - 1; at >= 0; at -= 1) {
+            if (ownRecords[at].item === this) ownRecords.splice(at, 1)
+        }
+        return destroy.call(this)
+    }
+
+    instrumented = true
+    return true
+}
+
+/** What a recorded item is showing now, or "". */
+function titleOfRecord(record) {
+    try {
+        const title = record.item.title
+        return title === null || title === undefined ? "" : String(title).trim()
+    } catch (e) {
+        return ""
+    }
+}
+
+/**
+ * The record behind one of Hammerspoon's own extras, matched by what it is showing.
+ *
+ * Nothing is shared between an HSMenuBarItem and the accessibility element standing for it,
+ * so the title is the only link. Both are read in the same moment, so even a title that
+ * changes constantly — one of these is a network reading — still matches. A title held by
+ * two items at once matches neither, and those fall back to being read through
+ * accessibility.
+ */
+function recordForExtra(item) {
+    if (!instrumented) return null
+    const label = item.label || ""
+    let found = null
+    for (const record of ownRecords) {
+        if (titleOfRecord(record) !== label) continue
+        if (found) return null
+        found = record
+    }
+    return found
+}
+
+/**
+ * The entries of one of Hammerspoon's own items, as the Spoon that made it described them.
+ *
+ * An item given an array has those entries. An item given a function builds its menu when it
+ * opens, so the function is called here to find out what it would build.
+ */
+function ownMenuEntries(record, depth) {
+    let spec = record.spec
+    if (typeof spec === "function") {
+        try {
+            spec = spec()
+        } catch (e) {
+            log(`a menu function failed: ${e}`)
+            return []
+        }
+    }
+    if (!Array.isArray(spec)) return []
+
+    const collect = (list, above, left) => {
+        const found = []
+        for (const row of list) {
+            if (!row) continue
+
+            let title = ""
+            try {
+                title = String(row.title === undefined ? "" : row.title).trim()
+            } catch (e) {
+                continue
+            }
+            // The two titles hs.menubar reads as a separator rather than an entry.
+            if (title === "" || title === "-" || title === "---") continue
+
+            const here = above.concat([title])
+
+            // A submenu is followed rather than offered, as with the accessibility walk.
+            if (Array.isArray(row.menu)) {
+                if (left > 0) found.push(...collect(row.menu, here, left - 1))
+                continue
+            }
+
+            if (typeof row.fn === "function" && row.disabled !== true) {
+                found.push({ fn: row.fn, path: here })
+            }
+        }
+        return found
+    }
+
+    return collect(spec, [], depth === undefined ? config.menuDepth : depth)
+}
+
 // MARK: - Pressing
 
 /**
- * Press one element.
+ * Press an extra, opening its menu.
  *
- * Hammerspoon's own items are clicked rather than pressed; see clickElement() for why. The
- * choice is made here rather than by the caller so that no caller can get it wrong.
+ * Hammerspoon's own are handled apart; see pressOwnExtra().
  */
-function pressElement(element, ownsIt) {
-    if (!element) return false
-
-    if (ownsIt) return clickElement(element)
+function pressItem(item) {
+    if (!item || !item.element) return false
+    if (item.own) return pressOwnExtra(item)
 
     try {
-        element.performAction("AXPress")
+        item.element.performAction("AXPress")
         return true
     } catch (e) {
-        log(`could not press: ${e}`)
+        log(`could not press ${item.name}: ${e}`)
         return false
     }
 }
 
 /**
- * Open a menu by clicking where its item is, rather than by pressing it.
+ * Press one of Hammerspoon's own extras.
  *
- * performAction("AXPress") on an element belonging to this same process deadlocks
- * Hammerspoon. The accessibility call is delivered to the main thread, which is the thread
- * already running the JavaScript that made the call, and opening a menu enters a nested
- * modal run loop that never returns. Hammerspoon stops answering keys, its timers stop, and
- * it has to be killed. This happened twice while writing this Spoon.
+ * An item given a click callback rather than a menu does its whole job in that callback, so
+ * it is called and nothing has to be on screen.
  *
- * A click has none of that. It goes to the window server and comes back as an ordinary
- * event, with the main thread free the whole time, which is what happens when the menu bar
- * is clicked by hand.
+ * An item with a menu cannot have that menu opened: showing it is the action, and the only
+ * thing that could do it is a click. So the entries inside are offered instead, which is the
+ * same set of actions the menu would have shown.
  *
- * The pointer is put back where it was afterwards.
+ * They are offered whether or not the item happens to be on screen. Clicking it when it is
+ * visible would work, but then what this does would depend on where the notch had pushed the
+ * item that minute, which is the thing this Spoon exists to stop mattering.
  */
-function clickElement(element) {
-    let position = null
-    let size = null
-    try {
-        position = element.position
-        size = element.size
-    } catch (e) {
-        log("could not read the item's position")
-        return false
-    }
-    if (!position || !size || size.w <= 0 || size.h <= 0) {
-        log("item has no position to click")
-        return false
+function pressOwnExtra(item) {
+    const record = recordForExtra(item)
+    if (record && !record.spec && typeof record.click === "function") {
+        try {
+            record.click()
+            return true
+        } catch (e) {
+            log(`${item.name} failed: ${e}`)
+            return false
+        }
     }
 
-    const at = { x: position.x + size.w / 2, y: position.y + size.h / 2 }
+    return chooseWithin(item)
+}
 
-    if (config.logClicks) {
-        log(`clicking (${Math.round(at.x)}, ${Math.round(at.y)}) ` +
-            `for an item at (${Math.round(position.x)}, ${Math.round(position.y)}) ` +
-            `sized ${Math.round(size.w)}x${Math.round(size.h)}`)
-    }
+/** The entries inside one item, from the registry when there is one and the menu when not. */
+function entriesWithin(item) {
+    const record = item.own ? recordForExtra(item) : null
+    return record ? ownMenuEntries(record) : menuEntries(item.element)
+}
 
-    // absolutePosition(), not getAbsolutePosition(): the latter does not exist, and reading
-    // it gives undefined rather than failing.
-    let restoreTo = null
-    try { restoreTo = hs.mouse.absolutePosition() } catch (e) { restoreTo = null }
-
-    try {
-        hs.mouse.setAbsolutePosition(at.x, at.y)
-        // Two numbers, not a point: given an object, both arguments come out as nothing and
-        // the click lands at the top left of the screen, on the Apple menu.
-        hs.eventtap.leftClick(at.x, at.y)
-    } catch (e) {
-        log(`could not click the item: ${e}`)
+/**
+ * Offer what is inside one item, for when its menu cannot be opened.
+ *
+ * The menu would have shown these same entries, and each performs its action without
+ * anything being on screen, so this reaches everything the menu would have.
+ */
+function chooseWithin(item) {
+    const inside = entriesWithin(item)
+    if (!inside.length) {
+        log(`${item.name} is not on screen and nothing inside it could be read`)
+        hs.ui.alert(`${describe(item)} is not reachable`).duration(2).show()
         return false
     }
 
-    if (restoreTo && config.restoreMouse) {
-        // After the menu has had a moment to open, so the click is not cut short.
-        restoreTimer = hs.timer.doAfter(config.restoreMouseDelay, () => {
-            restoreTimer = null
-            try { hs.mouse.setAbsolutePosition(restoreTo.x, restoreTo.y) } catch (e) { /* leave it */ }
+    // The module's chooser, not a local one; see choose() for why it is held there.
+    chooser = hs.chooser.create()
+    chooser.placeholder = describe(item)
+    chooser.visibleRows = config.rowsToDisplay
+    chooser.width = config.chooserWidth
+    chooser.setChoices(inside.map((entry, at) => ({
+        text: entry.path.join("  ▸  "),
+        subText: describe(item),
+        index: at
+    })))
+
+    chooser.onSelect = (chosen) => {
+        if (!chosen || chosen.index === undefined) return
+        const entry = inside[chosen.index]
+        if (!entry) return
+        invokeEntryWhenClear({
+            fn: entry.fn || null,
+            element: entry.element || null,
+            name: item.name
         })
     }
+
+    chooser.show()
     return true
+}
+
+/**
+ * Invoke a menu entry, which performs its action without opening anything.
+ *
+ * One of Hammerspoon's own calls the function its Spoon supplied. Everyone else's is pressed
+ * through accessibility.
+ */
+function invokeEntry(entry) {
+    if (!entry) return false
+
+    if (typeof entry.fn === "function") {
+        try {
+            entry.fn()
+            return true
+        } catch (e) {
+            log(`${entry.name} failed: ${e}`)
+            return false
+        }
+    }
+
+    if (!entry.element) return false
+    try {
+        entry.element.performAction("AXPress")
+        return true
+    } catch (e) {
+        log(`could not invoke ${entry.name}: ${e}`)
+        return false
+    }
 }
 
 /**
@@ -474,30 +725,60 @@ function clickElement(element) {
  * The timer is held in a variable: an hs.timer with nothing referring to it can be
  * collected before it fires.
  */
-function pressWhenClear(element, ownsIt) {
+function invokeEntryWhenClear(entry) {
     pressTimer = hs.timer.doAfter(config.pressDelay, () => {
         pressTimer = null
-        pressElement(element, ownsIt)
+        invokeEntry(entry)
     })
     return true
 }
 
 /**
- * Press an extra by name, scanning for it now.
+ * Find something by name and press it, scanning now.
  *
- * The element found by an earlier scan is not kept: an application can replace its menu bar
- * item at any time, and pressing a stale element does nothing.
+ * @param {string} name An item's name or alias, or a menu entry's name.
+ * @param {boolean} [itemsOnly] Look only at the items. Reading every menu to find an entry
+ *        costs seconds, and a caller that knows it named an item should not pay that to
+ *        discover the item has gone.
  */
-function press(name) {
+function pressNamed(name, itemsOnly) {
     const item = extras().find((e) => e.name === name || e.alias === name)
-    if (item) return pressWhenClear(item.element, item.own)
+    if (item) return pressItem(item)
 
     // A menu entry, which performs its own action rather than opening anything.
-    const entry = entries().find((e) => e.name === name)
-    if (entry) return pressWhenClear(entry.element, false)
+    if (itemsOnly !== true) {
+        const entry = entries().find((e) => e.name === name)
+        if (entry) return invokeEntry(entry)
+    }
 
+    log(`${name} was not in the menu bar when the time came to press it`)
     hs.ui.alert(`No menu bar extra named ${name}`).duration(2).show()
     return false
+}
+
+/**
+ * Press by name once whatever is showing has had time to close.
+ *
+ * The scan happens inside the timer rather than before it, so what is pressed is what is in
+ * the menu bar at the moment of the press rather than a fifth of a second earlier. See
+ * choose() for why that difference matters.
+ */
+function pressNamedWhenClear(name, itemsOnly) {
+    pressTimer = hs.timer.doAfter(config.pressDelay, () => {
+        pressTimer = null
+        pressNamed(name, itemsOnly)
+    })
+    return true
+}
+
+/**
+ * Press an extra by name.
+ *
+ * Nothing from an earlier scan is kept: an application can replace its menu bar item at any
+ * time, and the items slide about as their neighbours change width.
+ */
+function press(name) {
+    return pressNamedWhenClear(name, false)
 }
 
 // MARK: - The chooser
@@ -536,7 +817,12 @@ function choose(deep) {
         return icons.get(bundleID)
     }
 
-    const chooser = hs.chooser.create()
+    // Held in a module variable rather than only in this function. A chooser referred to by
+    // nothing is collected while it is still on screen — HSChooser's deinit takes the window
+    // with it — and the chooser then disappears with nobody having touched it. Every other
+    // Spoon here that opens one holds it this way: the clipboard, the window switcher, kitty,
+    // and hs_interactive-gt for the command chooser itself. See ai/chooser-collected.md.
+    chooser = hs.chooser.create()
     chooser.placeholder = deep === true ? "Menu bar, everything" : "Menu bar"
     chooser.searchSubText = true       // so the mb- names can be typed
     chooser.visibleRows = config.rowsToDisplay
@@ -564,17 +850,27 @@ function choose(deep) {
 
     // Pressed after the chooser has gone, not from onSelect. hs.chooser orders its panel out
     // before calling back, but focus has not returned to whatever was in front by then, and
-    // a menu opened before it does is dismissed as soon as it arrives. See pressWhenClear().
+    // a menu opened before it does is dismissed as soon as it arrives. See invokeEntryWhenClear().
     chooser.onSelect = (chosen) => {
         if (!chosen || chosen.index === undefined) return
         const row = rows[chosen.index]
         if (!row) return
 
-        // An item opens a menu, so it goes through the same path as before: pressed, or
-        // clicked when it is one of Hammerspoon's own. An entry performs its own action and
-        // opens nothing, so it is pressed whoever owns it.
-        if (row.kind === "item") pressWhenClear(row.item.element, row.item.own)
-        else pressWhenClear(row.entry.element, false)
+        // An item is found again by name when the time comes to press it, rather than kept
+        // from the scan that built this chooser. The items slide about: sampled every five
+        // seconds for two minutes, seventeen of thirty moved 55pt each time Control Center's
+        // microphone indicator appeared or went away. That is wider than most items are, so
+        // a click aimed at where an item used to be lands on its neighbour and opens the
+        // wrong menu. Two items crossed the notch in the same two minutes, and were
+        // therefore clickable only part of the time. The item may also have been replaced
+        // altogether, leaving an element that presses do nothing to.
+        //
+        // An entry is kept as it was found. It is pressed through accessibility rather than
+        // clicked, so where it is does not matter, and its name is not stable enough to find
+        // it again: the countdown's entry is `-start-25-min` until it is running and `-stop`
+        // afterwards.
+        if (row.kind === "item") pressNamedWhenClear(row.item.name, true)
+        else invokeEntryWhenClear(row.entry)
     }
 
     chooser.show()
@@ -592,10 +888,400 @@ function menu() {
         imageProvider: () => ({
             icon: entry.bundleID ? "bundle:" + entry.bundleID : "symbol:menubar.rectangle"
         }),
-        // Deferred for the same reason as the chooser: the menu that offered this button is
-        // still on screen and holding focus.
-        fn: () => pressWhenClear(entry.element, entry.own)
+        // Deferred for the same reason as the chooser, and found again by name for the same
+        // reason: this button may have been built minutes ago, and the items will have moved
+        // since. See choose().
+        fn: () => pressNamedWhenClear(entry.name, true)
     }))
+}
+
+// MARK: - What cannot be seen
+//
+// The menu bar holds more than there is room for, and macOS does not drop what does not fit.
+// It puts it somewhere useless instead: under the notch, left of the notch among the
+// application's own menus, or — when a menu bar manager such as Ice is running — thousands of
+// points off the side of the screen. Those items are still in the menu bar, still listed by
+// extras() and still pressable through everything above. They just cannot be seen or
+// pointed at.
+//
+// peek() draws them, briefly, below the menu bar.
+
+/** A screen's menu bar height, in points. */
+function menuBarHeightOf(screen) {
+    try {
+        const full = screen.fullFrame
+        const frame = screen.frame
+        if (!full || !frame) return 0
+        return frame.y - full.y
+    } catch (e) {
+        return 0
+    }
+}
+
+/**
+ * The band of a screen that the notch covers, or null when there is no notch.
+ *
+ * Hammerspoon 2 does not expose NSScreen's safe area, so this is worked out rather than read.
+ * A menu bar taller than an ordinary one means a notch, and the notch is centred and about an
+ * eighth of the width: measured here, 220pt of 1800, which is 12.2%.
+ *
+ * config.notchFraction is wider than that on purpose. Guessing wide puts an item in the strip
+ * that could have been seen anyway; guessing narrow leaves one out of the strip that cannot
+ * be seen at all, which is the one thing the strip exists to prevent.
+ */
+function notchBandOf(screen) {
+    if (menuBarHeightOf(screen) <= NOTCHLESS_MENU_BAR) return null
+
+    let full = null
+    try { full = screen.fullFrame } catch (e) { return null }
+    if (!full) return null
+
+    const width = full.w * config.notchFraction
+    const middle = full.x + full.w / 2
+    return { left: middle - width / 2, right: middle + width / 2 }
+}
+
+/** The screen a point is on, or null when it is on none of them. */
+function screenAt(point) {
+    let screens = []
+    try { screens = hs.screen.all() || [] } catch (e) { return null }
+
+    for (const screen of screens) {
+        let frame = null
+        try { frame = screen.fullFrame } catch (e) { continue }
+        if (!frame) continue
+        if (point.x >= frame.x && point.x < frame.x + frame.w &&
+            point.y >= frame.y && point.y < frame.y + frame.h) {
+            return screen
+        }
+    }
+    return null
+}
+
+/**
+ * Whether an item is somewhere it can actually be seen.
+ *
+ * Two ways to fail. An item parked off every screen is nowhere at all. An item left of the
+ * notch is in the half of the menu bar the application's own menus occupy, and is drawn
+ * beneath them — whether it is under the notch itself or further left again makes no
+ * difference to whether it can be seen.
+ */
+function isOnShow(item) {
+    let position = null
+    let size = null
+    try {
+        position = item.element.position
+        size = item.element.size
+    } catch (e) {
+        return false
+    }
+    if (!position || !size) return false
+
+    const screen = screenAt({ x: position.x + size.w / 2, y: position.y + size.h / 2 })
+    if (!screen) return false
+
+    const band = notchBandOf(screen)
+    if (band && position.x < band.right) return false
+
+    return true
+}
+
+/** Every item that is in the menu bar but cannot be seen there, in menu bar order. */
+function hidden() {
+    const found = extras().filter((item) => !isOnShow(item))
+    found.sort((one, other) => {
+        let a = 0
+        let b = 0
+        try { a = one.element.position.x } catch (e) { a = 0 }
+        try { b = other.element.position.x } catch (e) { b = 0 }
+        return a - b
+    })
+    return found
+}
+
+// MARK: - The strip
+
+/**
+ * How wide each item should be drawn.
+ *
+ * An item's width in the menu bar is no guide once its title is being drawn in place of its
+ * glyph. AirDrop's item is 18pt wide because what it draws there is an icon, while the word
+ * "AirDrop" at this size is three times that, and laying it out at 18pt clips it to "Air".
+ *
+ * So a title is measured, and only an item without one falls back to the width it occupies in
+ * the menu bar. Measuring needs a canvas, because minimumTextSize takes the font from an
+ * element rather than from its arguments; the one made here is never shown.
+ */
+/**
+ * A name for an item that has no title, taken from its own menu.
+ *
+ * The application's name is not always a useful answer. SystemUIServer hosts several of the
+ * system's menu extras at once, so naming one after the process that owns it makes Time
+ * Machine and the VPN both "SystemUIServer". The VPN at least says what it is in
+ * AXDescription; Time Machine reports no title, description, value or help at all.
+ *
+ * Its menu does say. A macOS menu extra almost always carries an entry naming itself — "Open
+ * Time Machine Settings…", "Wi-Fi Settings…", "Bluetooth Settings…" — so that entry is where
+ * the name comes from. Only the top level is read, which is one cheap menu rather than the
+ * whole tree, and only for an item that has nothing better to offer.
+ */
+function menuName(item) {
+    let inside = []
+    try {
+        inside = menuEntries(item.element, 0)
+    } catch (e) {
+        return ""
+    }
+
+    for (const entry of inside) {
+        const title = entry.path[entry.path.length - 1] || ""
+        const named = /^(?:Open\s+)?(.+?)\s+Settings…?$/.exec(title)
+        if (named) return named[1]
+    }
+    return ""
+}
+
+/**
+ * What to draw for an item as text, or "" when it should be drawn as an icon.
+ *
+ * Its own title where it has one, then its application's icon, then whatever its menu calls
+ * it, and failing all of those the application's name. See applicationIcon() for why some
+ * applications have no icon to show, and menuName() for why their name is not always enough.
+ */
+function peekTextOf(item) {
+    if (item.label) return item.label
+    if (applicationIcon(item)) return ""
+    return menuName(item) || item.application || item.name
+}
+
+function peekSizesFor(items) {
+    let probe = null
+    try {
+        probe = hs.canvas.create({ x: 0, y: 0, w: 10, h: config.peekHeight })
+        probe.replaceElements([{
+            type: "text",
+            text: "",
+            textSize: config.peekTextSize,
+            frame: { x: 0, y: 0, w: 10, h: config.peekHeight }
+        }])
+    } catch (e) {
+        probe = null
+    }
+
+    const sizes = items.map((item) => {
+        const text = peekTextOf(item)
+        if (text && probe) {
+            try {
+                const size = probe.minimumTextSize(0, text)
+                if (size && size.w > 0) {
+                    return { w: Math.ceil(size.w) + 4, h: Math.ceil(size.h) }
+                }
+            } catch (e) { /* fall through to the menu bar width */ }
+        }
+        try {
+            const size = item.element.size
+            if (size && size.w > 0) return { w: size.w, h: config.peekIconSize }
+        } catch (e) { /* fall through */ }
+        return { w: config.peekIconSize * 2, h: config.peekIconSize }
+    })
+
+    if (probe) {
+        try { probe.destroy() } catch (e) { /* nothing to do */ }
+    }
+    return sizes
+}
+
+/**
+ * An application's own icon, or null when it has none.
+ *
+ * HSImage.fromAppBundle() does not answer this. It looks the bundle up, and if it finds one it
+ * returns NSWorkspace's icon for it — which, for a bundle that declares no icon, is the
+ * generic grey placeholder rather than nothing. Its fallback symbol is no help either: that
+ * only applies when the bundle id cannot be resolved at all, and these resolve fine.
+ *
+ * Two of the applications here are in that position. Fleet Desktop lives outside
+ * /Applications, at /opt/orbit/bin/desktop/macos/stable, and has no Resources directory at
+ * all; SystemUIServer is a faceless system agent. Both came back as the same placeholder,
+ * which says nothing about which item it is and is worse than no icon, because it looks like
+ * an icon.
+ *
+ * So the bundle is asked whether it declares one before its icon is used.
+ */
+function applicationIcon(item) {
+    if (!item.bundleID || !item.bundlePath) return null
+
+    if (!iconDeclared.has(item.bundlePath)) {
+        let declared = false
+        try {
+            const path = item.bundlePath.replace(/\/+$/, "") + "/Contents/Info.plist"
+            const info = hs.plist.fromFile(path)
+            declared = !!(info && (info.CFBundleIconFile || info.CFBundleIconName))
+        } catch (e) {
+            declared = false
+        }
+        iconDeclared.set(item.bundlePath, declared)
+    }
+
+    if (!iconDeclared.get(item.bundlePath)) return null
+    try {
+        return HSImage.fromAppBundle(item.bundleID)
+    } catch (e) {
+        return null
+    }
+}
+
+/** Take the strip away. */
+function peekHide() {
+    if (peekTimer) {
+        try { peekTimer.stop() } catch (e) { /* it may already have fired */ }
+        peekTimer = null
+    }
+    if (peekCanvas) {
+        try { peekCanvas.destroy() } catch (e) { /* it may already have gone */ }
+        peekCanvas = null
+    }
+    return true
+}
+
+/**
+ * Show the items that cannot be seen, in a strip below the menu bar, aligned right.
+ *
+ * Each is drawn as its own title where it has one and as its application's icon where it does
+ * not. A title is what most of these actually show — a countdown, a bandwidth reading, an
+ * emoji — so for them the strip is exactly what the menu bar would have shown. An item with
+ * no title cannot be reproduced: there is no way to read the glyph an application draws into
+ * its own menu bar item, so its application's icon stands in.
+ *
+ * Clicking one does what choosing it from the chooser does.
+ */
+function peek() {
+    peekHide()
+
+    const items = hidden()
+    if (!items.length) {
+        hs.ui.alert("Every menu bar item is visible").duration(2).show()
+        return false
+    }
+
+    let screen = null
+    try { screen = hs.screen.all()[0] } catch (e) { screen = null }
+    if (!screen) return false
+
+    let full = null
+    try { full = screen.fullFrame } catch (e) { return false }
+    if (!full) return false
+
+    const sizes = peekSizesFor(items)
+    const inside = sizes.reduce((sum, each) => sum + each.w, 0) +
+        config.peekGap * (items.length - 1)
+    const stripWidth = inside + config.peekPadding * 2
+
+    // hs.canvas works in unflipped AppKit coordinates: y counts up from the bottom of the
+    // screen, where accessibility and hs.screen both count down from the top. So the strip's
+    // y is its bottom edge, and sitting it directly under the menu bar means measuring the
+    // menu bar down from the top of the screen and the strip's own height down from there.
+    const under = full.y + full.h - menuBarHeightOf(screen)
+
+    const canvas = hs.canvas.create({
+        x: full.x + full.w - stripWidth - config.peekMargin,
+        y: under - config.peekHeight - config.peekOffset,
+        w: stripWidth,
+        h: config.peekHeight
+    })
+
+    // An outline, because a translucent panel over a busy window has no edge of its own.
+    const elements = [{
+        type: "rectangle",
+        frame: { x: 0.5, y: 0.5, w: stripWidth - 1, h: config.peekHeight - 1 },
+        fillColor: config.peekBackground,
+        strokeColor: config.peekBorder,
+        strokeWidth: 1,
+        roundedRectRadii: { xRadius: 7, yRadius: 7 },
+        id: "_background"
+    }]
+
+    // Everything is centred on the strip's middle line. A title and an icon are different
+    // heights, so each is placed by its own height rather than given the strip's full height:
+    // text is drawn from the top of the frame it is given, so a full-height frame would sit
+    // every title higher than the icons beside it.
+    const middle = config.peekHeight / 2
+
+    let at = config.peekPadding
+    items.forEach((item, index) => {
+        const width = sizes[index].w
+
+        const text = peekTextOf(item)
+        if (text) {
+            const height = sizes[index].h
+            elements.push({
+                type: "text",
+                text: text,
+                textSize: config.peekTextSize,
+                textColor: config.peekForeground,
+                textAlignment: "center",
+                frame: { x: at, y: middle - height / 2, w: width, h: height }
+            })
+        } else {
+            // No title to reproduce, so the application it belongs to is the best that can be
+            // shown. Centred in the same width the item has in the menu bar.
+            const icon = config.peekIconSize
+            elements.push({
+                type: "image",
+                image: applicationIcon(item),
+                imageScaling: "scaleProportionally",
+                frame: {
+                    x: at + (width - icon) / 2,
+                    y: middle - icon / 2,
+                    w: icon,
+                    h: icon
+                }
+            })
+        }
+
+        // The thing that is clicked, rather than the title or the icon itself. One target per
+        // item, the full height of the strip and the full width of its slot, so that the
+        // space around a short title or a small icon answers to the pointer as well.
+        elements.push({
+            type: "rectangle",
+            frame: { x: at, y: 0, w: width, h: config.peekHeight },
+            fillColor: { red: 0, green: 0, blue: 0, alpha: 0.01 },
+            id: item.name,
+            trackMouseDown: true
+        })
+
+        at += width + config.peekGap
+    })
+
+    canvas.replaceElements(elements)
+    canvas.level("status")
+    canvas.behaviorList(["canJoinAllSpaces", "stationary"])
+    // So that clicking the strip does not bring Hammerspoon to the front; the point is to
+    // reach a menu bar item, not to switch application.
+    canvas.clickActivating(false)
+
+    canvas.mouseCallback((which, message, id, x, y) => {
+        if (message !== "mouseDown") return
+        if (!id || id === "_canvas" || id === "_background") return
+        peekHide()
+        pressNamedWhenClear(id, true)
+    })
+
+    canvas.show()
+    peekCanvas = canvas
+
+    if (config.peekSeconds > 0) {
+        peekTimer = hs.timer.doAfter(config.peekSeconds, () => {
+            peekTimer = null
+            peekHide()
+        })
+    }
+    return true
+}
+
+/** Show the strip, or take it away when it is already up. */
+function peekToggle() {
+    if (peekCanvas) return peekHide()
+    return peek()
 }
 
 // MARK: - Listing
@@ -616,13 +1302,18 @@ function list(deep) {
 
 // MARK: - Starting and stopping
 //
-// Nothing to start: there is no watcher, no cache and no command defined per extra.
+// No watcher, no cache and no command defined per extra. The one thing start() does is wrap
+// hs.menubar, which has to happen before any other Spoon creates an item: a menu registered
+// before the wrapping is in place is not recorded, and that item falls back to being read
+// through accessibility. This Spoon is therefore loaded first in init.js.
 
 function start() {
+    instrument()
     return module.exports
 }
 
 function stop() {
+    peekHide()
     return module.exports
 }
 
@@ -631,10 +1322,15 @@ module.exports = {
 
     extras,
     entries,
+    hidden,
     list,
     choose,
     menu,
     press,
+    peek,
+    peekHide,
+    peekToggle,
+    instrument,
 
     start,
     stop,

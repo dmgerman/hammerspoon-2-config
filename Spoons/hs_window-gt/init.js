@@ -1244,7 +1244,7 @@ function captureDigit(report) {
  *
  * @param {string|number} key The digit.
  * @param {boolean} [destroyed] True when the window has gone, in which case the watcher is
- *        left alone: its element is invalid by then, and hs.ax.removeWatcher reports that
+ *        left alone: its element is invalid by then, and hs.ax.off reports that
  *        as an error on the console rather than returning one. The observer goes with the
  *        element, so there is nothing to release.
  */
@@ -1255,8 +1255,8 @@ function detachKey(key, destroyed) {
 
     if (!destroyed && entry.element && entry.onDestroyed) {
         try {
-            hs.ax.removeWatcher(entry.element, hs.ax.notificationTypes.uIElementDestroyed,
-                                entry.onDestroyed)
+            hs.ax.off(entry.element, hs.ax.notificationTypes.uIElementDestroyed,
+                      entry.onDestroyed)
         } catch (e) {
             console.log(`[hs_window-gt] watcher for ${digit} was already gone: ${e && e.message ? e.message : e}`)
         }
@@ -1371,8 +1371,10 @@ function attachDigit(target, digit) {
     // chord would simply stop working in other applications for no apparent reason.
     //
     // The press-time check in focusAttached stays as the backstop. This does not fire when
-    // an application quits outright rather than closing its windows, and addWatcher can
-    // fail to attach at all.
+    // an application quits outright rather than closing its windows, and hs.ax.on can fail
+    // to attach at all — it reports a failed registration on the console and returns rather
+    // than throwing, so a failure is not distinguishable here from a successful attach.
+    // Nothing breaks: detachKey's off() call finds no watcher and is a no-op.
     const element = target.axElement()
     let onDestroyed = null
     if (element) {
@@ -1382,7 +1384,7 @@ function attachDigit(target, digit) {
             alert(`${config.attachModifiers.join("-")}-${digit} released\n${title} has closed`)
         }
         try {
-            hs.ax.addWatcher(element, hs.ax.notificationTypes.uIElementDestroyed, onDestroyed)
+            hs.ax.on(element, hs.ax.notificationTypes.uIElementDestroyed, onDestroyed)
         } catch (e) {
             console.error(`[hs_window-gt] could not watch ${title} for closing: ${e && e.message ? e.message : e}`)
             onDestroyed = null
@@ -1790,17 +1792,17 @@ function start() {
     // previous. Driven by application activation, which is the closest event available —
     // moving between two windows of the same application is not seen.
     //
-    // hs.application.addWatcher takes one handler and reports every event to it, so the
-    // event this one cares about is selected here rather than at registration.
+    // Registered for "didActivate" alone, so nothing is called for the other application
+    // events. The listener is passed the application that activated, which is not needed
+    // here: which window ended up focused is read from hs.window rather than derived from it.
     if (!focusWatcher) {
-        focusWatcher = (event) => {
-            if (event !== "didActivate") return
+        focusWatcher = () => {
             const window = hs.window.focusedWindow()
             if (!window || window.id === currentFocusedId) return
             previousFocusedId = currentFocusedId
             currentFocusedId = window.id
         }
-        hs.application.addWatcher(focusWatcher)
+        hs.application.on("didActivate", focusWatcher)
     }
     return module.exports
 }
@@ -1816,7 +1818,7 @@ function stop() {
         forgetTimer = null
     }
     if (focusWatcher) {
-        hs.application.removeWatcher(focusWatcher)
+        hs.application.off("didActivate", focusWatcher)
         focusWatcher = null
     }
     return module.exports

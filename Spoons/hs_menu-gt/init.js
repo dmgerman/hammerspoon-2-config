@@ -991,7 +991,7 @@ function openSession(menu, presenter, options) {
     // MARK: Press recognition
     //
     // Both presenters report a press as a button going down and later coming up: the
-    // Stream Deck through buttonCallback, the screen through a hotkey bound with both a
+    // Stream Deck through onButton, the screen through a hotkey bound with both a
     // press and a release handler. A hold fires as soon as the threshold elapses, while
     // the button is still down, which is how the Hammerspoon 1 Spoon behaved. macOS does
     // not deliver key auto-repeat to hs.hotkey, so a repeated press event cannot occur.

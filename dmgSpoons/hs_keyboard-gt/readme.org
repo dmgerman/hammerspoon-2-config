@@ -1,0 +1,162 @@
+* hs_keyboard-gt
+
+Switch keyboard layouts and input methods by name, with one key per destination.
+
+macOS switches input sources with ⌃Space, which cycles. Reaching a particular source means
+pressing it as many times as it takes, and how many that is depends on where you started.
+This Spoon names the destination, so one key goes to one input source.
+
+A port of the input method functions in the Hammerspoon 1 =hs_annoyances= Spoon:
+=setInputMethod()= is =methodToggle()= here, and =toggle_jp()= is =kanaToggle()=. =select()=
+is the one addition; version 1 had no chooser.
+
+* Simple usage
+
+#+begin_src js   :exports both
+const keyboard = hs.loadSpoon("hs_keyboard-gt")
+
+keyboard.methodToggle()          // between the default layout and the input method
+keyboard.kanaToggle()            // Hiragana ↔ Katakana
+keyboard.layoutDefault()         // back to the default layout
+keyboard.layoutSet("British")    // a layout, by name
+keyboard.methodSet("Hiragana")   // an input method, by name
+keyboard.select()                // pick one from a chooser
+
+keyboard.current()               // {layout, method, sourceID}
+keyboard.list()                  // what is active and what is enabled, as lines
+#+end_src
+
+* Layouts and input methods are different things
+
+A *layout* maps keys to characters: U.S., Canadian, British. An *input method* composes
+characters as you type, which is how Japanese, Chinese and Korean are entered. macOS keeps
+both in one menu and ⌃Space cycles through both, but they are selected by different calls,
+=hs.keycodes.setLayout()= and =hs.keycodes.setMethod()=, and a name given to the wrong one
+is not found. Hence the two setters here rather than one.
+
+They are also active at the same time. With Hiragana selected, =hs.keycodes.currentLayout()=
+still reports =Canadian=: that is the layout underneath the input method, and it is what
+decides which key makes which romaji.
+
+#+begin_src js   :exports both
+hs.keycodes.setMethod("Hiragana")
+hs.keycodes.currentLayout()      // "Canadian"      — the layout underneath
+hs.keycodes.currentMethod()      // "Hiragana"      — the method on top of it
+hs.keycodes.currentSourceID()    // "com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese"
+#+end_src
+
+So *"am I typing Japanese?" is answered by =currentMethod()=*, which is null when no input
+method is active, and never by =currentLayout()=.
+
+This is the one behavioural difference from version 1. That =setInputMethod()= compared
+=currentLayout()= against the default layout to decide which way to switch. In Hammerspoon 2
+that comparison is always true, because =currentLayout()= reports the default layout whether
+or not an input method is on top of it, and the toggle would only ever go one way.
+=methodToggle()= asks =currentMethod()= instead.
+
+Turning an input method off means selecting a layout. There is no call that removes the
+method and leaves the layout, because the layout was never gone.
+
+* Only enabled sources can be selected
+
+=hs.keycodes= lists and selects the input sources enabled in *System Settings → Keyboard →
+Input Sources*. A layout macOS knows about but which is not in that list cannot be switched
+to, and =setLayout()= returns false.
+
+Every setter reports that case in an alert naming what *is* enabled, because the alternative
+— nothing happening at all — reads as the key not being bound.
+
+#+begin_src js   :exports both
+keyboard.layouts()    // ["Canadian"]   — enabled layouts
+keyboard.methods()    // ["Hiragana"]   — enabled input methods
+#+end_src
+
+Katakana is a separate entry in that list. =kanaToggle()= needs both it and Hiragana enabled
+to have something to toggle between.
+
+* Name or identifier
+
+Wherever a setting names an input source, it takes either a localized name — =Hiragana=,
+=British= — or an input source identifier, =com.apple.keylayout.British=. A dot in the
+string is what tells them apart, since no localized name has one.
+
+Names are easier to write, and *they are not unique*. Enabling Katakana on this machine also
+enabled a second Kotoeri typing mode carrying the name =Hiragana=, so =methods()= now reports
+it twice:
+
+#+begin_src js   :exports both
+keyboard.methods()    // ["Hiragana", "Hiragana", "Katakana"]
+#+end_src
+
+=hs.keycodes.setMethod()= matches on the name and selects the first it finds, and nothing
+commits macOS to an order. Anything that has to arrive at one particular source therefore
+names it by identifier, which is why =inputMethod= and =kanaMethods= hold identifiers above.
+
+To find an identifier, switch to the source by hand and ask:
+
+#+begin_src js   :exports both
+hs.keycodes.currentSourceID()   // "com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese"
+#+end_src
+
+* The alert names the input method, not the layout
+
+=label()= gives the input method when one is active, and the layout only when none is. It
+does not show the layout underneath a method, because =currentLayout()= lags one switch
+behind: read immediately after switching, which is when the alert is drawn, it reports the
+layout that was in use before.
+
+#+begin_src js   :exports both
+keyboard.sourceSet("com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese")
+keyboard.current().layout    // "Canadian" — the layout that was in use a moment ago
+// one second later
+keyboard.current().layout    // "U.S."     — Kotoeri's romaji mode sits on a U.S. layout
+#+end_src
+
+=current()= reports it either way, for a caller that wants the layout and can wait.
+
+* Settings
+
+#+begin_src js   :exports both
+keyboard.config.defaultLayout = "Canadian"    // what layoutDefault() returns to
+keyboard.config.alert         = true          // name the source after a switch
+keyboard.config.alertSeconds  = 1
+keyboard.config.alertOnChange = false         // also when something else switches
+keyboard.config.rowsToDisplay = 10
+
+// What methodToggle() turns on, and what kanaToggle() cycles. Identifiers, not names —
+// see /Name or identifier/ below.
+keyboard.config.inputMethod = "com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese"
+keyboard.config.kanaMethods = [
+    "com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese",
+    "com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese.Katakana"
+]
+#+end_src
+
+=kanaMethods= is a list rather than a pair, so three or more input methods cycle. Two of
+them make it the toggle version 1 had.
+
+=alert= exists because the menu bar is not a reliable indicator: on a MacBook with a notch
+the input source flag is often among the icons there is no room for.
+
+=alertOnChange= announces switches made by anything — ⌃Space, the menu bar, an application
+changing it on your behalf. It is off by default because with =alert= already on, a switch
+made by this Spoon would be announced twice.
+
+* Commands
+
+As wired in =init.js=:
+
+| Command                   | Key              | What it does                               |
+|---------------------------+------------------+--------------------------------------------|
+| =keyboard-method-toggle=  | =cmd-ctrl \=     | Default layout ↔ the input method          |
+| =keyboard-kana-toggle=    | =cmd-ctrl-alt \= | Hiragana ↔ Katakana                        |
+| =keyboard-layout-default= |                  | Back to the default layout                 |
+| =keyboard-select=         |                  | Pick an input source from a chooser        |
+| =keyboard-current-show=   |                  | Name the active input source in an alert   |
+
+The two keys are the ones version 1 used.
+
+* What this needs
+
+Nothing. =hs.keycodes= reads and selects input sources through the Text Input Source API,
+which asks for no permission.

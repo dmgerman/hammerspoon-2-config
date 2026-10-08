@@ -64,12 +64,15 @@ const config = {
 let menusBySerial = {}
 let menusBySize = {}
 let defaultMenu = null
-let watcher = null
+// One listener per hs.streamdeck event. Held, because off() matches on function identity.
+let onDeckConnected = null
+let onDeckDisconnected = null
 // Adjusts every deck as the time of day changes. Held, because a timer with no reference
 // left is garbage collected before it fires.
 let brightnessTimer = null
-// Blanks the decks while the screen is locked. Held for the same reason.
-let powerWatcher = null
+// Blanks the decks while the screen is locked: hs.power event name -> listener. Held for
+// the same reason as the deck listeners above.
+const powerListeners = new Map()
 
 // One record per attached deck: the device, its session, its layout and its state.
 const decks = new Map()
@@ -109,6 +112,15 @@ function applyBrightness(record) {
         console.error(`[hs_streamdeck-gt] could not set brightness: ${e.message}`)
     }
 }
+
+// The hs.power events that can blank or restore a deck. One listener is registered per
+// name, because hs.power calls listeners with no arguments: which event fired is known
+// only from the name it was registered under, not from anything the listener is passed.
+const POWER_EVENTS = [
+    "screensDidLock", "screensDidUnlock",
+    "screensDidSleep", "screensDidWake",
+    "screensaverDidStart", "screensaverDidStop"
+]
 
 // A deck blanked because the screen locked is remembered separately from one switched off
 // by hand or by the idle timer, so that unlocking restores only what locking blanked.
@@ -399,7 +411,7 @@ function attach(device) {
     restartIdleTimer(record)
     device.reset()
 
-    device.buttonCallback((_device, key, isDown) => {
+    device.onButton((_device, key, isDown) => {
         try {
             handlePress(record, key, isDown)
         } catch (e) {
@@ -563,11 +575,14 @@ function getDecks() {
 function start() {
     for (const device of hs.streamdeck.all()) attach(device)
 
-    watcher = (event, device) => {
-        if (event === "connected" || event === "didConnect") attach(device)
-        else detach(device.serialNumber)
+    // Guarded, because each registration is a fresh closure: off() matches on identity, so
+    // registering twice would leave a listener that nothing holds a reference to remove.
+    if (!onDeckConnected) {
+        onDeckConnected = (device) => attach(device)
+        onDeckDisconnected = (device) => detach(device.serialNumber)
+        hs.streamdeck.on("connected", onDeckConnected)
+        hs.streamdeck.on("disconnected", onDeckDisconnected)
     }
-    hs.streamdeck.addWatcher(watcher)
 
     // Follows the time of day. applyBrightness only reaches the hardware when the value
     // changes, so this costs a comparison per deck per minute.
@@ -576,32 +591,38 @@ function start() {
         for (const record of decks.values()) applyBrightness(record)
     })
 
-    powerWatcher = (event) => {
-        try {
-            handlePowerEvent(event)
-        } catch (e) {
-            console.error(`[hs_streamdeck-gt] power event ${event} failed: ${e.message}`)
+    for (const event of POWER_EVENTS) {
+        if (powerListeners.has(event)) continue
+        const listener = () => {
+            try {
+                handlePowerEvent(event)
+            } catch (e) {
+                console.error(`[hs_streamdeck-gt] power event ${event} failed: ${e.message}`)
+            }
         }
+        powerListeners.set(event, listener)
+        hs.power.on(event, listener)
     }
-    hs.power.addEventWatcher(powerWatcher)
 
     return module.exports
 }
 
 /** Release every deck and stop watching for them. */
 function stop() {
-    if (watcher) {
-        hs.streamdeck.removeWatcher(watcher)
-        watcher = null
+    if (onDeckConnected) {
+        hs.streamdeck.off("connected", onDeckConnected)
+        onDeckConnected = null
+    }
+    if (onDeckDisconnected) {
+        hs.streamdeck.off("disconnected", onDeckDisconnected)
+        onDeckDisconnected = null
     }
     if (brightnessTimer) {
         brightnessTimer.stop()
         brightnessTimer = null
     }
-    if (powerWatcher) {
-        hs.power.removeEventWatcher(powerWatcher)
-        powerWatcher = null
-    }
+    for (const [event, listener] of powerListeners) hs.power.off(event, listener)
+    powerListeners.clear()
     for (const record of Array.from(decks.values())) {
         if (record.idleTimer) {
             record.idleTimer.stop()

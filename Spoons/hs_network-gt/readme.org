@@ -134,7 +134,7 @@ rest at each use.
 | Setting             | Default                    | Meaning                                            |
 |---------------------+----------------------------+----------------------------------------------------|
 | =ignoredNetworks=   | =[]=                       | Networks whose name is not announced.              |
-| =nameShortcut=      | ="dmg-ssid"=               | Shortcut run to read the network name. =null= to disable. |
+| =nameShortcut=      | ="dmg-ssid"=               | Shortcut run to read the network name. =null= to use =hs.wifi=, which needs Location Services. |
 | =vpnServices=       | =[]=                       | VPN services that may be announced. =[]= accepts any. |
 | =pollSeconds=       | =15=                       | Seconds between traffic samples.                   |
 | =bannerInterval=    | =120=                      | Seconds between announcements. =0= for none.       |
@@ -209,14 +209,47 @@ The file is only appended to.
 
 * Reading the network name
 
-=hs.wifi.currentNetwork()= returns nothing on recent macOS unless Location Services has
-authorized the caller. The way around it is a Shortcut that reports the network name, run
-by =config.nameShortcut=; =hs.wifi.currentNetwork()= is tried when the Shortcut returns
-nothing, and the interface name is used when that also fails.
+macOS treats an SSID as location data. Until Location Services has authorized the caller,
+=hs.wifi= returns =null= for =ssid=, =bssid=, =countryCode= and =wlanChannel= — not an error,
+just nothing — so =hs.wifi.currentNetwork()= cannot name the network.
 
-The stock /Get current Wi-Fi network/ action, followed by /Get name of/, is enough to build
-such a Shortcut. Set =config.nameShortcut= to its name, or to =null= if
-=hs.wifi.currentNetwork()= works on your system.
+There are two ways round it, and which one applies is a permission decision rather than a
+code one.
+
+** Granting Location Services, which is what this configuration does
+
+#+begin_src js   :exports both
+hs.permissions.checkLocation()     // false until it has been granted
+hs.permissions.requestLocation()   // shows the system prompt
+#+end_src
+
+macOS asks only once per application. If no prompt appears, enable it by hand at *System
+Settings → Privacy & Security → Location Services → Hammerspoon 2*.
+
+With it granted, =hs.wifi.currentNetwork("en0")= answers directly and
+=config.nameShortcut= can be =null=. =interfaceDetails()= gains =bssid=, =wlanChannel= and
+=countryCode= at the same time, all of which are =null= without it.
+
+The permission is standing and belongs to Hammerspoon 2 as a whole, not to this Spoon.
+
+** A Shortcut, which needs no permission
+
+=config.nameShortcut= names a Shortcut to run instead. The stock /Get current Wi-Fi network/
+action followed by /Get name of/ is enough to build one. macOS resolves the name on the
+caller's behalf, so no Location Services authorization is involved.
+
+It is not free. macOS shows the Shortcuts icon in the menu bar for as long as any Shortcut
+runs, so asking the name on =bannerInterval= makes that icon appear and disappear all day,
+and every run spawns a process to answer a question =hs.wifi= answers inside the process
+already running. Measured here, scanning the menu bar every two seconds for two minutes: the
+indicator was present in 4 scans of 60 with the Shortcut, and 0 of 60 without it.
+
+** The order they are tried in
+
+The Shortcut first when =config.nameShortcut= is set, then =hs.wifi.currentNetwork()=, then
+the interface name as =iface:en0=. So a configuration with neither the permission nor a
+Shortcut still runs; it just names interfaces instead of networks, and =ssids= in the saved
+state is then keyed by interface.
 
 * VPN detection
 

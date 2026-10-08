@@ -164,7 +164,8 @@ A record holds =device=, =session=, =layout= and =on=. =session= is the hs_menu-
 displaying on that deck, so =getDecks()[0].session.push(...)= opens a submenu from code.
 
 Decks are attached and released as they are plugged in and unplugged, through
-=hs.streamdeck.addWatcher=. =refreshAll()= is called whenever a menu is registered, so
+=hs.streamdeck.on("connected")= and =hs.streamdeck.on("disconnected")=. =refreshAll()= is
+called whenever a menu is registered, so
 changing a menu redraws the deck.
 
 * Notes

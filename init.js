@@ -18,6 +18,62 @@ const interactive = hs.loadSpoon("hs_interactive-gt");
 // Which further directories exist is this configuration's business, so they are added here.
 interactive.searchPath.push("dmgSpoons");
 
+// The icons on the right of the menu bar, pressed from the keyboard. A port of the
+// hs_menubar Spoon in ~/.hammerspoon.
+//
+// Loaded before every other Spoon, because its start() wraps hs.menubar to record what each
+// Spoon gives its own menu bar items. A Spoon loaded before this one registers its menu
+// without being recorded, and its item then has to be read through accessibility — which
+// cannot see a menu that is only built when it opens, and cannot reach an item that is not
+// on screen. On a MacBook with a notch most of them are not.
+//
+// One command only. The extras themselves are named by the Spoon — mb-nordvpn,
+// mb-hammerspoon-2-build — and stay in its own chooser rather than being defined here:
+// finding out what to define would mean scanning every process at load, and a command
+// defined from that scan would name an application that may since have quit.
+interactive.use("hs_menubar-gt", {
+    commands: (interactive, menubar) => {
+        // Two commands over the same list. The first offers the icons themselves and is
+        // quick; the second also offers what is inside each of their menus, which means
+        // reading every menu and takes a few seconds.
+        interactive.define({
+            name: "menubar-interactive",
+            doc: "Choose a macOS menu bar icon and open it.",
+            // This command opens a chooser, so it waits for the command chooser to close
+            // first. Created while that one is still closing, its own chooser does not hold
+            // the key window and the next thing to draw takes it away.
+            runDelay: 0.05,
+            fn: () => menubar.choose()
+        });
+
+        interactive.define({
+            name: "menubar-interactive-deep",
+            doc: "Choose a macOS menu bar icon or any entry inside its menu. Slower: every menu is read.",
+            runDelay: 0.05,
+            fn: () => menubar.choose(true)
+        });
+
+        // The menu bar holds more than the notch leaves room for, and what does not fit is
+        // put somewhere it cannot be seen rather than dropped. This shows that remainder
+        // below the menu bar for a few seconds. No runDelay: it draws rather than opening a
+        // chooser, so it has nothing to wait for.
+        // Named peek, and bound to peek(), because it takes itself away after peekSeconds.
+        // peekToggle() is the one to bind instead if peekSeconds is set to 0, which leaves
+        // the strip up until something dismisses it; then it really is a toggle and the
+        // command should be renamed menubar-peek-toggle to say so.
+        interactive.define({
+            name: "menubar-peek",
+            doc: "Show the menu bar icons that cannot be seen, in a strip below the menu bar.",
+            fn: () => menubar.peek()
+        });
+    },
+    keys: {
+        "cmd-ctrl-alt-shift m": "menubar-interactive",
+        "cmd-ctrl-alt-shift n": "menubar-interactive-deep",
+        "cmd-ctrl-alt-shift b": "menubar-peek"
+    }
+});
+
 interactive.use("hs_countdown-gt", {
     config: {
         defaultLenMinutes: 25,
@@ -114,7 +170,24 @@ interactive.use("hs_time-gt", {
 interactive.use("hs_network-gt", {
     config: {
         // The banner naming the network, every minute rather than the Spoon's two.
-        bannerInterval: 60
+        bannerInterval: 60,
+
+        // No Shortcut for the network's name: hs.wifi reads it directly.
+        //
+        // The Spoon runs the dmg-ssid Shortcut because macOS treats an SSID as location data
+        // and hs.wifi returns null for it until Location Services is authorized. That
+        // authorization has now been granted to Hammerspoon 2, so hs.wifi.currentNetwork()
+        // answers and the Shortcut is redundant. Both returned "shonan-village-center" when
+        // this was changed.
+        //
+        // It is also less intrusive. macOS shows the Shortcuts icon in the menu bar for as
+        // long as any Shortcut runs, so asking the name once a minute made that icon appear
+        // and vanish all day, and each run spawned a process to answer a question hs.wifi
+        // answers in the process already running.
+        //
+        // Set this back to "dmg-ssid" if Location Services is ever withdrawn; without either,
+        // the Spoon falls back to naming the interface, as iface:en0.
+        nameShortcut: null
     },
     commands: (interactive, network) => {
         // Every threshold is per network, and the one to act on is the one in use. Reading
@@ -233,38 +306,49 @@ interactive.use("hs_kitty-gt", {
     }
 });
 
-// The icons on the right of the menu bar, pressed from the keyboard. A port of the
-// hs_menubar Spoon in ~/.hammerspoon.
+// Keyboard layouts and input methods, by name rather than by cycling with ⌃Space. A port
+// of setInputMethod() and toggle_jp() from the hs_annoyances Spoon in ~/.hammerspoon, with
+// the two chords they were bound to there.
 //
-// One command only. The extras themselves are named by the Spoon — mb-nordvpn,
-// mb-hammerspoon-2-build — and stay in its own chooser rather than being defined here:
-// finding out what to define would mean scanning every process at load, and a command
-// defined from that scan would name an application that may since have quit.
-interactive.use("hs_menubar-gt", {
-    commands: (interactive, menubar) => {
-        // Two commands over the same list. The first offers the icons themselves and is
-        // quick; the second also offers what is inside each of their menus, which means
-        // reading every menu and takes a few seconds.
+// The Spoon's own defaults are the layout and the Kotoeri input modes this machine has
+// enabled, so there is nothing to set here.
+interactive.use("hs_keyboard-gt", {
+    commands: (interactive, keyboard) => {
         interactive.define({
-            name: "menubar-interactive",
-            doc: "Choose a macOS menu bar icon and open it.",
-            // This command opens a chooser, so it waits for the command chooser to close
-            // first. Created while that one is still closing, its own chooser does not hold
-            // the key window and the next thing to draw takes it away.
-            runDelay: 0.05,
-            fn: () => menubar.choose()
+            name: "keyboard-method-toggle",
+            doc: "Switch between the default keyboard layout and the Japanese input method.",
+            fn: () => keyboard.methodToggle()
         });
 
         interactive.define({
-            name: "menubar-interactive-deep",
-            doc: "Choose a macOS menu bar icon or any entry inside its menu. Slower: every menu is read.",
+            name: "keyboard-kana-toggle",
+            doc: "Switch between Hiragana and Katakana.",
+            fn: () => keyboard.kanaToggle()
+        });
+
+        interactive.define({
+            name: "keyboard-layout-default",
+            doc: "Return to the default keyboard layout, turning off any input method.",
+            fn: () => keyboard.layoutDefault()
+        });
+
+        interactive.define({
+            name: "keyboard-select",
+            doc: "Choose a keyboard layout or input method and switch to it.",
+            // Opens a chooser, so it waits for the command chooser to close first.
             runDelay: 0.05,
-            fn: () => menubar.choose(true)
+            fn: () => keyboard.select()
+        });
+
+        interactive.define({
+            name: "keyboard-current-show",
+            doc: "Name the keyboard layout and input method in use.",
+            fn: () => keyboard.currentShow()
         });
     },
     keys: {
-        "cmd-ctrl-alt-shift m": "menubar-interactive",
-        "cmd-ctrl-alt-shift n": "menubar-interactive-deep"
+        "cmd-ctrl \\": "keyboard-method-toggle",
+        "cmd-ctrl-alt \\": "keyboard-kana-toggle"
     }
 });
 

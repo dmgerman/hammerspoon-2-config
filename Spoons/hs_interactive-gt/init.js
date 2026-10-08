@@ -779,10 +779,19 @@ function execute() {
     const chooser = hs.chooser.create()
     chooser.placeholder = "M-x"
     chooser.searchSubText = true
-    chooser.setChoices(commands().map((command) => ({
-        text: command.name,
-        subText: command.doc || whereIs(command.name).join(", ")
-    })))
+    // The chord goes in `text`, after the name: a row's right-hand column is the chooser's
+    // own ⌘-digit hint and cannot be written to, and `subText` belongs to the docstring.
+    chooser.setChoices(commands().map((command) => {
+        const chords = keyLabels(command.name)
+        const row = {
+            text: chords.length ? `${command.name}   ${chords.join("  ")}` : command.name,
+            // `text` carries the chord too, so the name is kept here for onSelect.
+            command: command.name
+        }
+        // An empty subText still draws its line, leaving the name off centre in the row.
+        if (command.doc) row.subText = command.doc
+        return row
+    }))
     chooser.onSelect = (item) => {
         activeChooser = null
 
@@ -795,7 +804,7 @@ function execute() {
         // prompts in turn keeps it above zero and observers see one prompt throughout.
         const run = () => {
             try {
-                callInteractively(item.text, { snapshot: snap })
+                callInteractively(item.command, { snapshot: snap })
             } finally {
                 promptClosed()
             }
@@ -803,7 +812,7 @@ function execute() {
 
         // From here, or from a timer once this chooser has closed, as the command asked.
         // See the runDelay option on define().
-        const chosen = registry.get(item.text)
+        const chosen = registry.get(item.command)
         const after = chosen ? chosen.runDelay : 0
 
         if (after > 0) {
@@ -903,6 +912,55 @@ function unsetKey(chord) {
     binding.hotkey.destroy()
     keymap.delete(chord)
     return true
+}
+
+// MARK: - Showing a chord
+//
+// A chord is written as its modifier words — "cmd-ctrl-alt left" — because that is what
+// hs.hotkey takes and what a configuration reads best. On screen the symbols are shorter
+// and are what the key caps and every macOS menu say, so a binding is displayed as
+// "⌃⌥⌘←" rather than repeated as written.
+
+// In the order macOS writes them, which is not the order a chord is usually typed in.
+const MODIFIER_SYMBOLS = {
+    ctrl: "⌃", control: "⌃", "⌃": "⌃",
+    alt: "⌥", option: "⌥", "⌥": "⌥",
+    shift: "⇧", "⇧": "⇧",
+    cmd: "⌘", command: "⌘", "⌘": "⌘"
+}
+const MODIFIER_ORDER = ["⌃", "⌥", "⇧", "⌘"]
+
+// Only keys whose name is longer than the symbol everyone knows them by. Anything else —
+// "f5", "home", "tab" — reads better spelled out than abbreviated.
+const KEY_SYMBOLS = {
+    left: "←", right: "→", up: "↑", down: "↓",
+    return: "⏎", enter: "⌤", escape: "⎋", esc: "⎋",
+    delete: "⌫", forwarddelete: "⌦", space: "␣"
+}
+
+/**
+ * Render a binding as the symbols macOS shows for it.
+ *
+ * @param {object} binding A keymap record, with `mods` and `key`.
+ * @returns {string} e.g. "⌃⌥⌘←". Unknown modifiers are left as written.
+ */
+function keyLabel(binding) {
+    const symbols = binding.mods.map((mod) => MODIFIER_SYMBOLS[mod.toLowerCase()] || mod)
+    symbols.sort((a, b) => MODIFIER_ORDER.indexOf(a) - MODIFIER_ORDER.indexOf(b))
+
+    const key = String(binding.key)
+    const named = KEY_SYMBOLS[key.toLowerCase()]
+    return symbols.join("") + (named || (key.length === 1 ? key.toUpperCase() : key))
+}
+
+/**
+ * Every binding of a command, as the symbols macOS shows for it.
+ *
+ * @param {string} name The command name.
+ * @returns {string[]} One label per chord bound to it, empty if it has none.
+ */
+function keyLabels(name) {
+    return [...keymap.values()].filter((b) => b.command === name).map(keyLabel)
 }
 
 /** Every chord bound to a command name. */
@@ -1197,6 +1255,8 @@ module.exports = {
     setKeys,
     unsetKey,
     whereIs,
+    keyLabel,
+    keyLabels,
     describeKey,
     bindings,
     init,

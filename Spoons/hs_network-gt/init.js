@@ -75,6 +75,11 @@ const config = {
 
 // MARK: - State
 
+// The hs.wifi events that mean the connection may have changed under us. The same listener
+// is registered for each: it re-reads the interface rather than trusting anything the
+// event carries, so which of them fired makes no difference.
+const WIFI_EVENTS = ["ssidChange", "powerChange"]
+
 // Loaded from config.stateFile: {ssids, alerts_paused, tracking_paused}. The key names
 // are the v1 Spoon's; "ssids" is keyed by network name, which is an SSID when one can be
 // read and "iface:en0" when it cannot.
@@ -91,7 +96,9 @@ let thresholds = {}
 let menubarItem = null
 let pollTimer = null
 let bannerTimer = null
-let wifiWatcher = null
+// Registered for each of WIFI_EVENTS. Held, because hs.wifi.off() matches on function
+// identity.
+let wifiListener = null
 let bannerCanvas = null
 let bannerHideTimer = null
 
@@ -940,11 +947,9 @@ function start() {
         bannerTimer = hs.timer.doEvery(config.bannerInterval, () => networkNameShow())
     }
 
-    if (!wifiWatcher) {
-        wifiWatcher = hs.wifi.addWatcher()
-        wifiWatcher.events = ["ssidChange", "powerChange"]
-        wifiWatcher.setCallback(() => onWifiChange())
-        wifiWatcher.start()
+    if (!wifiListener) {
+        wifiListener = () => onWifiChange()
+        for (const event of WIFI_EVENTS) hs.wifi.on(event, wifiListener)
     }
 
     poll()
@@ -961,9 +966,9 @@ function stop() {
         bannerTimer.stop()
         bannerTimer = null
     }
-    if (wifiWatcher) {
-        wifiWatcher.destroy()
-        wifiWatcher = null
+    if (wifiListener) {
+        for (const event of WIFI_EVENTS) hs.wifi.off(event, wifiListener)
+        wifiListener = null
     }
     if (menubarItem) {
         menubarItem.destroy()

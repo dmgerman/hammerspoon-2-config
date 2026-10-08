@@ -1,6 +1,23 @@
 # Rendered button tiles and encoded icons, written by hs_menu-gt. Regenerated on demand.
 .cache/
 
+# Clipboard history, written by hs_clipboard-gt. Whatever has been copied on this machine,
+# so not something to put in a repository at all.
+clipboard/
+
+# Runtime logs.
+logs/
+
+# Working notes and settings for AI assistants. Local to this machine: drafts that are not
+# finished, and nothing the configuration needs in order to run.
+ai/
+.claude/
+
+# npm packages, and the single-file bundles bundle.js builds from them. Both are products
+# of `npm install` and `npm run bundle`; package.json records what to rebuild from.
+node_modules/
+lib/
+
 # Emacs backups
 *~
 \#*\#

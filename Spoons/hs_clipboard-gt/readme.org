@@ -222,7 +222,7 @@ password-like left in it is removed even if nothing is copied afterwards.
 
 * Differences from the Hammerspoon 1 Spoon
 
-- Changes arrive through =hs.pasteboard.addWatcher= rather than a timer of the Spoon's
+- Changes arrive through =hs.pasteboard.on("change")= rather than a timer of the Spoon's
   own.
 - The history is a JSON file under =logs/=, not an entry in the application defaults.
 - Images are not stored. The v1 Spoon kept them URL-encoded in the same list.

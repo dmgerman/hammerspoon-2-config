@@ -296,6 +296,6 @@ Recorded so they are not investigated twice.
 | File attributes, including size       | =hs.fs.attributes=                               |
 | Accessibility text of a focused field | =hs.ax.focusedElement().attributeValue("AXValue")= |
 | Pasteboard, and detecting a change    | =writeString=, =readString=, =changeCount=       |
-| Screen lock and unlock                | =hs.power.addEventWatcher=                       |
+| Screen lock and unlock                | =hs.power.on("screensDidLock")=                  |
 | Menu bar items                        | =hs.menubar.create=                              |
 | Stream Deck                           | =hs.streamdeck=, images, brightness, callbacks   |

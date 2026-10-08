@@ -19,7 +19,7 @@
 // UUIDs, hashes and filenames are not masked.
 //
 // Four departures from the v1 Spoon:
-//   * Changes arrive through hs.pasteboard.addWatcher rather than a timer of the Spoon's
+//   * Changes arrive through hs.pasteboard.on("change") rather than a timer of the Spoon's
 //     own, so config.watchInterval sets the interval of the shared pasteboard watcher.
 //   * The history is a JSON file under logs/, not an entry in the application defaults.
 //   * Images are not stored. v1 kept them URL-encoded in the same list.
@@ -912,7 +912,7 @@ function start() {
 
     hs.pasteboard.watcherInterval = config.watchInterval
     watcher = () => pasteboardCapture()
-    hs.pasteboard.addWatcher(watcher)
+    hs.pasteboard.on("change", watcher)
 
     if (config.menubarShow) {
         menubarItem = hs.menubar.create(false)
@@ -927,7 +927,7 @@ function stop() {
     previewPollStop()
     previewHide()
     if (watcher) {
-        hs.pasteboard.removeWatcher(watcher)
+        hs.pasteboard.off("change", watcher)
         watcher = null
     }
     if (chooser) {
