@@ -169,7 +169,11 @@ function openInBrowser(url, role) {
         console.error(`[hs_url-gt] no browser resolved for '${role}', cannot open ${url}`)
         return
     }
-    hs.application.launchOrFocus(bundleID)
+    // setFrontmost() while the browser is running raises only its main window, so a browser
+    // with several windows open does not put all of them in front. launchOrFocus starts it.
+    const app = hs.application.matchingBundleID(bundleID)
+    if (app) app.setFrontmost(false)
+    else hs.application.launchOrFocus(bundleID)
     hs.urlevent.openURLWithBundle(url, bundleID)
 }
 

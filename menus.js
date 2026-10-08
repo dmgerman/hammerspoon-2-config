@@ -158,8 +158,8 @@ function windowSwitcherMenu() {
             imageProvider: () => ({
                 icon: state.bundleID ? "bundle:" + state.bundleID : "symbol:macwindow"
             }),
-            // Through the Spoon: window.focus() alone does not bring the application
-            // forward when Hammerspoon is not frontmost, which it is not here.
+            // Through the Spoon, which adds the raise() that focus() alone does not do
+            // when the window being asked for is in another space.
             fn: () => hs.spoons["hs_window-gt"].focusWindow(window)
         }))
 }

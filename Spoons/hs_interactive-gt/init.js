@@ -183,11 +183,11 @@ function ask(options) {
     // application's panel accept keys. Dialogs getting the same treatment upstream would
     // make this unnecessary.
     //
-    // launchOrFocus rather than activate: an application that is not frontmost may not
-    // activate another, and that includes activating itself from a background context.
-    // launchOrFocus goes through NSWorkspace, which is not restricted.
+    // launchOrFocus for Hammerspoon itself: the prompt window does not exist yet, so there
+    // is nothing for setFrontmost to bring forward as the main window. Restoring afterwards
+    // does use setFrontmost, which leaves the restored application's other windows alone.
     const previous = hs.application.frontmost()
-    const restoreTo = previous && previous.bundleID !== OWN_BUNDLE_ID ? previous.bundleID : null
+    const restoreTo = previous && previous.bundleID !== OWN_BUNDLE_ID ? previous : null
     hs.application.launchOrFocus(OWN_BUNDLE_ID)
 
     promptOpened()
@@ -203,7 +203,7 @@ function ask(options) {
     } finally {
         // show() is modal, so the prompt is gone by the time it returns.
         promptClosed()
-        if (restoreTo) hs.application.launchOrFocus(restoreTo)
+        if (restoreTo) restoreTo.setFrontmost(false)
     }
 
     return result

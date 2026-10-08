@@ -268,9 +268,16 @@ function describe(tab) {
 
 // MARK: - Switching
 
-/** Bring kitty forward. Not activate(): an application that is not frontmost cannot. */
+/**
+ * Bring kitty forward, starting it if it is not running.
+ *
+ * setFrontmost() while it is running, so that only kitty's main OS window is raised and its
+ * other windows keep their place. launchOrFocus would bring all of them forward.
+ */
 function focusApp() {
-    hs.application.launchOrFocus(KITTY_BUNDLE_ID)
+    const app = hs.application.matchingBundleID(KITTY_BUNDLE_ID)
+    if (app) app.setFrontmost(false)
+    else hs.application.launchOrFocus(KITTY_BUNDLE_ID)
     return true
 }
 

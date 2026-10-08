@@ -144,16 +144,22 @@ function waitForFrontmost(seconds) {
 /**
  * Bring Emacs forward.
  *
- * Not app.activate(): macOS does not let an application that is not frontmost activate
- * another one, and Hammerspoon never is at the moment a key is pressed. launchOrFocus goes
- * through NSWorkspace, which is not restricted.
+ * setFrontmost() rather than launchOrFocus() when Emacs is already running: it raises only
+ * Emacs's main window, leaving its other frames where they are, where launchOrFocus brings
+ * all of them in front of everything else. It works from a key press, where Hammerspoon is
+ * not the frontmost application, which app.activate() did not until Hammerspoon 2 issue
+ * #228 was fixed.
+ *
+ * launchOrFocus() remains the way to start Emacs when it is not running.
  *
  * @returns {Promise} Resolves to whether Emacs is frontmost.
  */
 function focus() {
     if (isFrontmost()) return Promise.resolve(true)
 
-    hs.application.launchOrFocus(config.bundleID)
+    const app = hs.application.matchingBundleID(config.bundleID)
+    if (app) app.setFrontmost(false)
+    else hs.application.launchOrFocus(config.bundleID)
     return waitForFrontmost()
 }
 
@@ -552,21 +558,15 @@ function endEditing(id, everything) {
         return Promise.resolve(false)
     }
 
-    // Raising the application and focusing the window are separate steps: macOS does not
-    // let an application that is not frontmost activate another one, so window.focus()
-    // alone reports success while the application stays behind. launchOrFocus raises it;
-    // focus() then picks the right window within it.
-    const application = window.application
-    if (application && application.bundleID) hs.application.launchOrFocus(application.bundleID)
-
+    // window.focus() brings the application forward with this window raised, and nothing
+    // else of the application's. The delay before typing is still needed: the keystrokes go
+    // to whatever is frontmost when they are sent, and the activation is not instant.
     return new Promise((resolve) => {
+        window.focus()
         later(config.editing.focusDelay, () => {
-            window.focus()
-            later(config.editing.focusDelay, () => {
-                if (everything) hs.eventtap.keyStroke(["cmd"], "a")
-                hs.eventtap.keyStroke(["cmd"], "v")
-                resolve(true)
-            })
+            if (everything) hs.eventtap.keyStroke(["cmd"], "a")
+            hs.eventtap.keyStroke(["cmd"], "v")
+            resolve(true)
         })
     })
 }

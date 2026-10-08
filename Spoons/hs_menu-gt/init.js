@@ -748,12 +748,11 @@ function activateApp(bundleID, hideIfActive) {
         return
     }
 
-    // Not app.activate(): NSRunningApplication.activate() is subject to macOS cooperative
-    // activation and does nothing when the calling application is not frontmost, which
-    // Hammerspoon never is at the moment a key or a Stream Deck button is pressed. It
-    // fails silently. launchOrFocus goes through NSWorkspace.openApplication, which is not
-    // restricted, and starts the application when it is not already running.
-    hs.application.launchOrFocus(bundleID)
+    // setFrontmost() when it is running: it raises only the application's main window,
+    // leaving its other windows where they are. launchOrFocus would bring all of them
+    // forward, and is what starts the application when it is not running.
+    if (app) app.setFrontmost(false)
+    else hs.application.launchOrFocus(bundleID)
 }
 
 // MARK: - Sessions

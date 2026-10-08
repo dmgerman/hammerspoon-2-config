@@ -29,7 +29,6 @@ port fails. /Unexplained/ means the cause has not been established.
 | One Spoon directory, no search path            | Missing     | No       | No                  |
 | Command line client has no =-c=                 | Missing     | No       | Yes, standard input |
 | =hs.window= frame helpers raise a TypeError     | Defect      | Yes      | Yes, set =frame=    |
-| Activation refused unless frontmost            | Changed     | Yes      | Yes                 |
 | =hs.ui= windows cannot be changed once shown    | Changed     | Partly   | Partly              |
 | =hs.task= promises sometimes never resolve      | Unexplained | Yes      | Yes, watch a file   |
 
@@ -161,31 +160,6 @@ over that property — what =hs.window.grid= would have provided.
 =frame=. The second is a four-line change to =hs.window.js=.
 
 * Behaviour that changed
-
-** An application cannot be activated unless Hammerspoon is frontmost
-
-=HSApplication.activate()= calls =NSRunningApplication.activate(options:)=, which macOS
-refuses when the calling application is not frontmost — which Hammerspoon never is at the
-moment a hotkey or a Stream Deck button is pressed. It fails silently: no error, no log,
-nothing happens.
-
-=HSWindow.focus()= has the same limitation in a more misleading form. It returns =true=,
-and the window is raised within its own application, but the application stays behind.
-
-: app.activate()      → Emacs does not come forward
-: app.activate(true)  → Emacs does not come forward
-: launchOrFocus(id)   → Emacs frontmost
-
-*Workaround*: =hs.application.launchOrFocus(bundleID)=, which goes through
-=NSWorkspace.openApplication= and is not restricted. To focus a particular window, raise
-the application first and then call =window.focus()=; that combination was verified to put
-the right window of the right application in front.
-
-The version 1 Emacs Spoon already used =launchOrFocusByBundleID= for this reason, with a
-comment explaining it, so the constraint predates Hammerspoon 2.
-
-*Wanted*: either =activate()= using the same mechanism, or documentation saying it cannot
-work from a background application. A silent failure is the worst of the three.
 
 ** The client evaluates one statement
 

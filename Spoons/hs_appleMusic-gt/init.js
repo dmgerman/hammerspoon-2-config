@@ -929,9 +929,16 @@ function toggleAutoPlay() {
 
 // MARK: - Lifecycle
 
-/** Bring Music forward, launching it if it is not running. */
+/**
+ * Bring Music forward, launching it if it is not running.
+ *
+ * setFrontmost() while it is running, so that only Music's main window is raised and its
+ * other windows, the MiniPlayer among them, keep their place.
+ */
 function focus() {
-    hs.application.launchOrFocus(MUSIC_BUNDLE_ID)
+    const app = hs.application.matchingBundleID(MUSIC_BUNDLE_ID)
+    if (app) app.setFrontmost(false)
+    else hs.application.launchOrFocus(MUSIC_BUNDLE_ID)
     return module.exports
 }
 

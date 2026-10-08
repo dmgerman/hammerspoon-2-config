@@ -101,6 +101,12 @@ let pendingSnapshots = new Set()   // window ids whose snapshot has been asked f
 // chooser closes.
 let sessionWindows = new Map()
 
+// Only reached when hs_window-gt is not loaded; it owns the same delay as a config setting.
+// See focusWindowById, and focusWindow() in hs_window-gt for the measurements.
+const FOCUS_REASSERT_DELAY = 0.3
+let reassertTimer = null
+let reassertFor = null
+
 // The last few openings, kept so a slow one can be looked at afterwards. The console has no
 // history that can be read back, and a message that has scrolled away is no use when the
 // thing being investigated happens once in five times.
@@ -642,8 +648,7 @@ function finishChoosing() {
 /**
  * Focus a window by id, bringing its application forward.
  *
- * Through hs_window-gt when it is loaded, because window.focus() alone does not raise the
- * application when Hammerspoon is not frontmost, which it is not here.
+ * Through hs_window-gt when it is loaded, so that both Spoons focus windows the same way.
  */
 function focusWindowById(id) {
     // From the chooser's own list when one is open, so that choosing a window does not pay
@@ -654,25 +659,26 @@ function focusWindowById(id) {
     const helper = hs.spoons ? hs.spoons["hs_window-gt"] : null
     if (helper && typeof helper.focusWindow === "function") return helper.focusWindow(window)
 
-    // Bring the application forward first, then focus the window. Activating afterwards
-    // makes macOS focus whichever window it considers main — the one on the screen in use
-    // — which discards the focus. AXFrontmost rather than launchOrFocus, which raises every
-    // window the application has. See focusWindow() in hs_window-gt, which this mirrors.
-    try {
-        const application = window.application
-        const element = application ? application.axElement() : null
-        if (element && typeof element.setAttributeValueValue === "function") {
-            element.setAttributeValueValue("AXFrontmost", true)
-        }
-    } catch (e) {
-        log(`could not set AXFrontmost: ${e}`)
-    }
-
-    window.focus()
+    // window.focus() makes the window main and brings its application forward with only
+    // that window raised, which is what Hammerspoon 2 issue #228 added.
+    const accepted = window.focus()
     // raise() as well: focus() alone will not leave a full screen space for another window
     // of the same application. See focusWindow() in hs_window-gt.
     window.raise()
-    return true
+
+    // And again once the application has answered the activation, because until then it can
+    // pick its own main window — the one on the screen in use rather than the one asked for.
+    // Held in a variable: a timer with no reference left is collected before it fires.
+    reassertFor = window.id
+    reassertTimer = hs.timer.doAfter(FOCUS_REASSERT_DELAY, () => {
+        reassertTimer = null
+        if (reassertFor !== window.id) return
+        reassertFor = null
+        window.becomeMain()
+        window.raise()
+    })
+
+    return accepted
 }
 
 // MARK: - Public API
@@ -737,9 +743,8 @@ function selectApplicationByBundle(bundleID) {
     const theirs = ordered.filter((record) => record.state.bundleID === bundleID)
 
     if (!theirs.length) {
-        // Nothing tracked for it. launchOrFocus starts it or brings it forward, and goes
-        // through NSWorkspace, which is not subject to the restriction that stops an
-        // application that is not frontmost activating another.
+        // Nothing tracked for it, so it may not be running at all. launchOrFocus starts it
+        // or brings it forward; there is no window here to focus.
         hs.application.launchOrFocus(bundleID)
         return true
     }

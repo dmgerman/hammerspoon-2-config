@@ -79,7 +79,12 @@ const config = {
     // Reapplying a size after moving a window to another screen: how many attempts, and
     // how long to wait between them. See setFrameOnScreen for why one is not enough.
     resizeAttempts: 5,
-    resizeDelay: 0.05
+    resizeDelay: 0.05,
+
+    // Seconds after focusing a window before asserting again that it is its application's
+    // main window. See focusWindow() for the measurements. 0 switches the second assertion
+    // off, which loses windows on a screen other than the one in use.
+    focusReassertDelay: 0.3
 }
 
 // MARK: - State
@@ -129,6 +134,10 @@ let forgetTimer = null
 let currentFocusedId = null
 let previousFocusedId = null
 let focusWatcher = null
+
+// The window focusWindow() will assert as main again when its delay runs out. Replaced by
+// each call, so an older assertion cannot undo a newer window choice.
+let focusReassertFor = null
 
 // MARK: - Helpers
 
@@ -202,24 +211,39 @@ function focused() {
 /**
  * Focus a window and bring its application forward.
  *
- * Not window.focus() alone. That sets the window as its application's focused one and then
- * calls NSRunningApplication.activate(), which macOS ignores when the calling application
- * is not frontmost — and Hammerspoon never is at the moment a hotkey fires. It fails
- * silently, reporting success while nothing moves. hs.application.launchOrFocus() goes
- * through NSWorkspace.openApplication, which is not restricted, and is what hs_menu-gt
- * uses for the same reason.
+ * window.focus() does most of the job since Hammerspoon 2 issue #228 was fixed: it makes the
+ * window its application's main window and then brings the application to the front with
+ * only that window raised, so the application's other windows keep their place. It also
+ * returns whether that worked, where before it returned true even when nothing moved.
  *
- * The window is focused first so that the application comes forward with the right window
- * already selected.
- *
- * window.raise() is then needed for the case of two windows of one application in different
+ * window.raise() is still needed for the case of two windows of one application in different
  * spaces, one of them full screen. Full screen puts a window in a space of its own, and the
  * only thing that makes macOS leave a space is an application coming forward. When the
  * window being left and the window being asked for belong to the same application, that
- * application is already frontmost, so neither activate() nor launchOrFocus() moves
- * anything, and setting AXFocused on a window in another space does not either: focus()
- * returns true, hs.window.focusedWindow() reports the new window, and the screen still shows
- * the old one. AXRaise does cross the space boundary, which is what raise() performs.
+ * application is already frontmost, so the activation moves nothing, and setting AXMain on a
+ * window in another space does not either: focus() returns true, hs.window.focusedWindow()
+ * reports the new window, and the screen still shows the old one. AXRaise does cross the
+ * space boundary, which is what raise() performs.
+ *
+ * The assertion at focusReassertDelay is needed because the application answers the
+ * activation after focus() has returned, and can choose its own main window when it does —
+ * the window on the screen in use rather than the one that was asked for.
+ *
+ * Measured on 2026-10-08, asking for a Chrome window on the external screen while the
+ * keyboard focus was on the built-in display, four trials each, reading
+ * hs.window.focusedWindow() 1.2s afterwards:
+ *
+ *   focus() + raise()                                     0/4 and 3/4 in two runs
+ *   focus() + raise(), becomeMain() + raise() at 0.3s      4/4 and 4/4
+ *   AXFrontmost + focus() + raise(), as before #228        0/4
+ *
+ * The misses put a different window of the right application in front. The variance between
+ * the two runs of the first row is why the second assertion is unconditional rather than
+ * applied only when the first is seen to have failed.
+ *
+ * Upstream does the same thing for Finder windows inside focus() itself, on the same 0.3s,
+ * and cancels a pending retry when a newer window is asked for. This does both for every
+ * application, because Chrome needs it too. See ai/issue_unfiled_focus-main-window-race.md.
  *
  * @param {object} window The window to focus.
  * @returns {boolean} Whether the window accepted focus.
@@ -227,9 +251,9 @@ function focused() {
 function focusWindow(window) {
     if (!window) return false
 
-    // Each step is timed separately when something has set the hook. All of them go through
-    // accessibility and all of them block the main thread, so which one is slow depends on
-    // how quickly the target application answers.
+    // Each step is timed separately when something has set the hook. Both go through
+    // accessibility and both block the main thread, so which one is slow depends on how
+    // quickly the target application answers.
     const watcher = globalThis.__probeSlowCall
     const step = (label, fn) => {
         if (!watcher) return fn()
@@ -241,55 +265,22 @@ function focusWindow(window) {
         }
     }
 
-    // The application is brought forward first, and the window focused after.
-    //
-    // The other way round does not work across screens. Activating an application makes
-    // macOS focus whichever of its windows it considers main, which is the one on the
-    // screen in use, and that discards a focus applied a moment earlier. Asking for a
-    // Chrome window on a second monitor while working on the first gave the Chrome window
-    // on the first: the focus was applied and then overridden by the activation.
-    step("frontmost", () => frontmostSet(window))
     const accepted = step("focus", () => window.focus())
     step("raise", () => window.raise())
-    return accepted
-}
 
-/**
- * Bring a window's application forward without disturbing its other windows.
- *
- * Setting AXFrontmost on the application element, rather than calling
- * hs.application.launchOrFocus().
- *
- * window.focus() sets AXFocused on the window and then calls activate() on the application,
- * but that activation is refused: macOS does not let an application which is not frontmost
- * activate another, and Hammerspoon is not frontmost when a key is pressed. Measured —
- * focus() returns true and the target application stays where it is.
- *
- * launchOrFocus() does bring it forward, because NSWorkspace.openApplication is not subject
- * to that restriction, but it raises every window the application has: selecting one window
- * of an editor with six open brought all six in front of everything else.
- *
- * Setting AXFrontmost activates the application and leaves its window order alone, so the
- * window that was focused is the one in front. Hammerspoon 1 achieved the same by calling
- * activate() without its allWindows argument.
- *
- * @param {object} window An HSWindow.
- * @returns {boolean} Whether the attribute was set.
- */
-function frontmostSet(window) {
-    try {
-        const application = window.application
-        if (!application) return false
-
-        const element = application.axElement()
-        if (!element || typeof element.setAttributeValueValue !== "function") return false
-
-        element.setAttributeValueValue("AXFrontmost", true)
-        return true
-    } catch (e) {
-        console.error(`[hs_window-gt] could not set AXFrontmost: ${e}`)
-        return false
+    // Dropped if another window is asked for first, so the assertion cannot undo a newer
+    // choice. The timer is held by dmg-libs/timer.js until it fires.
+    if (config.focusReassertDelay > 0) {
+        focusReassertFor = window.id
+        timers.later(config.focusReassertDelay, () => {
+            if (focusReassertFor !== window.id) return
+            focusReassertFor = null
+            window.becomeMain()
+            window.raise()
+        })
     }
+
+    return accepted
 }
 
 /** Whether two frames describe the same rectangle, within a pixel. */

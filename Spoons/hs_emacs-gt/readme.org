@@ -69,10 +69,10 @@ hs.task.runAsync(emacs.config.emacsClient, ["-e", "(buffer-name)"])
 | =focus()=                 | Brings Emacs forward. Resolves to whether it worked.    |
 | =waitForFrontmost(secs)=  | Resolves when Emacs is frontmost, or when time runs out. |
 
-=focus()= uses =hs.application.launchOrFocus= rather than =activate()=. macOS does not let
-an application that is not frontmost activate another one, and Hammerspoon never is at the
-moment a key is pressed; =activate()= fails silently there, while =launchOrFocus= goes
-through =NSWorkspace= and is not restricted.
+=focus()= uses =app.setFrontmost()= when Emacs is already running, which raises only
+Emacs's main window and leaves its other frames where they are. =launchOrFocus= would bring
+all of them in front of everything else, and is kept only for starting Emacs when it is not
+running.
 
 =waitForFrontmost= polls every =config.focusPollInterval= up to =config.focusTimeout=. The
 Hammerspoon 1 version used a busy-wait, which stopped everything else in Hammerspoon,
@@ -180,10 +180,9 @@ looks like Hammerspoon being down. Reinstall it whenever Hammerspoon is updated.
 input, because the Hammerspoon 2 client has no =-c= option. Calls go to
 =hs.spoons["hs_emacs-gt"]= rather than to =spoon.editWithEmacs=.
 
-Pasting back takes two steps rather than one. In Hammerspoon 1, =w:focus()= was enough.
-macOS does not let an application that is not frontmost activate another one, so
-=window.focus()= now reports success while the application stays where it was: the
-application is raised with =launchOrFocus= first, and the window focused within it.
+Pasting back is =window.focus()= followed by a delay of =config.editing.focusDelay= before
+the keystrokes are sent, because the keystrokes go to whatever is frontmost when they are
+sent and the activation is not instant.
 
 ** When an application will not give up its text
 

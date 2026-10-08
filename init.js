@@ -53,6 +53,18 @@ interactive.use("hs_menubar-gt", {
             fn: () => menubar.choose(true)
         });
 
+        // The same list again, right-clicking what is chosen rather than opening it. A third
+        // command rather than a modifier on the first two: hs.chooser's onSelect is given the
+        // chosen row and nothing else, so a secondary selection cannot be told from an
+        // ordinary one. Only the icons are offered, an entry inside a menu having no second
+        // action to ask for.
+        interactive.define({
+            name: "menubar-interactive-secondary",
+            doc: "Choose a macOS menu bar icon and right-click it.",
+            runDelay: 0.05,
+            fn: () => menubar.secondaryChoose()
+        });
+
         // The menu bar holds more than the notch leaves room for, and what does not fit is
         // put somewhere it cannot be seen rather than dropped. This shows that remainder
         // below the menu bar for a few seconds. No runDelay: it draws rather than opening a
@@ -411,8 +423,10 @@ const shell = require(hs.appinfo.configDir + "/dmg-libs/shell.js");
 // Switch to a Chrome tab rather than to Chrome. focusTabChrome.py lists Chrome's tabs,
 // focuses the first whose URL or title contains what was asked for, and opens the address
 // when none does. Chrome is raised afterwards, on a delay so it does not beat the script:
-// focusing a tab selects it within Chrome without bringing Chrome forward, and macOS does
-// not let an application that is not frontmost activate another one.
+// focusing a tab selects it within Chrome without bringing Chrome forward.
+//
+// setFrontmost() rather than launchOrFocus(), so that only the Chrome window holding the
+// tab is raised and Chrome's other windows stay where they are.
 //
 // PATH is set because the script runs under `env python3` and calls terminal-notifier,
 // and Hammerspoon's shell does not read the profile that puts either on PATH.
@@ -428,7 +442,9 @@ const chromeTab = (() => {
 
         // Held: a timer with no reference left is garbage collected before it fires.
         raiseTimer = hs.timer.doAfter(0.4, () => {
-            hs.application.launchOrFocus("com.google.Chrome");
+            const chrome = hs.application.matchingBundleID("com.google.Chrome");
+            if (chrome) chrome.setFrontmost(false);
+            else hs.application.launchOrFocus("com.google.Chrome");
         });
 
         return shell.shellRunLogging("chrome", command);
