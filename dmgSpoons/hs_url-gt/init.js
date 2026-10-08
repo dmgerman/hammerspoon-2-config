@@ -14,6 +14,10 @@
 // Decoders run before either route, since they repair the URL itself rather than decide
 // where it goes.
 
+// Commands go through dmg-libs/shell.js rather than hs.task.shell(), which loses its task
+// to a garbage collection while the child is still running.
+const shell = require(hs.appinfo.configDir + "/dmg-libs/shell.js")
+
 // MARK: - User-configurable settings
 
 const config = {
@@ -155,10 +159,7 @@ function decode(url, sourceApp) {
 
 /** Open a YouTube URL in a Chrome tab, without raising Chrome. */
 function youtube(url) {
-    return hs.task.shell(`${config.chromeCli} open '${forShell(url)}' -i`)
-        .catch((e) => {
-            console.error(`[hs_url-gt] chrome-cli failed for ${url}: ${e && e.stderr ? e.stderr : e}`)
-        })
+    return shell.shellRunLogging("hs_url-gt", `${config.chromeCli} open '${forShell(url)}' -i`)
 }
 
 /** Open a URL in one of the configured browsers, by role name. */

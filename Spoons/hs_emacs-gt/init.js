@@ -16,6 +16,10 @@
 // The elisp this Spoon runs is the caller's: nothing here names a function that is not
 // part of Emacs itself.
 
+// Commands go through dmg-libs/shell.js rather than hs.task.shell(), which loses its task
+// to a garbage collection while the child is still running.
+const shell = require(hs.appinfo.configDir + "/dmg-libs/shell.js")
+
 // MARK: - User-configurable settings
 
 const config = {
@@ -175,17 +179,14 @@ function discoverSocket() {
     const command = `/usr/sbin/lsof -p ${app.pid} 2>&1 | ` +
         `/usr/bin/grep -Eo '/[^[:space:]]*/emacs[0-9]+/[^[:space:]/]+' | /usr/bin/head -1`
 
-    return hs.task.shell(command).then((result) => {
-        const found = result && result.stdout ? String(result.stdout).trim() : ""
+    return shell.shellRun(command).then((result) => {
+        const found = result.out ? String(result.out).trim() : ""
         if (!found) {
             console.error("[hs_emacs-gt] could not find the Emacs server socket")
             return null
         }
         socketPath = found
         return found
-    }).catch(() => {
-        console.error("[hs_emacs-gt] could not find the Emacs server socket")
-        return null
     })
 }
 
@@ -203,12 +204,15 @@ function discoverSocket() {
 function runClient(args, retried) {
     const argv = socketPath ? ["--socket-name=" + socketPath].concat(args) : args.slice()
 
-    return hs.task.runAsync(config.emacsClient, argv).then((result) => ({
-        ok: true,
-        stdout: result && result.stdout ? String(result.stdout) : "",
-        stderr: ""
-    })).catch((failure) => {
-        const stderr = failure && failure.stderr ? String(failure.stderr) : ""
+    // A failure arrives as a non-zero code rather than a rejection, so both outcomes are
+    // handled in the one then(). See dmg-libs/shell.js for why these do not use hs.task
+    // directly.
+    return shell.commandRun(config.emacsClient, argv).then((result) => {
+        if (result.code === 0) {
+            return { ok: true, stdout: String(result.out || ""), stderr: "" }
+        }
+
+        const stderr = String(result.err || "")
 
         if (!retried && stderr.indexOf("can't find socket") !== -1) {
             socketPath = null

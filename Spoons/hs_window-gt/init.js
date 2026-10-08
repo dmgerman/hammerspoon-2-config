@@ -25,6 +25,11 @@
 // positions go on the ring. Undo then returns to where your hand left it, and undo again to
 // where the last command had put it.
 
+// resize()'s retry delay goes through dmg-libs/timer.js, which holds each timer until it
+// fires. An hs.timer.doAfter whose return value is discarded is collected before the
+// deadline.
+const timers = require(hs.appinfo.configDir + "/dmg-libs/timer.js")
+
 // MARK: - User-configurable settings
 
 const config = {
@@ -861,7 +866,7 @@ function sizeApplied(win, rect) {
  */
 function resize(win, rect, attempts) {
     if (attempts <= 0) return
-    hs.timer.doAfter(config.resizeDelay, () => {
+    timers.later(config.resizeDelay, () => {
         try {
             // The advice recorded where the window was put before these corrections ran.
             // Bring that up to date, or the next move reads the difference as one made by
@@ -1244,9 +1249,9 @@ function captureDigit(report) {
  *
  * @param {string|number} key The digit.
  * @param {boolean} [destroyed] True when the window has gone, in which case the watcher is
- *        left alone: its element is invalid by then, and hs.ax.off reports that
- *        as an error on the console rather than returning one. The observer goes with the
- *        element, so there is nothing to release.
+ *        left alone: the observer goes with the element, so there is nothing to release.
+ *        Calling hs.ax.off() for it would be harmless — it returns without doing anything
+ *        when no watcher is registered for that element and notification — but pointless.
  */
 function detachKey(key, destroyed) {
     const digit = String(key)
@@ -1254,12 +1259,8 @@ function detachKey(key, destroyed) {
     if (!entry) return false
 
     if (!destroyed && entry.element && entry.onDestroyed) {
-        try {
-            hs.ax.off(entry.element, hs.ax.notificationTypes.uIElementDestroyed,
-                      entry.onDestroyed)
-        } catch (e) {
-            console.log(`[hs_window-gt] watcher for ${digit} was already gone: ${e && e.message ? e.message : e}`)
-        }
+        hs.ax.off(entry.element, hs.ax.notificationTypes.uIElementDestroyed,
+                  entry.onDestroyed)
     }
 
     entry.hotkey.destroy()
@@ -1372,9 +1373,9 @@ function attachDigit(target, digit) {
     //
     // The press-time check in focusAttached stays as the backstop. This does not fire when
     // an application quits outright rather than closing its windows, and hs.ax.on can fail
-    // to attach at all — it reports a failed registration on the console and returns rather
-    // than throwing, so a failure is not distinguishable here from a successful attach.
-    // Nothing breaks: detachKey's off() call finds no watcher and is a no-op.
+    // to attach at all — it throws when the native registration is refused, which the catch
+    // below reports before clearing onDestroyed. The key stays bound either way, so nothing
+    // breaks: detachKey's off() call finds no watcher and is a no-op.
     const element = target.axElement()
     let onDestroyed = null
     if (element) {

@@ -403,6 +403,11 @@ interactive.use("hs_clipboard-gt", {
 // Stream Deck by hs_streamdeck-gt. Editing menus.js takes effect on the next reload.
 const menus = require(hs.appinfo.configDir + "/menus.js");
 
+// Commands go through dmg-libs/shell.js rather than hs.task.shell(), which loses its task
+// to a garbage collection while the child is still running. See its header for the
+// measurements, and ai/issue_267_task-gc.md for the report, filed upstream as #267.
+const shell = require(hs.appinfo.configDir + "/dmg-libs/shell.js");
+
 // Switch to a Chrome tab rather than to Chrome. focusTabChrome.py lists Chrome's tabs,
 // focuses the first whose URL or title contains what was asked for, and opens the address
 // when none does. Chrome is raised afterwards, on a delay so it does not beat the script:
@@ -426,9 +431,7 @@ const chromeTab = (() => {
             hs.application.launchOrFocus("com.google.Chrome");
         });
 
-        return hs.task.shell(command).catch((e) => {
-            console.error(`[chrome] ${field} ${match} failed: ${e && e.stderr ? e.stderr : e}`);
-        });
+        return shell.shellRunLogging("chrome", command);
     };
 })();
 
@@ -1029,9 +1032,7 @@ interactive.define({
 interactive.define({
     name: "screen-lock",
     doc: "Lock the screen.",
-    fn: () => hs.task.shell("/usr/bin/open -a ScreenSaverEngine").catch((e) => {
-        console.error(`[screen-lock] failed: ${e && e.stderr ? e.stderr : e}`);
-    })
+    fn: () => shell.shellRunLogging("screen-lock", "/usr/bin/open -a ScreenSaverEngine")
 });
 
 // The scroll wheel.
@@ -1070,9 +1071,8 @@ interactive.define({
             return null;
         }
 
-        hs.task.shell(`/usr/bin/open -a ${JSON.stringify(SCROLL_INVERTER_APP)}`).catch((e) => {
-            console.error(`[mouse-direction-toggle] could not start ${SCROLL_INVERTER}: ${e}`);
-        });
+        shell.shellRunLogging("mouse-direction-toggle",
+            `/usr/bin/open -a ${JSON.stringify(SCROLL_INVERTER_APP)}`);
         hs.ui.alert("Mouse wheel: inverted").duration(2).show();
         return true;
     }

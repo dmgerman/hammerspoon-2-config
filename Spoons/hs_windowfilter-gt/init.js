@@ -793,19 +793,11 @@ function forgetWindow(id, destroyed) {
     // Not removed when the window has been destroyed. Its element is invalid by then and
     // there is nothing to remove: the observer goes with the element.
     //
-    // This also avoided a console line per closed window, because hs.ax.off reported the
-    // invalid element as an error on the console rather than returning one.
-    // Upstream attempted to silence that in bb644bd, which this build has; whether it is
-    // gone has not been confirmed, since a destroyed element is needed to provoke it and
-    // this code no longer produces one. Skipping the call is right on its own terms, so it
-    // stays either way.
-    if (!destroyed) {
-        try {
-            hs.ax.off(record.element, WINDOW_NOTIFICATIONS(), record.handler)
-        } catch (e) {
-            log("debug", `watcher for window ${id} was already gone`)
-        }
-    }
+    // The console output this also used to avoid is gone: hs.ax.off() now returns without
+    // calling into Swift when no watcher is registered for that element and notification,
+    // and the Swift paths for a missing watcher or observer log at debug level rather than
+    // as errors. Skipping the call is still right on its own terms, so it stays.
+    if (!destroyed) hs.ax.off(record.element, WINDOW_NOTIFICATIONS(), record.handler)
     tracked.delete(id)
 
     for (const [key, timer] of [...pending]) {
@@ -859,11 +851,7 @@ function forgetApplication(pid) {
     const record = trackedApps.get(pid)
     if (!record) return
 
-    try {
-        hs.ax.off(record.element, APPLICATION_NOTIFICATIONS(), record.handler)
-    } catch (e) {
-        log("debug", `watcher for application ${pid} was already gone`)
-    }
+    hs.ax.off(record.element, APPLICATION_NOTIFICATIONS(), record.handler)
     trackedApps.delete(pid)
 
     for (const [id, window] of [...tracked]) {

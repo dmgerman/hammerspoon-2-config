@@ -947,9 +947,20 @@ function start() {
         bannerTimer = hs.timer.doEvery(config.bannerInterval, () => networkNameShow())
     }
 
+    // Each name is an independent CoreWLAN registration that can be refused, and hs.wifi.on
+    // throws when one is. Caught, because the Spoon is still useful without it: the poll
+    // timer below notices a changed network on its own, a few seconds later than the event
+    // would have. Letting the throw out instead would take the menubar item and the polling
+    // with it, since use() treats a Spoon whose start() throws as failed.
     if (!wifiListener) {
         wifiListener = () => onWifiChange()
-        for (const event of WIFI_EVENTS) hs.wifi.on(event, wifiListener)
+        for (const event of WIFI_EVENTS) {
+            try {
+                hs.wifi.on(event, wifiListener)
+            } catch (e) {
+                console.error(`[hs_network-gt] could not watch wifi ${event}: ${e && e.message ? e.message : e}`)
+            }
+        }
     }
 
     poll()

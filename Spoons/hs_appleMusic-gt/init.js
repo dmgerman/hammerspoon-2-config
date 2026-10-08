@@ -11,6 +11,10 @@
 // album is then chosen by identifier rather than by whichever card came first, which is
 // what kept turning a plain album into its deluxe edition.
 
+// Commands go through dmg-libs/shell.js rather than hs.task.shell(), which loses its task
+// to a garbage collection while the child is still running.
+const shell = require(hs.appinfo.configDir + "/dmg-libs/shell.js")
+
 // MARK: - User-configurable settings
 
 const config = {
@@ -822,11 +826,13 @@ function pressPlayWhenReady(description) {
  */
 function openAlbumURL(url) {
     const musicURL = String(url).replace(/^https?:/i, "music:")
-    return hs.task.shell(`/usr/bin/open ${forShell(musicURL)}`)
-        .catch((e) => {
-            console.error(`[hs_appleMusic-gt] could not open ${musicURL}: ${e}`)
-            alert("Could not open the album in Music")
-        })
+    return shell.shellRun(`/usr/bin/open ${forShell(musicURL)}`).then((result) => {
+        if (result.code === 0) return
+        const detail = (result.err || "").trim()
+        console.error(`[hs_appleMusic-gt] could not open ${musicURL}` +
+            (detail ? `: ${detail}` : ` (exit ${result.code})`))
+        alert("Could not open the album in Music")
+    })
 }
 
 /**
