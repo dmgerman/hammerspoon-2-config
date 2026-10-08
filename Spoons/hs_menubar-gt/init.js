@@ -781,6 +781,128 @@ function press(name) {
     return pressNamedWhenClear(name, false)
 }
 
+// MARK: - Right-clicking
+//
+// Some extras answer a right click with a second, different menu; Caffeine is one. There is no
+// accessibility action for that. Every extra in this menu bar advertises AXPress and nothing
+// else bar the occasional AXCancel, and AXPress carries neither a button nor modifier flags.
+// So the only way to deliver a right click is to post one at the item, which requires the item
+// to be what is drawn at its own position.
+//
+// For the items the strip shows, it is not. An item left of the notch is drawn beneath the
+// frontmost application's own menus, and accessibility hit-tests its centre to that
+// application's AXMenuBar rather than to the item: measured here, Caffeine at 948,7.5 hit pid
+// 1294's menu bar at 0,0 1800x39. A click posted there goes to the menu bar instead.
+//
+// Hammerspoon 1 could address an event to one application, with CGEventPostToPSN
+// (extensions/eventtap/libeventtap_event.m:685). Hammerspoon 2's hs.eventtap posts only to
+// .cghidEventTap (HSEventTapModule.swift:785), so that route does not exist from JavaScript.
+// See ai/issue_unfiled_eventtap-post-to-application.md.
+//
+// The click is the only thing that cannot be delivered, though. The menu itself is readable:
+// Caffeine's item has one AXMenu child holding About Caffeine, Preferences…, Activate for and
+// Quit, each advertising AXPress, and AXPress does not care where the item is drawn. So where
+// the click cannot be posted, the entries inside are offered instead and the chosen one is
+// pressed — which is what chooseWithin() already does for Hammerspoon's own items, and for the
+// same reason.
+//
+// Which menu that is depends on the application. An item whose two menus differ exposes only
+// one of them to accessibility, and there is no way to ask which. So this reaches the entries
+// of the menu the item exposes, not necessarily the ones its right click would have shown.
+
+/** An item's frame as accessibility reports it, or null. */
+function frameOf(item) {
+    try {
+        const frame = item.element.attributeValue("AXFrame")
+        if (!frame) return null
+        return { x: frame.x, y: frame.y, w: frame.w, h: frame.h }
+    } catch (e) {
+        return null
+    }
+}
+
+/**
+ * Whether a click posted at a frame's centre would reach the element that frame belongs to.
+ *
+ * Asked of accessibility rather than worked out from the geometry: what the hit test answers
+ * with is what the click will reach, and the item is reachable only when that answer is the
+ * item itself. Compared by frame, which is the one thing both elements report.
+ */
+function isWhereItIsDrawn(frame) {
+    if (!frame || frame.w <= 0 || frame.h <= 0) return false
+    try {
+        const at = new HSPoint(frame.x + frame.w / 2, frame.y + frame.h / 2)
+        const hit = hs.ax.elementAtPoint(at)
+        if (!hit) return false
+        const there = hit.attributeValue("AXFrame")
+        if (!there) return false
+        return there.x === frame.x && there.y === frame.y &&
+            there.w === frame.w && there.h === frame.h
+    } catch (e) {
+        return false
+    }
+}
+
+/**
+ * Right-click an extra, so that it shows whatever it shows for a secondary click.
+ *
+ * An item that is where it is drawn gets a real right click, which is exactly what a right
+ * click in the menu bar would have been. Every other item — which is every item the strip
+ * shows — has the entries inside it offered instead.
+ *
+ * Hammerspoon's own go straight to the entries: hs.menubar calls a click callback with no
+ * arguments (HSMenuBarItem.swift:166), so a Spoon's item has no secondary click of its own,
+ * and pressOwnExtra() already offers what it has.
+ */
+function itemSecondaryPress(item) {
+    if (!item || !item.element) return false
+    if (item.own) return pressOwnExtra(item)
+
+    const frame = frameOf(item)
+    if (isWhereItIsDrawn(frame)) {
+        try {
+            hs.eventtap.rightClick(frame.x + frame.w / 2, frame.y + frame.h / 2)
+            return true
+        } catch (e) {
+            log(`could not right-click ${item.name}: ${e}`)
+            return false
+        }
+    }
+
+    const at = frame ? `${Math.round(frame.x)},${Math.round(frame.y)}` : "its position"
+    log(`${item.name} is not what is drawn at ${at}, so its entries are offered instead`)
+    return chooseWithin(item)
+}
+
+/** Find an item by name and right-click it, scanning now. */
+function namedSecondaryPress(name) {
+    const item = extras().find((e) => e.name === name || e.alias === name)
+    if (item) return itemSecondaryPress(item)
+
+    log(`${name} was not in the menu bar when the time came to right-click it`)
+    hs.ui.alert(`No menu bar extra named ${name}`).duration(2).show()
+    return false
+}
+
+/**
+ * Right-click by name once whatever is showing has had time to close.
+ *
+ * Same reasoning as pressNamedWhenClear(), and the same timer: only one press is ever in
+ * flight, and the scan happens inside the timer so the position used is the current one.
+ */
+function namedSecondaryPressWhenClear(name) {
+    pressTimer = hs.timer.doAfter(config.pressDelay, () => {
+        pressTimer = null
+        namedSecondaryPress(name)
+    })
+    return true
+}
+
+/** Right-click an extra by name. */
+function secondaryPress(name) {
+    return namedSecondaryPressWhenClear(name)
+}
+
 // MARK: - The chooser
 //
 // This Spoon's own, holding only menu bar extras. Both the icons and the names are here
@@ -795,8 +917,11 @@ function press(name) {
  *        seconds against a tenth of one on this machine — so it is asked for rather than
  *        assumed. Items whose menu is only built when opened are offered on their own
  *        either way.
+ * @param {boolean} [secondary] Right-click what is chosen rather than pressing it; see
+ *        itemSecondaryPress(). Only the items are offered: an entry inside a menu has one
+ *        action and no second one, so there is nothing for a right click to mean.
  */
-function choose(deep) {
+function choose(deep, secondary) {
     const items = extras()
     if (!items.length) {
         hs.ui.alert("No menu bar extras found").duration(2).show()
@@ -806,7 +931,7 @@ function choose(deep) {
     // Items first, then what is inside them. An item whose menu could not be read is still
     // offered on its own: opening it is all that can be done until it has been opened.
     const rows = items.map((item) => ({ kind: "item", item: item }))
-    if (deep === true) {
+    if (deep === true && secondary !== true) {
         for (const entry of entries()) rows.push({ kind: "entry", entry: entry })
     }
 
@@ -823,7 +948,8 @@ function choose(deep) {
     // Spoon here that opens one holds it this way: the clipboard, the window switcher, kitty,
     // and hs_interactive-gt for the command chooser itself. See ai/chooser-collected.md.
     chooser = hs.chooser.create()
-    chooser.placeholder = deep === true ? "Menu bar, everything" : "Menu bar"
+    chooser.placeholder = secondary === true ? "Menu bar, right click"
+        : deep === true ? "Menu bar, everything" : "Menu bar"
     chooser.searchSubText = true       // so the mb- names can be typed
     chooser.visibleRows = config.rowsToDisplay
     chooser.width = config.chooserWidth
@@ -869,12 +995,24 @@ function choose(deep) {
         // clicked, so where it is does not matter, and its name is not stable enough to find
         // it again: the countdown's entry is `-start-25-min` until it is running and `-stop`
         // afterwards.
-        if (row.kind === "item") pressNamedWhenClear(row.item.name, true)
-        else invokeEntryWhenClear(row.entry)
+        if (row.kind !== "item") return invokeEntryWhenClear(row.entry)
+        if (secondary === true) return namedSecondaryPressWhenClear(row.item.name)
+        pressNamedWhenClear(row.item.name, true)
     }
 
     chooser.show()
     return true
+}
+
+/**
+ * Pick something from the menu bar and right-click it.
+ *
+ * The chooser cannot tell a secondary selection from an ordinary one — hs.chooser's onSelect
+ * is given the chosen row and nothing else, no button and no modifier flags — so this is a
+ * second way in rather than a modifier on the first.
+ */
+function secondaryChoose() {
+    return choose(false, true)
 }
 
 // MARK: - The menu
@@ -1246,7 +1384,8 @@ function peek() {
             frame: { x: at, y: 0, w: width, h: config.peekHeight },
             fillColor: { red: 0, green: 0, blue: 0, alpha: 0.01 },
             id: item.name,
-            trackMouseDown: true
+            trackMouseDown: true,
+            trackRightMouseDown: true
         })
 
         at += width + config.peekGap
@@ -1259,10 +1398,14 @@ function peek() {
     // reach a menu bar item, not to switch application.
     canvas.clickActivating(false)
 
+    // A left click presses the item, which opens its menu. A right click asks for whatever the
+    // item shows for a secondary click, and often cannot be delivered at all; see the comment
+    // above itemSecondaryPress().
     canvas.mouseCallback((which, message, id, x, y) => {
-        if (message !== "mouseDown") return
+        if (message !== "mouseDown" && message !== "rightMouseDown") return
         if (!id || id === "_canvas" || id === "_background") return
         peekHide()
+        if (message === "rightMouseDown") return namedSecondaryPressWhenClear(id)
         pressNamedWhenClear(id, true)
     })
 
@@ -1325,8 +1468,10 @@ module.exports = {
     hidden,
     list,
     choose,
+    secondaryChoose,
     menu,
     press,
+    secondaryPress,
     peek,
     peekHide,
     peekToggle,

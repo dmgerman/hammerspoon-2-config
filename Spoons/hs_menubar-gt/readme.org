@@ -197,15 +197,24 @@ null =fn=; one of Hammerspoon's own, taken from the registry, has an =fn= and a 
 Wrap =hs.menubar= so that what each Spoon gives its items is recorded. Called by =start()=,
 and safe to call twice. See "Load this Spoon first".
 
-** choose([deep])
+** choose([deep], [secondary])
 
 Show a chooser and act on what is chosen. With =deep= true, menu entries are offered as
-well as the icons.
+well as the icons. With =secondary= true, what is chosen is right-clicked rather than opened,
+and only the icons are offered; =secondaryChoose()= is the name to call for that.
+
+** secondaryChoose()
+
+The same chooser as =choose()=, right-clicking what is chosen instead of opening it. Only the
+icons are offered: an entry inside a menu has one action and no second one.
 
 ** peek(), peekHide(), peekToggle()
 
 Draw the icons that cannot be seen in a strip below the menu bar, aligned right, for
 =peekSeconds= seconds. Clicking one does what choosing it from the chooser does.
+Right-clicking one asks for its secondary menu; because the click itself cannot reach an icon
+the strip draws, what happens instead is that the entries inside it are offered in the
+chooser. See =secondaryPress()=.
 
 Each is drawn as its own title where it has one. Most of the hidden ones do have a title — a
 countdown, a bandwidth reading, an emoji — and for those the strip shows exactly what the menu
@@ -303,6 +312,61 @@ move about, and one found a fifth of a second earlier may since have slid under 
 neighbour. =press()= returns as soon as the press is scheduled, so =true= means scheduled
 rather than done; a name that no longer matches anything reports so in an alert.
 
+** secondaryPress(name)
+
+Right-click an icon by name, so that it shows whatever it shows for a secondary click. Same
+scheduling as =press()=: it returns once the click is scheduled, and the icon is found again
+at that moment.
+
+An icon that is where it is drawn gets a real right click. Every other icon — which is every
+icon the strip shows — has the entries inside it offered in the chooser instead.
+
+*** Right-clicking an icon
+
+Some icons answer a right click with a second, different menu. Caffeine is one.
+
+Accessibility cannot carry a right click. All 23 icons in this menu bar advertise =AXPress=
+and nothing else bar the occasional =AXCancel=, and =AXPress= has no button number and no
+modifier flags. So the only way to deliver one is to post a click, which is the one thing the
+rest of this Spoon avoids — see "Why nothing is clicked" — and it only works when the icon is
+what is drawn at its own position.
+
+For an icon the strip shows, it is not. An icon left of the notch is drawn beneath the
+frontmost application's own menus, and =hs.ax.elementAtPoint= hit-tests its centre to that
+application's =AXMenuBar=. Measured here, with the seven icons the strip was showing:
+
+| Icon                             | Its frame      | What is drawn there      |
+|----------------------------------+----------------+--------------------------|
+| =mb-caffeine=                    | 948,7.5 32x24  | =AXMenuBar= 0,0 1800x39  |
+| =mb-karabiner-console-user-server= | 911,7.5 31x24 | =AXMenuBar= 0,0 1800x39  |
+| =mb-systemuiserver-2=            | 995,8.5 22x22  | =AXMenuBar= 0,0 1800x39  |
+
+All seven, including the four of Hammerspoon's own. A click posted at any of those positions
+goes to the menu bar. So =secondaryPress()= asks the hit test first, and posts a click only
+when the answer is the icon itself.
+
+The click is the only thing that cannot be delivered, though. The menu is readable. Caffeine's
+icon has one =AXMenu= child, and following its submenu gives twelve entries, each pressable:
+
+: About Caffeine, Preferences..., Activate for > Indefinitely, Activate for > Short (testing),
+: Activate for > 5 minutes ... Activate for > 5 hours, Quit
+
+=AXPress= on one of those does not care where the icon is drawn. So where the click cannot be
+posted, =chooseWithin()= offers these and presses the chosen one — the same thing this Spoon
+already does for Hammerspoon's own icons, and for the same reason. Hammerspoon's own go
+straight there: =hs.menubar= calls a click callback with no arguments, so a Spoon's icon has
+no secondary click to tell apart from an ordinary one.
+
+What this does *not* do is tell the two menus apart. An icon exposes one =AXMenu= to
+accessibility and there is no way to ask which of its menus that is, so what the chooser
+offers is the entries of the menu the icon exposes — for Caffeine that is the right-click menu,
+but that is an observation about Caffeine, not a rule.
+
+Posting a click to an icon wherever it is would need an event addressed to an application
+rather than to a point on the screen. Hammerspoon 1 had that — =hs.eventtap.event:post(app)=
+used =CGEventPostToPSN= — and Hammerspoon 2's =hs.eventtap= posts only to the HID tap.
+Drafted as =ai/issue_unfiled_eventtap-post-to-application.md=.
+
 ** menu()
 
 The icons as =hs_menu-gt= buttons, each with its application's icon.
@@ -351,18 +415,29 @@ mb.config.skipApplications.push("Control Center")
 
 In this configuration, from =init.js=:
 
-| Command                     | Key   | Does                                  |
-|-----------------------------+-------+---------------------------------------|
-| =menubar-interactive=       | ⇧⌃⌘M  | choose an icon and open it            |
-| =menubar-interactive-deep=  | ⇧⌃⌘N  | choose an icon or any entry in a menu |
-| =menubar-peek-toggle=       | ⇧⌃⌘B  | show the icons that cannot be seen    |
+| Command                          | Key   | Does                                  |
+|----------------------------------+-------+---------------------------------------|
+| =menubar-interactive=            | ⇧⌃⌘M  | choose an icon and open it            |
+| =menubar-interactive-deep=       | ⇧⌃⌘N  | choose an icon or any entry in a menu |
+| =menubar-interactive-secondary=  | —     | choose an icon and right-click it     |
+| =menubar-peek=                   | ⇧⌃⌘B  | show the icons that cannot be seen    |
 
-The first two set =runDelay= so they wait for the command chooser to close before opening
-their own; see the =hs_interactive-gt= readme for why. =menubar-peek-toggle= draws rather
-than opening a chooser, so it has nothing to wait for.
+The first three set =runDelay= so they wait for the command chooser to close before opening
+their own; see the =hs_interactive-gt= readme for why. =menubar-peek= draws rather than
+opening a chooser, so it has nothing to wait for.
+
+=menubar-interactive-secondary= has no key: it is a third command rather than a modifier on
+the first because =hs.chooser= cannot tell a secondary selection from an ordinary one — its
+=onSelect= is given the chosen row and nothing else, no button and no modifier flags.
 
 * Known rough edges
 
 An item with no title is drawn as its application's icon rather than the glyph it actually
 shows, because that glyph cannot be read. Where one application owns several untitled items
 they therefore look alike in the strip.
+
+A right click on the strip cannot be delivered as a click. The icons the strip draws are
+covered by the frontmost application's menus, and a right click can only be posted to a
+position, so the entries inside the icon are offered in the chooser instead. For an icon whose
+two menus differ, that is whichever menu the icon exposes to accessibility, which cannot be
+asked about. See =secondaryPress()=.
