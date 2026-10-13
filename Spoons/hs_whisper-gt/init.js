@@ -16,7 +16,7 @@
 //   whisperserver a local whisper.cpp HTTP server, with the model already in memory
 //
 // A recorder or transcriber that does not validate falls back once to a simpler one rather
-// than leaving the Spoon dead, and says so.
+// than leaving the Spoon unusable, and reports that it did so.
 //
 // Two things here are not translations of the Lua:
 //
@@ -143,7 +143,8 @@ const SEVERITY_DURATIONS = {debug: 0, info: 3, warning: 5, error: 10}
 
 // Peak amplitude, 0 to 1, below which the first chunk of a session counts as silence and
 // the session is abandoned rather than transcribed. A working microphone in a quiet room
-// floors around 0.005; one that is muted, off, or denied permission delivers about 0. Only
+// has a noise floor around 0.005; one that is muted, off, or denied permission delivers
+// about 0. Only
 // the first chunk is judged — silence between later phrases is ordinary.
 const SILENCE_PEAK_FLOOR = 0.001
 
@@ -198,7 +199,7 @@ let indicatorCanvas = null
 
 let activityTap = null
 let activityAppListener = null
-let activityCounts = {keys: 0, clicks: 0, appSwitches: 0}
+let activityCounts = {keys: 0, clicks: 0, itemClicks: 0, appSwitches: 0}
 let startingApp = null
 let shouldPaste = false
 let userCallback = null
@@ -346,10 +347,131 @@ function sessionPrefix(lang) {
 
 // MARK: - Menu bar
 
+/**
+ * The menu shown when the menu bar item is right-clicked.
+ *
+ * Built fresh on each opening, so it reports the state it is opened in: what can be done
+ * now, which language and filter are selected, and which backends are actually in use.
+ *
+ * Everything this Spoon can do is reachable here, because a Spoon's commands are otherwise
+ * only reachable from a key or the command chooser, and neither says what exists.
+ *
+ * A left click dictates instead (see menuBarClick()), but the two dictation actions are
+ * entries here as well, so that the menu lists everything.
+ */
+function menuBuild() {
+    const idle = state === STATES.idle
+    const entries = []
+
+    if (state === STATES.recording) {
+        entries.push({title: "Stop and transcribe", fn: () => transcribeEnd()})
+        entries.push({title: "Abort", fn: () => transcribeAbort()})
+    } else if (state === STATES.transcribing) {
+        entries.push({title: "Transcribing…", disabled: true})
+        entries.push({title: "Abort", fn: () => transcribeAbort()})
+    } else {
+        entries.push({title: "Dictate", fn: () => transcribeToggle(true)})
+        entries.push({title: "Dictate to the clipboard", fn: () => transcribeToggle()})
+    }
+
+    entries.push({title: "-"})
+
+    // The language is fixed when a dictation starts, so changing it part way through would
+    // do nothing to the dictation in progress. Shown, but not selectable, while one runs.
+    entries.push({
+        title: `Language: ${languageGet()}`,
+        menu: config.languages.map((lang) => ({
+            title: lang,
+            checked: lang === languageGet(),
+            disabled: !idle,
+            fn: () => languageSet(lang)
+        }))
+    })
+
+    // The filter runs on the assembled text at the end, so changing it during a dictation
+    // does apply to that dictation.
+    const active = filterActive()
+    entries.push({
+        title: `Filter: ${active ? active.name : "none"}`,
+        menu: [
+            {title: "No filter", checked: active === null, fn: () => filterSet(null)}
+        ].concat(config.filters.map((filter, i) => ({
+            title: filter.name,
+            checked: activeFilter === i,
+            fn: () => filterSet(i)
+        })))
+    })
+
+    entries.push({
+        title: "Transcribe a recording again…",
+        disabled: !idle,
+        fn: () => transcribeAgain()
+    })
+
+    entries.push({title: "-"})
+
+    const diagnostics = [
+        {title: "Show diagnostics in the console", fn: () => diagnose()},
+        {title: "Log every step", checked: debugEnabled, fn: () => debugSet(!debugEnabled)},
+        {
+            title: `Forget old recordings (keeping ${config.recordingsKeep || "all"})`,
+            disabled: !config.recordingsKeep,
+            fn: () => {
+                const gone = recordingsPrune()
+                notify("config", "info", `Deleted ${gone} recordings`)
+            }
+        }
+    ]
+    if (recorder && recorder.name === "streaming") {
+        diagnostics.splice(2, 0, {
+            title: "Restart the streaming server",
+            disabled: !idle,
+            fn: () => serverRestart("asked to from the menu")
+        })
+    }
+    entries.push({title: "Diagnostics", menu: diagnostics})
+
+    // Which backends are in use, rather than which were asked for: a fallback means those
+    // differ, and this is where that is visible without running a command.
+    entries.push({title: "-"})
+    entries.push({
+        title: starting
+            ? "Checking the recorder and transcriber…"
+            : (recorder && transcriber)
+                ? `Using ${recorder.name} and ${transcriber.name}`
+                : "No working recorder or transcriber",
+        disabled: true
+    })
+
+    return entries
+}
+
+/**
+ * Answer a click on the menu bar item.
+ *
+ * A left click does what the transcribeToggle key does: it starts a dictation into whatever
+ * has focus, or stops the one in progress and transcribes it. Any other button, including
+ * a Ctrl-click, opens the menu. The menu is built when it opens, so it shows the current
+ * state.
+ *
+ * With monitorUserActivity, every click during a recording counts against auto-paste. A
+ * click on this item is not a sign of having moved on, so it is recorded as one of ours
+ * and autoPaste() subtracts it. This assumes the event tap counted the same press before
+ * the activity monitor stopped. If it did not, a single click elsewhere would be cancelled
+ * out by it.
+ */
+function menuBarClick(button) {
+    if (state === STATES.recording) activityCounts.itemClicks += 1
+    if (button === "left") transcribeToggle(true)
+    else menuBar.popUpMenu(menuBuild())
+}
+
 function menuBarEnsure() {
     if (menuBar) return
     menuBar = hs.menubar.create()
-    menuBar.setClickCallback(() => transcribeToggle())
+    // No menu is set: a menu replaces the click callback, and the callback is what tells a
+    // left click from a right one.
+    menuBar.setClickCallback(menuBarClick)
 }
 
 function menuBarSet(title, tooltip) {
@@ -467,7 +589,7 @@ function indicatorHide() {
  * carried a table of them that nothing could ever match.
  */
 function activityMonitorStart() {
-    activityCounts = {keys: 0, clicks: 0, appSwitches: 0}
+    activityCounts = {keys: 0, clicks: 0, itemClicks: 0, appSwitches: 0}
 
     const focused = hs.window.focusedWindow()
     startingApp = focused ? focused.application : null
@@ -514,11 +636,17 @@ function activityMonitorStop() {
     logDebug("activity monitoring stopped")
 }
 
+/** Clicks during the recording, leaving out those on this Spoon's own menu bar item. */
+function activityClicksElsewhere() {
+    return Math.max(0, activityCounts.clicks - activityCounts.itemClicks)
+}
+
 function activitySummary() {
     const parts = []
     const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`
     if (activityCounts.keys > 0) parts.push(plural(activityCounts.keys, "key", "keys"))
-    if (activityCounts.clicks > 0) parts.push(plural(activityCounts.clicks, "click", "clicks"))
+    const clicks = activityClicksElsewhere()
+    if (clicks > 0) parts.push(plural(clicks, "click", "clicks"))
     if (activityCounts.appSwitches > 0) {
         parts.push(plural(activityCounts.appSwitches, "app switch", "app switches"))
     }
@@ -880,7 +1008,7 @@ const transcribers = {
  * Peak amplitude of a WAV file, 0 to 1, or null if it cannot be measured.
  *
  * `sox file -n stat` reports the largest positive and the largest negative sample on
- * stderr; the peak is whichever is further from zero. This is what lets the dead-microphone
+ * stderr; the peak is whichever is further from zero. This is what lets the silent-recording
  * check below apply to the sox recorder: in the Lua version only the streaming recorder
  * reported a peak, so the check — and the recovery runbook written for it — never ran for
  * anyone recording with sox.
@@ -1029,8 +1157,8 @@ const recorders = {
             // Without microphone permission the server does not fail: it blocks inside
             // PortAudio opening the input stream, emits nothing further, and cannot then
             // be stopped by asking or by SIGTERM because its main thread never returns to
-            // Python. Starting it would buy a thirty-second wait and a process to kill,
-            // so say what is wrong instead.
+            // Python. Starting it would mean a thirty-second wait and then a process
+            // that has to be killed, so report what is wrong instead.
             if (!hs.permissions.checkMicrophone()) {
                 return "Hammerspoon 2 has no microphone permission, so the streaming " +
                     "server would hang trying to open the input device. Grant it in " +
@@ -1268,7 +1396,7 @@ const recorders = {
             }
             const pause = () => new Promise((resolve) => timers.later(0.25, resolve))
 
-            // Up to two seconds to go of its own accord, then insist.
+            // Up to two seconds for it to exit on its own, then kill it.
             for (let waited = 0; waited < 8; waited += 1) {
                 if (!(await alive())) {
                     logDebug(`the streaming server (pid ${pid}) stopped when asked`)
@@ -1436,8 +1564,8 @@ function chunkReceived(mine, audioFile, chunkNum, isFinal, peak) {
         `chunk ${chunkNum} (final=${isFinal}, peak=${peak}): ${audioFile}`)
 
     // If the very first chunk is silent then the microphone is not delivering audio, and
-    // going on would mean transcribing nothing while the user keeps talking into a dead
-    // microphone. Later chunks are not judged: a pause between phrases is ordinary.
+    // going on would mean transcribing nothing while the user keeps talking into a
+    // microphone that is delivering no signal. Later chunks are not judged: a pause between phrases is ordinary.
     if (chunkNum === 1 && peak !== null && peak < SILENCE_PEAK_FLOOR) {
         notify("recording", "error", silentAudioExplain(peak))
         transcribeAbort()
@@ -1473,7 +1601,7 @@ function chunkReceived(mine, audioFile, chunkNum, isFinal, peak) {
  * repeat what is about to be pasted or copied anyway. That is known from the first chunk
  * being the final one, not from counting the chunks so far: when chunk 1 comes back, chunk
  * 2 has usually not been recorded yet, so a count would suppress exactly the chunk that
- * most wants showing.
+ * most needs to be shown.
  *
  * @param {object} mine The session the chunk belongs to.
  * @param {number} chunkNum Which chunk, counting from 1.
@@ -1630,7 +1758,7 @@ function pasteKeystroke() {
 function autoPaste(text) {
     if (config.monitorUserActivity) {
         const busy = activityCounts.keys >= config.activityKeyLimit ||
-            activityCounts.clicks >= 1 ||
+            activityClicksElsewhere() >= 1 ||
             activityCounts.appSwitches >= 1
         if (busy) {
             notify("transcription", "warning",

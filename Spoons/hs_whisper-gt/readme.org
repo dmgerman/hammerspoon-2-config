@@ -33,15 +33,45 @@ Install what that needs with =brew install sox whisperkit-cli=.
 puts it on the clipboard instead, to be pasted wherever you want it. Both start and stop the
 same way: press once to begin, press again to transcribe what was said.
 
-A =🎤 (en)= item appears in the menu bar; clicking it starts and stops a recording, as the
-key does. While recording it counts the seconds, and while transcribing it shows =⏳=.
+A =🎤 (en)= item appears in the menu bar. While recording it counts the seconds, and while
+transcribing it shows =⏳=.
+
+* The menu bar item
+
+A left click on it does what the =transcribeToggle= key does. It starts a dictation into
+whatever has focus, and a second left click stops it and types the text. While a dictation
+is being transcribed, a left click only reports that it is busy.
+
+A right click, or a Ctrl-click, opens a menu containing everything the Spoon can do, so
+nothing is reachable only by a keyboard shortcut you have to remember:
+
+- *Dictate* and *Dictate to the clipboard* while idle; *Stop and transcribe* and *Abort*
+  while one is running
+- *Language*, with the current one ticked
+- *Filter*, with the active one ticked and /No filter/ to clear it
+- *Transcribe a recording again…*
+- *Diagnostics*: show the diagnostics, turn detailed logging on, restart the streaming
+  server, forget old recordings
+- a last line naming the recorder and transcriber actually in use, so a fallback is visible
+
+The menu is rebuilt each time it opens, so it shows the current state. Entries that would do
+nothing are greyed out rather than hidden. The language cannot be changed part way through a
+dictation, because it is fixed when the dictation starts. The filter can be changed, and
+applies to the dictation in progress, because it runs on the finished text.
+
+With =config.monitorUserActivity=, a click during a recording normally stops the text from
+being pasted. A click on this menu bar item does not count, so a left click can stop a
+dictation and still have the text pasted.
+
+This needs a Hammerspoon 2 built from 9ea05e03 or later, which is when a menu bar item began
+reporting which button was clicked (issue #272).
 
 ** Microphone permission
 
 Hammerspoon 2 needs microphone permission, in *System Settings → Privacy & Security →
-Microphone*. Without it macOS does not refuse to record: it hands over samples that have
-been replaced with zero, with no error of any kind, and the only symptom is that nothing is
-ever transcribed. So the Spoon checks the permission before it records and says so rather
+Microphone*. Without it macOS does not refuse to record: it returns samples that have been
+replaced with zero, with no error of any kind, and the only symptom is that nothing is ever
+transcribed. So the Spoon checks the permission before it records and says so rather
 than recording silence.
 
 =config.monitorUserActivity= additionally needs *Accessibility*, because it watches for
@@ -119,7 +149,7 @@ it again when the Spoon stops.
 
 ** Falling back
 
-A recorder or transcriber that cannot be used does not leave the Spoon dead. =streaming=
+A recorder or transcriber that cannot be used does not leave the Spoon unusable. =streaming=
 falls back to =sox=, and =whisperkit= and =whisperserver= fall back to =whispercli=. The
 fallback is reported, so it is clear which one is actually in use; =whisper-diagnose= also
 says.
@@ -353,7 +383,7 @@ In order, least invasive first:
    =sounddevice=, through PortAudio — and a physical replug clears it.
 2. =sudo killall corespeechd=, which restarts the speech-recognition daemon.
 3. =sudo killall coreaudiod=, which resets system-wide audio. Every application using audio
-   hiccups, so only if the first two did not help.
+   is interrupted briefly, so only if the first two did not help.
 
 ** The streaming server will not start
 
@@ -416,7 +446,7 @@ Behaviour that deliberately changed, beyond names and the language:
   ="[chunk 3: error - ...]"= in among the words, so the error reached the clipboard and from
   there whatever you pasted into. Now only the chunks that worked are joined, and the loss
   is reported.
-- *The dead-microphone check applies to both recorders.* It needs the peak amplitude, which
+- *The silent-recording check applies to both recorders.* It needs the peak amplitude, which
   only the streaming recorder reported, so with =sox= it never ran at all. The =sox= recorder
   now measures it, and the microphone permission is checked before recording either way.
 - *Recordings are pruned.* Nothing in version 1 ever deleted one, so =tempDir= held every

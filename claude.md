@@ -113,6 +113,49 @@ the link that makes a command findable from its code and its code findable from 
 
 Rename the function and the command together when either changes.
 
+## Writing
+
+Comments, docstrings, readmes, issue drafts and conversation are all held to this.
+
+**No metaphor or figurative framing.** Describe what the code or the system actually does.
+
+**Plain is not the same as abstract.** The failure to watch for is removing a metaphor and
+leaving vagueness behind. An abstraction reads as evasive in a way the metaphor did not, so
+the text gets worse rather than better:
+
+| Figurative                     | Abstract, and worse                                     | Right                                    |
+|--------------------------------|---------------------------------------------------------|------------------------------------------|
+| only one click gets through     | `can be clicked in one way that reaches JavaScript`     | `only a left click reaches the Spoon`    |
+| the chunk that most wants showing | `the chunk whose display is most warranted`           | `the chunk that most needs to be shown`  |
+| every audio application hiccups | `audio clients experience discontinuity`                | `every application using audio is interrupted briefly` |
+
+**One thing per sentence.** Convoluted text is usually a single sentence in which every
+clause qualifies the one before it, often ending in a counterfactual inside a counterfactual
+(`there would be no menu to show if it were`). Split it. When there is more than one reason
+for something, number them:
+
+> A left click to start dictating, with a right click for everything else, would be better.
+> It cannot be built in Hammerspoon 2, for three reasons:
+>
+> 1. A right click on a menu bar item never reaches the Spoon.
+> 2. A left click cannot say which button it was.
+> 3. Attaching a menu replaces the click action instead of adding to it.
+
+**Lead with the fact, then the qualification.** Not the other way round, and not both woven
+together.
+
+**Write full sentences, not notes.** Brevity is not the goal; a human is going to read this.
+Give each sentence its subject and verb rather than compressing it into a label and a colon,
+and spell out what was done rather than leaving the reader to reconstruct it:
+
+| Too compressed | Right |
+|----------------|-------|
+| `Clicked by hand: two left clicks, then one right click. Three clicks produced two callbacks:` | `I then clicked that menu bar item by hand three times: two left clicks, followed by one right click. Those three clicks produced only two callbacks, and both recorded exactly the same thing:` |
+| `Not a defect, but it rules out keeping the callback and adding a menu.` | `This is simply how NSStatusItem works, so I am not reporting it as a defect. It does, however, rule out the obvious alternative, which would have been to keep the click callback and attach a menu alongside it.` |
+
+This matters most in issue drafts and readmes, where the reader has none of the context that
+made the short version legible to whoever wrote it.
+
 ## Common Patterns
 
 ### Hotkey Binding
@@ -280,6 +323,25 @@ is strict and it binds outside contributors:
 So an issue may be drafted here, but it is not ready to file until it has been cut down and
 understood. Check for an existing issue first, and state only what has been verified — do not
 claim a behaviour is a regression from Hammerspoon 1 without having checked Hammerspoon 1.
+
+**Every draft ends with an `## AI disclosure` section.** It is the first requirement in the
+policy, and a draft without one is not ready to file. Name the tool and the model, say what
+the AI actually did, and say that a human reviewed and edited it. The extent has to be
+accurate: if a measurement needed a hand on the mouse or the keyboard, say so, and do not
+claim work that was not done. The format follows the issues already filed from here —
+`issue_267_task-gc.md` and `resolved_issue_258_canvas-right-click.md`:
+
+```markdown
+## AI disclosure
+
+Drafted with Claude Code (Claude Opus 5), which read the `hs.menubar` source for the file and
+line references cited above, set up the click test, and read its results back over `hs.ipc`.
+The three clicks themselves were made by hand. I reviewed and edited this before filing, as
+`AI_POLICY.md` requires.
+```
+
+The body of a draft is written in the voice of whoever files it, so "I" there is the human,
+not the AI. The disclosure is where the AI's part is stated.
 
 ## Development Tips
 

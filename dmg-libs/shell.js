@@ -67,6 +67,86 @@ function commandRun(launchPath, args) {
 }
 
 /**
+ * Run a command, writing `input` to its standard input, and resolve as `commandRun` does.
+ *
+ * For a filter: a command that reads text on stdin and writes the result to stdout. The
+ * input is sent as soon as the task starts and stdin is then closed, which is what makes a
+ * command that reads to end-of-input finish at all.
+ *
+ * @param {string} launchPath The executable.
+ * @param {string[]} args Passed as an argument list.
+ * @param {string} input Written to the command's standard input.
+ * @returns {Promise<{out: string, err: string, code: number}>} Never rejects, as `commandRun`.
+ */
+function commandRunInput(launchPath, args, input) {
+    return new Promise((resolve) => {
+        let out = ""
+        let err = ""
+
+        const task = hs.task.create(launchPath, args || [],
+            (code) => {
+                running.delete(task)
+                resolve({out: out, err: err, code: code})
+            },
+            null,
+            (kind, chunk) => {
+                if (kind === "stdout") out += chunk
+                else if (kind === "stderr") err += chunk
+            })
+
+        if (!task) {
+            resolve({out: "", err: `could not start ${launchPath}`, code: -1})
+            return
+        }
+
+        running.add(task)
+        task.start()
+        task.sendInput(input)
+        task.closeInput()
+    })
+}
+
+/**
+ * Start a long-running command and return it, held until it exits.
+ *
+ * For a command that outlives the call: a server that is sent requests and answers them,
+ * rather than one that is run for an answer. `commandRun` is the wrong shape for that --
+ * it resolves only once the command has exited, which this kind never does until told to.
+ *
+ * The task is held for the same reason as everything else here, and that reason is more
+ * acute for a long-lived one: the longer it runs, the likelier a collection reaches it.
+ *
+ * @param {string} launchPath The executable.
+ * @param {string[]} args Passed as an argument list.
+ * @param {object} [handlers]
+ * @param {function} [handlers.onOutput] Called as `(kind, chunk)` for each piece of output,
+ *   where `kind` is "stdout" or "stderr". Chunks are whatever the pipe delivers, so a
+ *   caller reading lines must join them itself.
+ * @param {function} [handlers.onExit] Called as `(code)` when the command exits.
+ * @returns {?object} The task, for `sendInput`, `terminate` and `isRunning`, or null if it
+ *   could not be started.
+ */
+function commandStart(launchPath, args, handlers) {
+    const options = handlers || {}
+
+    const task = hs.task.create(launchPath, args || [],
+        (code) => {
+            running.delete(task)
+            if (options.onExit) options.onExit(code)
+        },
+        null,
+        (kind, chunk) => {
+            if (options.onOutput) options.onOutput(kind, chunk)
+        })
+
+    if (!task) return null
+
+    running.add(task)
+    task.start()
+    return task
+}
+
+/**
  * Run a shell command, resolving to its output and exit code.
  *
  * The replacement for `hs.task.shell()`. Use `commandRun` instead when the arguments are
@@ -106,6 +186,8 @@ function runningCount() {
 
 module.exports = {
     commandRun: commandRun,
+    commandRunInput: commandRunInput,
+    commandStart: commandStart,
     shellRun: shellRun,
     shellRunLogging: shellRunLogging,
     runningCount: runningCount

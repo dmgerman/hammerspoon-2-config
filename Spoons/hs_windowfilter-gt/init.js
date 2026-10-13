@@ -790,14 +790,22 @@ function forgetWindow(id, destroyed) {
     const record = tracked.get(id)
     if (!record) return
 
-    // Not removed when the window has been destroyed. Its element is invalid by then and
-    // there is nothing to remove: the observer goes with the element.
+    // Removed even when the window has been destroyed. hs.ax holds its watchers in a
+    // dictionary keyed by element and notification name, and nothing removes an entry when
+    // the element it refers to becomes invalid, so a watcher left behind here stays for the
+    // lifetime of the process. Each one holds this handler as a JSValue, which keeps the
+    // closure and the record it captured alive with it.
     //
-    // The console output this also used to avoid is gone: hs.ax.off() now returns without
-    // calling into Swift when no watcher is registered for that element and notification,
-    // and the Swift paths for a missing watcher or observer log at debug level rather than
-    // as errors. Skipping the call is still right on its own terms, so it stays.
-    if (!destroyed) hs.ax.off(record.element, WINDOW_NOTIFICATIONS(), record.handler)
+    // Measured on 2026-10-12, after the app had been running for 49 hours: 20,678 live
+    // HSAXWatcherObject instances against the 260 the 36 tracked windows and 22 tracked
+    // applications account for, in a watchers dictionary of 1,064,960 bytes. The orphans
+    // were pinning 1.8 million strings and 330,000 dictionaries, which was most of the
+    // process's 353 MB footprint.
+    //
+    // Calling off() on a destroyed window's element is safe. hs.ax's _removeWatcher
+    // removes the dictionary entry in a defer, which runs before the AXUIElementGetPid
+    // check that gives up on an invalid element.
+    hs.ax.off(record.element, WINDOW_NOTIFICATIONS(), record.handler)
     tracked.delete(id)
 
     for (const [key, timer] of [...pending]) {
