@@ -197,24 +197,18 @@ null =fn=; one of Hammerspoon's own, taken from the registry, has an =fn= and a 
 Wrap =hs.menubar= so that what each Spoon gives its items is recorded. Called by =start()=,
 and safe to call twice. See "Load this Spoon first".
 
-** choose([deep], [secondary])
+** choose([deep])
 
 Show a chooser and act on what is chosen. With =deep= true, menu entries are offered as
-well as the icons. With =secondary= true, what is chosen is right-clicked rather than opened,
-and only the icons are offered; =secondaryChoose()= is the name to call for that.
-
-** secondaryChoose()
-
-The same chooser as =choose()=, right-clicking what is chosen instead of opening it. Only the
-icons are offered: an entry inside a menu has one action and no second one.
+well as the icons.
 
 ** peek(), peekHide(), peekToggle()
 
 Draw the icons that cannot be seen in a strip below the menu bar, aligned right, for
 =peekSeconds= seconds. Clicking one does what choosing it from the chooser does.
-Right-clicking one asks for its secondary menu; because the click itself cannot reach an icon
-the strip draws, what happens instead is that the entries inside it are offered in the
-chooser. See =secondaryPress()=.
+Right-clicking one asks for its secondary menu. One of Hammerspoon's own gets its right-click
+action. For anyone else's, the click itself cannot reach an icon the strip draws, so the
+entries inside it are offered in the chooser instead. See =secondaryPress()=.
 
 Each is drawn as its own title where it has one. Most of the hidden ones do have a title — a
 countdown, a bandwidth reading, an emoji — and for those the strip shows exactly what the menu
@@ -319,7 +313,8 @@ scheduling as =press()=: it returns once the click is scheduled, and the icon is
 at that moment.
 
 An icon that is where it is drawn gets a real right click. Every other icon — which is every
-icon the strip shows — has the entries inside it offered in the chooser instead.
+icon the strip shows — has the entries inside it offered in the chooser instead. One of
+Hammerspoon's own has its click callback called with ="right"=, wherever it is.
 
 *** Right-clicking an icon
 
@@ -352,10 +347,14 @@ icon has one =AXMenu= child, and following its submenu gives twelve entries, eac
 : Activate for > 5 minutes ... Activate for > 5 hours, Quit
 
 =AXPress= on one of those does not care where the icon is drawn. So where the click cannot be
-posted, =chooseWithin()= offers these and presses the chosen one — the same thing this Spoon
-already does for Hammerspoon's own icons, and for the same reason. Hammerspoon's own go
-straight there: =hs.menubar= calls a click callback with no arguments, so a Spoon's icon has
-no secondary click to tell apart from an ordinary one.
+posted, =chooseWithin()= offers these and presses the chosen one.
+
+Hammerspoon's own icons are not clicked at all, so where they are drawn does not matter. An
+icon with a click callback has that callback called with ="right"=, which is what
+=hs.menubar= passes it for a real right click. A Spoon can therefore give its icon a second
+action, and this reaches it: =hs_whisper-gt= opens its menu on a right click. An icon with a
+menu opens that same menu for either button, so its entries are offered in the chooser, as
+for an ordinary press.
 
 What this does *not* do is tell the two menus apart. An icon exposes one =AXMenu= to
 accessibility and there is no way to ask which of its menus that is, so what the chooser
@@ -419,16 +418,11 @@ In this configuration, from =init.js=:
 |----------------------------------+-------+---------------------------------------|
 | =menubar-interactive=            | ⇧⌃⌘M  | choose an icon and open it            |
 | =menubar-interactive-deep=       | ⇧⌃⌘N  | choose an icon or any entry in a menu |
-| =menubar-interactive-secondary=  | —     | choose an icon and right-click it     |
 | =menubar-peek=                   | ⇧⌃⌘B  | show the icons that cannot be seen    |
 
-The first three set =runDelay= so they wait for the command chooser to close before opening
+The first two set =runDelay= so they wait for the command chooser to close before opening
 their own; see the =hs_interactive-gt= readme for why. =menubar-peek= draws rather than
 opening a chooser, so it has nothing to wait for.
-
-=menubar-interactive-secondary= has no key: it is a third command rather than a modifier on
-the first because =hs.chooser= cannot tell a secondary selection from an ordinary one — its
-=onSelect= is given the chosen row and nothing else, no button and no modifier flags.
 
 * Known rough edges
 
@@ -436,8 +430,9 @@ An item with no title is drawn as its application's icon rather than the glyph i
 shows, because that glyph cannot be read. Where one application owns several untitled items
 they therefore look alike in the strip.
 
-A right click on the strip cannot be delivered as a click. The icons the strip draws are
-covered by the frontmost application's menus, and a right click can only be posted to a
-position, so the entries inside the icon are offered in the chooser instead. For an icon whose
-two menus differ, that is whichever menu the icon exposes to accessibility, which cannot be
-asked about. See =secondaryPress()=.
+A right click on the strip cannot be delivered as a click to another application's icon. The
+icons the strip draws are covered by the frontmost application's menus, and a right click can
+only be posted to a position, so the entries inside the icon are offered in the chooser
+instead. For an icon whose two menus differ, that is whichever menu the icon exposes to
+accessibility, which cannot be asked about. Hammerspoon's own icons are not affected, because
+their click callback is called directly. See =secondaryPress()=.
