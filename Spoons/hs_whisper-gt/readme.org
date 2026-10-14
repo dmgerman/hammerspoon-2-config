@@ -52,7 +52,11 @@ nothing is reachable only by a keyboard shortcut you have to remember:
 - *Transcribe a recording again…*
 - *Diagnostics*: show the diagnostics, turn detailed logging on, restart the streaming
   server, forget old recordings
-- a last line naming the recorder and transcriber actually in use, so a fallback is visible
+- a line naming the recorder and transcriber actually in use, so a fallback is visible
+- a last line naming the input device being recorded from. When it is not the system
+  default, the line says why: either the default is a Bluetooth headset (see /Which
+  microphone is used, and Bluetooth headsets/), or the default changed during a dictation
+  and the streaming server has not restarted yet
 
 The menu is rebuilt each time it opens, so it shows the current state. Entries that would do
 nothing are greyed out rather than hidden. The language cannot be changed part way through a

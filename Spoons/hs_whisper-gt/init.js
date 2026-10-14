@@ -447,6 +447,9 @@ function menuBuild() {
                 : "No working recorder or transcriber",
         disabled: true
     })
+    if (recorder) {
+        entries.push({title: `Input: ${inputDeviceDescribe()}`, disabled: true})
+    }
 
     return entries
 }
@@ -1641,16 +1644,7 @@ function chunkSettled(mine, chunkNum, isFinal, text) {
  * samples that carry no signal. It is a guess, and says so.
  */
 function silentAudioExplain(peak) {
-    let device = "unknown"
-    const chosen = config.recorder === "streaming"
-        ? recorders.streaming.device
-        : inputDeviceChoose(config.soxAudioInputDevice)
-    if (chosen) {
-        device = chosen
-    } else {
-        const standard = hs.audiodevice.defaultInputDevice()
-        if (standard) device = `${standard.name} (system default)`
-    }
+    const device = inputDeviceDescribe()
 
     const because = peak === 0
         ? "Likely cause: Hammerspoon 2 has not been given microphone permission, or the " +
@@ -1796,6 +1790,34 @@ function autoPaste(text) {
 }
 
 // MARK: - Audio input device changes
+
+/**
+ * The input device the recorder in use records from, as text for the menu and messages.
+ *
+ * For a running streaming server this is the device it was given when it started, because
+ * that is the one it has open. Otherwise it is the device the next recording would use.
+ */
+function inputDeviceDescribe() {
+    const streaming = recorder && recorder.name === "streaming"
+    const configured = streaming
+        ? config.streamingAudioInputDevice
+        : config.soxAudioInputDevice
+    const chosen = streaming && recorders.streaming.task
+        ? recorders.streaming.device
+        : inputDeviceChoose(configured)
+
+    const standard = hs.audiodevice.defaultInputDevice()
+    if (!chosen) return standard ? `${standard.name} (system default)` : "unknown"
+
+    if (configured || !standard || standard.name === chosen) return chosen
+
+    // Say why the default input is not being used, so that it does not look like a mistake.
+    if (standard.transportType === "bluetooth") {
+        return `${chosen} (the default, ${standard.name}, is Bluetooth)`
+    }
+    // The default changed during a dictation, and the server restarts when it ends.
+    return `${chosen} (until the streaming server restarts)`
+}
 
 /**
  * The name of the input device to record from, or null for the system default.
