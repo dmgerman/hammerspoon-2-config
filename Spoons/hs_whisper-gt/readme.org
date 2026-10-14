@@ -92,6 +92,53 @@ Two recorders and three transcribers, each chosen by name.
 
 =sox= needs =brew install sox=.
 
+*** Which microphone is used, and Bluetooth headsets
+
+Both recorders record from the system default input, with one exception: when the default
+input is a Bluetooth headset, such as AirPods, they record from the Mac's built-in
+microphone instead. The headset then only plays sound, and you can keep listening to it while
+you dictate.
+
+This is necessary because a Bluetooth headset cannot play sound well and use its microphone
+at the same time:
+
+1. A headset plays sound using a Bluetooth profile called A2DP. A2DP sends high-quality
+   audio, but only from the Mac to the headset.
+2. Its microphone works only with a second profile, HFP. HFP sends audio in both directions,
+   but at the quality of a telephone call.
+3. The headset uses one profile at a time, and stays on HFP for as long as anything has its
+   microphone open.
+
+This is a limitation of Bluetooth and macOS, not of Hammerspoon 2 or of this Spoon. With
+AirPods on macOS 26, the sound did not just lose quality when their microphone was opened. It
+stopped completely, and started again only when the microphone was closed. Recording with sox
+stopped the sound in the same way as the streaming server, so it does not depend on the
+recorder.
+
+It matters most for the =streaming= recorder, because its server opens the microphone when it
+starts and keeps it open until it exits, not only while you are dictating. Recording from the
+AirPods would stop their sound for as long as the Spoon was running.
+
+macOS usually makes AirPods the default input as well as the default output when they
+connect. Without =bluetoothInputAvoid=, the sound in the AirPods would stop as soon as they
+connected.
+
+How the device is chosen:
+
+1. A device named in =soxAudioInputDevice= or =streamingAudioInputDevice= is always used as
+   it is.
+2. Otherwise, if the default input is a Bluetooth device and =bluetoothInputAvoid= is =true=
+   (the default), the built-in microphone is used.
+3. Otherwise the default input is used. This includes a Mac with no built-in microphone,
+   where the headset's microphone is the only one available.
+
+When the default input changes, the streaming server restarts and chooses again. A change
+made during a dictation waits until the dictation has finished. =diagnose()= reports the
+device the server was actually given.
+
+To dictate into the headset instead, set =bluetoothInputAvoid: false=. Its sound will then
+stop, or play at telephone quality, while the microphone is open.
+
 *** Chunking
 
 =streaming= watches for pauses and cuts the recording at them, so a long dictation becomes
@@ -337,6 +384,7 @@ Per backend:
 #+begin_src js   :exports both
 soxCmd: "/opt/homebrew/bin/sox"
 soxAudioInputDevice: null              // null for the system default
+bluetoothInputAvoid: true              // see below
 
 streamingPythonPath: "/usr/bin/python3"
 streamingAudioInputDevice: null
@@ -357,6 +405,10 @@ whisperserverCmd: null                 // set these two to start a server when n
 whisperserverModelPath: null
 whisperserverStartupTimeout: 10
 #+end_src
+
+=bluetoothInputAvoid= records from the built-in microphone when the default input is a
+Bluetooth headset, so that the headset keeps playing sound. See /Which microphone is used,
+and Bluetooth headsets/.
 
 A setting is one key, never a nested object, because =hs_interactive-gt='s =use()= applies
 =config= with =Object.assign=. That is a shallow merge, so setting one key of a nested
@@ -384,6 +436,19 @@ In order, least invasive first:
 2. =sudo killall corespeechd=, which restarts the speech-recognition daemon.
 3. =sudo killall coreaudiod=, which resets system-wide audio. Every application using audio
    is interrupted briefly, so only if the first two did not help.
+
+** Sound in AirPods or another Bluetooth headset stops
+
+Something has their microphone open, and they have switched to the headset profile. See
+/Which microphone is used, and Bluetooth headsets/. Run =diagnose()=:
+
+- If the streaming server's device is the headset, =bluetoothInputAvoid= is =false=, or a
+  recorder's device is set to the headset in the configuration.
+- If it is the built-in microphone, another application has the headset's microphone open.
+  Quit it or change its input.
+
+The sound starts again once the microphone is closed. =whisper.stop()= closes it. Changing
+the default input in *System Settings → Sound* also closes it, because the server restarts.
 
 ** The streaming server will not start
 

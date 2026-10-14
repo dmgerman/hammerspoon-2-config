@@ -95,6 +95,11 @@ const config = {
     soxCmd: "/opt/homebrew/bin/sox",
     soxAudioInputDevice: null,   // null for the system default
 
+    // With no device configured, record from the built-in microphone when the system
+    // default input is a Bluetooth headset. While its microphone is in use, a headset such
+    // as AirPods stops playing sound, so recording from it means not hearing anything else.
+    bluetoothInputAvoid: true,
+
     // streaming. No port: the server speaks over its own stdin and stdout.
     streamingPythonPath: "/usr/bin/python3",
     streamingAudioInputDevice: null,
@@ -1055,8 +1060,9 @@ const recorders = {
             const self = recorders.sox
             self.audioFile = `${config.tempDir}/${mine.prefix}.wav`
 
-            const args = config.soxAudioInputDevice
-                ? ["-q", "-t", "coreaudio", config.soxAudioInputDevice, self.audioFile]
+            const device = inputDeviceChoose(config.soxAudioInputDevice)
+            const args = device
+                ? ["-q", "-t", "coreaudio", device, self.audioFile]
                 : ["-q", "-d", self.audioFile]
 
             let exitReached
@@ -1108,6 +1114,8 @@ const recorders = {
     streaming: {
         fallback: "sox",
         task: null,
+        // The input device the running server was given, or null for the system default.
+        device: null,
         // Output arrives in whatever sizes the pipe delivers, so a partial last line is
         // kept here until the rest of it turns up.
         pending: "",
@@ -1181,9 +1189,10 @@ const recorders = {
                 "--max-chunk-duration", String(config.streamingMaxChunkDuration),
                 "--perfect-silence-duration", "0"
             ]
-            if (config.streamingAudioInputDevice) {
-                args.push("--audio-input", config.streamingAudioInputDevice)
-            }
+            // Chosen when the server starts, which is also when it opens the device. A
+            // change of default input restarts the server, which chooses again.
+            self.device = inputDeviceChoose(config.streamingAudioInputDevice)
+            if (self.device) args.push("--audio-input", self.device)
             if (debugEnabled) args.push("--verbose")
 
             self.pending = ""
@@ -1633,11 +1642,11 @@ function chunkSettled(mine, chunkNum, isFinal, text) {
  */
 function silentAudioExplain(peak) {
     let device = "unknown"
-    const configured = config.recorder === "streaming"
-        ? config.streamingAudioInputDevice
-        : config.soxAudioInputDevice
-    if (configured) {
-        device = configured
+    const chosen = config.recorder === "streaming"
+        ? recorders.streaming.device
+        : inputDeviceChoose(config.soxAudioInputDevice)
+    if (chosen) {
+        device = chosen
     } else {
         const standard = hs.audiodevice.defaultInputDevice()
         if (standard) device = `${standard.name} (system default)`
@@ -1787,6 +1796,39 @@ function autoPaste(text) {
 }
 
 // MARK: - Audio input device changes
+
+/**
+ * The name of the input device to record from, or null for the system default.
+ *
+ * A device named in the configuration is always used. Otherwise it is the system default,
+ * unless that is a Bluetooth device and `bluetoothInputAvoid` is set, in which case it is
+ * the built-in microphone. While anything records from the microphone of a Bluetooth
+ * headset such as AirPods, the headset switches from its playback profile (A2DP) to its
+ * headset profile (HFP), and sound playing through it stops. Measured on 2026-10-14: with
+ * the AirPods as the default input, starting the streaming server stopped the sound in
+ * them, recording with sox did the same, and the sound came back when sox finished.
+ *
+ * @param {?string} configured The device configured for the recorder in use.
+ * @returns {?string}
+ */
+function inputDeviceChoose(configured) {
+    if (configured) return configured
+    if (!config.bluetoothInputAvoid) return null
+
+    const standard = hs.audiodevice.defaultInputDevice()
+    if (!standard || standard.transportType !== "bluetooth") return null
+
+    const builtIn = hs.audiodevice.allInputDevices()
+        .find((device) => device.transportType === "built-in")
+    if (!builtIn) {
+        // A Mac with no microphone of its own, so the headset's microphone is the only
+        // one available.
+        logDebug(`${standard.name} is the only input; recording from it`)
+        return null
+    }
+    logDebug(`the default input ${standard.name} is Bluetooth; recording from ${builtIn.name}`)
+    return builtIn.name
+}
 
 /**
  * Restart the streaming server so it binds to the input device now in use.
@@ -2188,7 +2230,7 @@ function diagnose() {
     if (recorder && recorder.name === "streaming") {
         const task = recorders.streaming.task
         say(`streaming server: ${task ? `pid ${task.pid} running=${task.isRunning}` : "not running"}`)
-        say(`  device: ${config.streamingAudioInputDevice || "(system default)"}`)
+        say(`  device: ${recorders.streaming.device || "(system default)"}`)
     }
     if (transcriber && transcriber.name === "whisperserver") {
         const task = transcribers.whisperserver.task
