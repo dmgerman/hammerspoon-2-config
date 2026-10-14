@@ -218,6 +218,10 @@ let recordingChooser = null
 
 let debugEnabled = false
 
+// The input device chosen from the menu, by name, or null to choose automatically (see
+// inputDeviceChoose()). Like the language, it lasts until the configuration is reloaded.
+let inputDeviceSelected = null
+
 let audioListener = null
 // A device change during a recording is deferred to the end of it, because restarting the
 // server mid-session would discard the audio.
@@ -407,6 +411,28 @@ function menuBuild() {
         })))
     })
 
+    // The streaming server opens the device when it starts, so changing it restarts the
+    // server, which would throw away a dictation in progress. Not selectable while one runs.
+    if (recorder) {
+        entries.push({
+            title: `Microphone: ${inputDeviceDescribe()}`,
+            menu: [
+                {
+                    title: "Automatic",
+                    checked: inputDeviceSelected === null,
+                    disabled: !idle,
+                    fn: () => inputDeviceSet(null)
+                },
+                {title: "-"}
+            ].concat(hs.audiodevice.allInputDevices().map((device) => ({
+                title: device.name,
+                checked: device.name === inputDeviceSelected,
+                disabled: !idle,
+                fn: () => inputDeviceSet(device.name)
+            })))
+        })
+    }
+
     entries.push({
         title: "Transcribe a recording again…",
         disabled: !idle,
@@ -447,9 +473,6 @@ function menuBuild() {
                 : "No working recorder or transcriber",
         disabled: true
     })
-    if (recorder) {
-        entries.push({title: `Input: ${inputDeviceDescribe()}`, disabled: true})
-    }
 
     return entries
 }
@@ -1809,7 +1832,9 @@ function inputDeviceDescribe() {
     const standard = hs.audiodevice.defaultInputDevice()
     if (!chosen) return standard ? `${standard.name} (system default)` : "unknown"
 
-    if (configured || !standard || standard.name === chosen) return chosen
+    // Chosen by name, so there is nothing to explain.
+    if (chosen === inputDeviceSelected || chosen === configured) return chosen
+    if (!standard || standard.name === chosen) return chosen
 
     // Say why the default input is not being used, so that it does not look like a mistake.
     if (standard.transportType === "bluetooth") {
@@ -1822,7 +1847,8 @@ function inputDeviceDescribe() {
 /**
  * The name of the input device to record from, or null for the system default.
  *
- * A device named in the configuration is always used. Otherwise it is the system default,
+ * A device chosen from the menu comes first, as long as it is still connected. Then a device
+ * named in the configuration. Otherwise it is the system default,
  * unless that is a Bluetooth device and `bluetoothInputAvoid` is set, in which case it is
  * the built-in microphone. While anything records from the microphone of a Bluetooth
  * headset such as AirPods, the headset switches from its playback profile (A2DP) to its
@@ -1834,6 +1860,12 @@ function inputDeviceDescribe() {
  * @returns {?string}
  */
 function inputDeviceChoose(configured) {
+    if (inputDeviceSelected) {
+        const connected = hs.audiodevice.allInputDevices()
+            .some((device) => device.name === inputDeviceSelected)
+        if (connected) return inputDeviceSelected
+        logDebug(`${inputDeviceSelected} is not connected; choosing automatically`)
+    }
     if (configured) return configured
     if (!config.bluetoothInputAvoid) return null
 
@@ -1850,6 +1882,32 @@ function inputDeviceChoose(configured) {
     }
     logDebug(`the default input ${standard.name} is Bluetooth; recording from ${builtIn.name}`)
     return builtIn.name
+}
+
+/**
+ * Record from the named input device, or choose automatically when `name` is null.
+ *
+ * Restarts the streaming server, because it opens its device when it starts. Refused during
+ * a dictation, because the restart would throw away the recording.
+ *
+ * @param {?string} name The device's name, as hs.audiodevice reports it.
+ * @returns {boolean} Whether the choice was made.
+ */
+function inputDeviceSet(name) {
+    if (state !== STATES.idle) {
+        notify("config", "warning", "The microphone cannot be changed during a dictation")
+        return false
+    }
+    if (name !== null && !hs.audiodevice.allInputDevices().some((d) => d.name === name)) {
+        notify("config", "warning", `No input device is called ${name}`)
+        return false
+    }
+    inputDeviceSelected = name
+    notify("config", "info", `Microphone: ${name ?? "automatic"}`)
+    if (recorder && recorder.name === "streaming") {
+        serverRestart("the microphone was changed")
+    }
+    return true
 }
 
 /**
@@ -2423,6 +2481,8 @@ module.exports = {
     languageSet,
     languageSelect,
     languageNext,
+
+    inputDeviceSet,
 
     filterGet,
     filterSet,

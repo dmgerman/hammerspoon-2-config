@@ -49,19 +49,21 @@ nothing is reachable only by a keyboard shortcut you have to remember:
   while one is running
 - *Language*, with the current one ticked
 - *Filter*, with the active one ticked and /No filter/ to clear it
+- *Microphone*, titled with the input device being recorded from, with /Automatic/ and every
+  input device to choose from. When the device is not the system default and was not chosen
+  by name, the title says why: either the default is a Bluetooth headset (see /Which
+  microphone is used, and Bluetooth headsets/), or the default changed during a dictation and
+  the streaming server has not restarted yet
 - *Transcribe a recording again…*
 - *Diagnostics*: show the diagnostics, turn detailed logging on, restart the streaming
   server, forget old recordings
-- a line naming the recorder and transcriber actually in use, so a fallback is visible
-- a last line naming the input device being recorded from. When it is not the system
-  default, the line says why: either the default is a Bluetooth headset (see /Which
-  microphone is used, and Bluetooth headsets/), or the default changed during a dictation
-  and the streaming server has not restarted yet
+- a last line naming the recorder and transcriber actually in use, so a fallback is visible
 
 The menu is rebuilt each time it opens, so it shows the current state. Entries that would do
 nothing are greyed out rather than hidden. The language cannot be changed part way through a
-dictation, because it is fixed when the dictation starts. The filter can be changed, and
-applies to the dictation in progress, because it runs on the finished text.
+dictation, because it is fixed when the dictation starts. Nor can the microphone, because
+changing it restarts the streaming server, which would discard the recording. The filter can
+be changed, and applies to the dictation in progress, because it runs on the finished text.
 
 With =config.monitorUserActivity=, a click during a recording normally stops the text from
 being pasted. A click on this menu bar item does not count, so a left click can stop a
@@ -129,11 +131,13 @@ connected.
 
 How the device is chosen:
 
-1. A device named in =soxAudioInputDevice= or =streamingAudioInputDevice= is always used as
-   it is.
-2. Otherwise, if the default input is a Bluetooth device and =bluetoothInputAvoid= is =true=
+1. A device chosen from the *Microphone* menu, or with =inputDeviceSet()=, is used while it
+   is connected. When it is disconnected, the rules below apply until it is connected again.
+2. Otherwise, a device named in =soxAudioInputDevice= or =streamingAudioInputDevice= is used
+   as it is.
+3. Otherwise, if the default input is a Bluetooth device and =bluetoothInputAvoid= is =true=
    (the default), the built-in microphone is used.
-3. Otherwise the default input is used. This includes a Mac with no built-in microphone,
+4. Otherwise the default input is used. This includes a Mac with no built-in microphone,
    where the headset's microphone is the only one available.
 
 When the default input changes, the streaming server restarts and chooses again. A change
@@ -315,6 +319,20 @@ opens a chooser; =languageNext= moves through the list.
 #+begin_src js   :exports both
 whisper.config.languages = ["en", "ja", "es"]
 whisper.languageSet("ja")
+#+end_src
+
+** inputDeviceSet(name)
+
+Record from the input device called =name=, as =hs.audiodevice= reports it, or choose
+automatically when =name= is =null=. It does the same as the *Microphone* menu. The streaming
+server restarts so that it opens the new device. It is refused during a dictation, because
+the restart would discard the recording. The choice lasts until the configuration is
+reloaded; to keep a device permanently, set =soxAudioInputDevice= or
+=streamingAudioInputDevice=.
+
+#+begin_src js   :exports both
+whisper.inputDeviceSet("MacBook Pro Microphone")
+whisper.inputDeviceSet(null)
 #+end_src
 
 ** filterSelect()
