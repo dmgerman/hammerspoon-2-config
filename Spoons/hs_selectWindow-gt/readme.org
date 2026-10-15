@@ -88,13 +88,23 @@ Switch straight to the window used before the current one. No chooser is shown.
 
 Go straight to the previously used window of the focused application.
 
-** selectApplicationByBundle(bundleID)
+** selectApplicationByBundle(bundleID, titlePattern)
 
 Switch to an application's current window, or back again when already there.
 
 #+begin_src js   :exports both
 sw.selectApplicationByBundle("org.gnu.Emacs")
+sw.selectApplicationByBundle("net.kovidgoyal.kitty", /^notes/)
 #+end_src
+
+/titlePattern/ is optional. It is a JavaScript =RegExp=, or a string that is compiled into
+one, and it is matched against window titles each time the function is called. An empty
+pattern is the same as none, and switches to the application as usual. Only the
+application's windows whose title matches are switched to, the most recently used first.
+When the application has windows but none of them matches, its current window is used
+instead and an alert says that the pattern matched nothing. A title is a good thing to match
+only when it stays the same: a browser window's title changes with its tab, while a terminal
+window given a name keeps it.
 
 Pressing the same key twice returns to the window that was in use before, so one key per
 application switches between two applications rather than only reaching one.
@@ -102,6 +112,8 @@ application switches between two applications rather than only reaching one.
 "Back again" is the most recently used window that is *not* that application's, rather than
 simply the previous window. Otherwise an application with two windows would toggle between
 its own, which is what =selectPreviousApplicationWindow()= is for.
+With /titlePattern/, "back again" is the most recently used window whose title does not
+match, which can be another window of the same application.
 
 Matched on bundle identifier rather than on name: a name can be changed by a localisation or
 shared by two applications, while the identifier is what the application is. An application

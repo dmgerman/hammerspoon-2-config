@@ -730,13 +730,37 @@ function selectPreviousWindow() {
  * An application that is not running, or is running with no window yet tracked, is launched
  * or brought forward.
  *
+ * With a title pattern, only the application's windows whose title matches it are wanted,
+ * and the first of those in most-recently-used order is the one switched to. "Back again"
+ * then means the most recently used window that does not match, which may be another window
+ * of the same application. When the application has windows but none of them matches, the
+ * application's current window is used instead, as if no pattern had been given, and an
+ * alert says so. The pattern is looked up each time, so a window that is closed and opened
+ * again with a matching title is found without anything being rebound.
+ *
  * @param {string} bundleID For example "com.apple.Safari".
+ * @param {RegExp|string} [titlePattern] Matched against window titles with
+ *        String.prototype.search, so a RegExp with the g or y flag behaves like one without.
+ *        A string is compiled with new RegExp(). An empty string or an empty RegExp is the
+ *        same as no pattern: the application's windows are switched to as usual.
  * @returns {boolean} Whether anything was switched to.
  */
-function selectApplicationByBundle(bundleID) {
+function selectApplicationByBundle(bundleID, titlePattern) {
     if (!bundleID) {
         hs.ui.alert("No bundle identifier given").duration(2).show()
         return false
+    }
+
+    let pattern = null
+    if (titlePattern !== undefined && titlePattern !== null && titlePattern !== "") {
+        try {
+            pattern = titlePattern instanceof RegExp ? titlePattern : new RegExp(titlePattern)
+        } catch (e) {
+            hs.ui.alert(`Bad title pattern ${titlePattern}\n${e.message}`).duration(3).show()
+            return false
+        }
+        // An empty RegExp matches every title, so it is the same as no pattern at all.
+        if (pattern.source === "(?:)") pattern = null
     }
 
     const ordered = allRecords()
@@ -749,17 +773,33 @@ function selectApplicationByBundle(bundleID) {
         return true
     }
 
+    // The windows being switched to: those whose title matches, or every window of the
+    // application when there is no pattern or nothing matches it.
+    let wanted = theirs
+    if (pattern) {
+        const matching = theirs.filter((record) => (record.state.title || "").search(pattern) !== -1)
+        if (matching.length) {
+            wanted = matching
+        } else {
+            const name = theirs[0].state.application || bundleID
+            hs.ui.alert(`No ${name} window matches ${pattern}\nusing its current window`)
+                .duration(2).show()
+        }
+    }
+
+    const isWanted = (record) => wanted.includes(record)
     const current = ordered.find((record) => record.state.focused)
-    if (current && current.state.bundleID === bundleID) {
-        const away = ordered.find((record) => record.state.bundleID !== bundleID)
+    if (current && isWanted(current)) {
+        const away = ordered.find((record) => !isWanted(record))
         if (!away) {
-            hs.ui.alert("No window outside this application").duration(2).show()
+            hs.ui.alert(wanted === theirs ? "No window outside this application"
+                                          : "No other window to go back to").duration(2).show()
             return false
         }
         return focusWindowById(away.state.id)
     }
 
-    return focusWindowById(theirs[0].state.id)
+    return focusWindowById(wanted[0].state.id)
 }
 
 /** Go straight to the previously used window of the focused application. */
