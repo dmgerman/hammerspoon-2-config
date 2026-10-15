@@ -117,7 +117,8 @@ when a window on it reports =isFullscreen=.
 *** tileWith(other, win)
 
 Put two windows side by side on this window's screen: /other/ on the left half, this window
-on the right. Focus is returned to this window, since choosing the other one took it away.
+on the right. Both windows are brought forward, and focus is returned to this window, since
+choosing the other one took it away.
 
 *** swapWithWindow(other, win), swapWithPrevious(win)
 

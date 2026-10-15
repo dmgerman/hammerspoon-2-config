@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>org.turingmachine.whisper-stream</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/dmg/.config/dmg/python/bin/python3</string>
+        <string>/Users/dmg/.config/Hammerspoon2/Spoons/hs_whisper-gt/whisper_stream.py</string>
+        <string>--port</string>
+        <string>12341</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/Users/dmg/.config/dmg/python/bin</string>
+        <key>HOME</key>
+        <string>/Users/dmg</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ProcessType</key>
+    <string>Interactive</string>
+
+    <key>StandardOutPath</key>
+    <string>/Users/dmg/Library/Logs/whisper-stream.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/dmg/Library/Logs/whisper-stream.log</string>
+</dict>
+</plist>

@@ -20,11 +20,11 @@
 //
 // Two things here are not translations of the Lua:
 //
-// The streaming recorder talks to its Python server over the server's own stdin and stdout
-// rather than over TCP, because Hammerspoon 2 has no socket module. See
-// ai/issue_unfiled_socket-tcp-client.md. The protocol is the same newline-delimited JSON
-// either way, and a pipe is the better of the two: no port to find free, nothing left
-// listening, and the server exits with Hammerspoon.
+// The streaming recorder's Python server is started by launchd, not by this Spoon, and the
+// Spoon connects to it over a WebSocket. Version 1 started the server itself and spoke to
+// it over TCP; Hammerspoon 2 has no TCP socket, but it has a WebSocket client. A server of
+// its own lets Emacs use the same one, keeps its model loaded across reloads, and opens the
+// microphone only while dictating. See the readme for the protocol and the LaunchAgent.
 //
 // Transcription is genuinely asynchronous. The Lua version deferred a blocking `io.popen`
 // read by 10 ms and called that async, so Hammerspoon froze for the length of every
@@ -100,8 +100,10 @@ const config = {
     // as AirPods stops playing sound, so recording from it means not hearing anything else.
     bluetoothInputAvoid: true,
 
-    // streaming. No port: the server speaks over its own stdin and stdout.
-    streamingPythonPath: "/usr/bin/python3",
+    // streaming. The server is started by launchd (see the readme), and this is where it
+    // listens. streamingLaunchAgent is the label serverRestart() asks launchd to restart.
+    streamingUrl: "ws://127.0.0.1:12341",
+    streamingLaunchAgent: "org.turingmachine.whisper-stream",
     streamingAudioInputDevice: null,
     streamingSilenceThreshold: 2.0,   // seconds of silence that ends a chunk
     streamingMinChunkDuration: 3.0,
@@ -222,11 +224,6 @@ let debugEnabled = false
 // inputDeviceChoose()). Like the language, it lasts until the configuration is reloaded.
 let inputDeviceSelected = null
 
-let audioListener = null
-// A device change during a recording is deferred to the end of it, because restarting the
-// server mid-session would discard the audio.
-let audioRestartPending = false
-let audioRestartTimer = null
 
 // MARK: - Logging and notification
 
@@ -1139,150 +1136,111 @@ const recorders = {
 
     streaming: {
         fallback: "sox",
-        task: null,
-        // The input device the running server was given, or null for the system default.
-        device: null,
-        // Output arrives in whatever sizes the pipe delivers, so a partial last line is
-        // kept here until the rest of it turns up.
-        pending: "",
-        // Resolved by the server_ready event, so start() can wait for the server to be up.
-        ready: null,
+        // The connection to the server. Held here because hs.http keeps only a weak
+        // reference to it, so without this one it would be collected while still open.
+        socket: null,
+        // True from the server's server_ready until the connection fails or closes.
+        connected: false,
+        // The server's last report of itself: recording, microphone_open, device.
+        status: null,
+        // Resolved by server_ready, or with an error when the connection fails first.
         readyReached: null,
+        // Resolved by recording_started, or with the error the server sent instead.
+        startedReached: null,
         // Set while a session is stopping, resolved when the server says it has stopped.
         stopped: null,
         stoppedReached: null,
         // The session the current callbacks belong to, and where to send its chunks.
         mine: null,
         onChunk: null,
-        sawFinalChunk: false,
 
-        validate: async () => {
-            const python = await executableResolve(config.streamingPythonPath)
-            if (!python) return `Python not found at ${config.streamingPythonPath}`
+        validate: async () => recorders.streaming.connect(),
 
-            const script = `${spoonDir}/whisper_stream.py`
-            if (!hs.fs.exists(script)) return `whisper_stream.py is missing from the Spoon`
-
-            const checked = await shell.commandRun(python, [script, "--check-deps"])
-            if (checked.code !== 0) {
-                let missing = ""
-                try {
-                    missing = (JSON.parse(checked.out || "{}").missing || []).join(", ")
-                } catch (e) { /* not JSON; the generic message below will do */ }
-                return missing
-                    ? `Missing Python packages: ${missing}`
-                    : "whisper_stream.py reported missing Python dependencies " +
-                      "(run it with --check-deps to see which)"
-            }
-            return null
-        },
+        /** Connect now, so the first recording does not wait for it. */
+        warmup: async () => recorders.streaming.connect(),
 
         /**
-         * Start the Python server, if it is not already running.
+         * Connect to the server, unless already connected.
          *
-         * Pre-started by start(), so the first recording is not held up by loading the VAD
-         * model. The filename prefix is sent with each start_recording rather than given
-         * here, because this one server serves every later recording.
+         * @returns {Promise<?string>} null once connected, or why it could not.
          */
-        async warmup() {
+        async connect() {
             const self = recorders.streaming
-            if (self.task && self.task.isRunning) return null
+            if (self.connected) return null
+            self.disconnect()
 
-            // Without microphone permission the server does not fail: it blocks inside
-            // PortAudio opening the input stream, emits nothing further, and cannot then
-            // be stopped by asking or by SIGTERM because its main thread never returns to
-            // Python. Starting it would mean a thirty-second wait and then a process
-            // that has to be killed, so report what is wrong instead.
-            if (!hs.permissions.checkMicrophone()) {
-                return "Hammerspoon 2 has no microphone permission, so the streaming " +
-                    "server would hang trying to open the input device. Grant it in " +
-                    "System Settings → Privacy & Security → Microphone."
-            }
-
-            const python = await executableResolve(config.streamingPythonPath)
-            if (!python) return `Python not found at ${config.streamingPythonPath}`
-
-            if (!dirEnsure(config.tempDir)) return `Could not create ${config.tempDir}`
-
-            const args = [
-                `${spoonDir}/whisper_stream.py`,
-                "--transport", "stdio",
-                "--output-dir", config.tempDir,
-                // Replaced per recording by the start_recording command.
-                "--filename-prefix", "warmup",
-                "--silence-threshold", String(config.streamingSilenceThreshold),
-                "--min-chunk-duration", String(config.streamingMinChunkDuration),
-                "--max-chunk-duration", String(config.streamingMaxChunkDuration),
-                "--perfect-silence-duration", "0"
-            ]
-            // Chosen when the server starts, which is also when it opens the device. A
-            // change of default input restarts the server, which chooses again.
-            self.device = inputDeviceChoose(config.streamingAudioInputDevice)
-            if (self.device) args.push("--audio-input", self.device)
-            if (debugEnabled) args.push("--verbose")
-
-            self.pending = ""
-            self.sawFinalChunk = false
-            self.ready = new Promise((resolve) => { self.readyReached = resolve })
-
-            self.task = shell.commandStart(python, args, {
-                onOutput: (kind, chunk) => {
-                    if (kind === "stdout") self.outputRead(chunk)
-                    // The server's own diagnostics, including the --verbose audio levels.
-                    else logDebug(`whisper_stream: ${chunk.trim()}`)
-                },
-                onExit: (code) => {
-                    self.task = null
-                    if (code !== 0) {
-                        notify("recording", "error",
-                            `The streaming server exited with code ${code}`)
-                    } else {
-                        logDebug("the streaming server exited")
+            const ready = new Promise((resolve) => { self.readyReached = resolve })
+            const socket = hs.http.openWebSocket(config.streamingUrl)
+            if (!socket) return `streamingUrl is not a WebSocket URL: ${config.streamingUrl}`
+            self.socket = socket
+            socket
+                .setMessageCallback((message) => {
+                    if (self.socket !== socket) return
+                    let event
+                    try {
+                        event = JSON.parse(message)
+                    } catch (e) {
+                        logDebug(`unparseable message from the streaming server: ${message}`)
+                        return
                     }
-                    // Nothing more is coming, so release anything waiting on it.
-                    if (self.readyReached) self.readyReached()
-                    if (self.stoppedReached) self.stoppedReached()
-                }
-            })
-            if (!self.task) return "Could not start the streaming server"
+                    self.eventHandle(event)
+                })
+                // When the server goes away, only the error callback is called; the close
+                // callback is not. Measured on 2026-10-15 against an hs.httpserver that was
+                // stopped mid-connection. So both mean the connection is over.
+                .setErrorCallback((error) => {
+                    if (self.socket === socket) self.disconnected(error)
+                })
+                .setCloseCallback((code, reason) => {
+                    if (self.socket === socket) self.disconnected(`closed (${code} ${reason})`)
+                })
 
+            let failed
             try {
-                await promiseTimeout(self.ready, 30, "streaming server startup")
+                failed = await promiseTimeout(ready, 5, "connecting to the streaming server")
             } catch (e) {
-                // Left running it would hold the input device, and the next attempt would
-                // then block on the open exactly as this one did.
-                await self.serverStop()
-                return `${e.message}. The commonest cause is that it could not open the ` +
-                    "microphone: either Hammerspoon 2 has no microphone permission, or " +
-                    "another process still holds the input device."
+                failed = e.message
             }
-            if (!self.task) return "The streaming server exited while starting"
-
-            logDebug("the streaming server is ready")
+            if (failed) {
+                self.disconnect()
+                return `Could not reach the streaming server at ${config.streamingUrl}: ` +
+                    `${failed}. It is started by the LaunchAgent ` +
+                    `${config.streamingLaunchAgent}; see the readme.`
+            }
+            logDebug(`connected to the streaming server at ${config.streamingUrl}`)
             return null
         },
 
-        /** Split the server's stdout into whole lines and handle each as an event. */
-        outputRead(chunk) {
+        /** Close the connection without treating it as a failure. */
+        disconnect() {
             const self = recorders.streaming
-            self.pending += chunk
-
-            const lines = self.pending.split("\n")
-            // Whatever follows the last newline is an incomplete line; keep it.
-            self.pending = lines.pop()
-
-            for (const line of lines) {
-                const text = line.trim()
-                if (!text) continue
-                let event
+            const socket = self.socket
+            self.socket = null
+            self.connected = false
+            if (socket) {
                 try {
-                    event = JSON.parse(text)
+                    socket.destroy()
                 } catch (e) {
-                    logDebug(`unparseable line from the streaming server: ${text}`)
-                    continue
+                    logDebug(`closing the connection to the streaming server: ${e.message}`)
                 }
-                self.eventHandle(event)
             }
+        },
+
+        /** The connection has failed or the server has gone. */
+        disconnected(why) {
+            const self = recorders.streaming
+            self.socket = null
+            self.connected = false
+            logDebug(`the streaming server connection ended: ${why}`)
+
+            // Release whatever is waiting on the server, since nothing more is coming.
+            if (self.readyReached) self.readyReached(String(why))
+            if (self.startedReached) self.startedReached(`the connection ended: ${why}`)
+            if (self.mine) {
+                notify("recording", "error",
+                    `Lost the connection to the streaming server during a recording (${why})`)
+            }
+            if (self.stoppedReached) self.stoppedReached()
         },
 
         eventHandle(event) {
@@ -1290,11 +1248,24 @@ const recorders = {
 
             switch (event.type) {
             case "server_ready":
-                if (self.readyReached) self.readyReached()
+                self.connected = true
+                self.status = event
+                if (self.readyReached) {
+                    self.readyReached(null)
+                    self.readyReached = null
+                }
+                break
+
+            case "status":
+                self.status = event
                 break
 
             case "recording_started":
-                logDebug("the streaming server started recording")
+                logDebug(`the streaming server started recording from ${event.device || "the system default"}`)
+                if (self.startedReached) {
+                    self.startedReached(null)
+                    self.startedReached = null
+                }
                 break
 
             case "chunk_ready": {
@@ -1304,7 +1275,6 @@ const recorders = {
                 if (self.onChunk) {
                     self.onChunk(event.audio_file, event.chunk_num, event.is_final, peak)
                 }
-                if (event.is_final) self.sawFinalChunk = true
                 break
             }
 
@@ -1323,8 +1293,14 @@ const recorders = {
                 break
 
             case "error":
-                notify("recording", "error",
-                    `The streaming server reported: ${event.error}`)
+                // An error in answer to start_recording is start()'s to report.
+                if (self.startedReached) {
+                    self.startedReached(event.error)
+                    self.startedReached = null
+                } else {
+                    notify("recording", "error",
+                        `The streaming server reported: ${event.error}`)
+                }
                 break
 
             default:
@@ -1334,36 +1310,63 @@ const recorders = {
 
         commandSend(command) {
             const self = recorders.streaming
-            if (!self.task || !self.task.isRunning) return false
-            self.task.sendInput(JSON.stringify(command) + "\n")
-            return true
+            if (!self.connected || !self.socket) return false
+            try {
+                self.socket.send(JSON.stringify(command))
+                return true
+            } catch (e) {
+                logDebug(`sending to the streaming server: ${e.message}`)
+                return false
+            }
         },
 
         async start(mine, onChunk) {
             const self = recorders.streaming
 
-            if (!self.task || !self.task.isRunning) {
-                const failed = await self.warmup()
-                if (failed) throw new Error(failed)
-            }
+            const failed = await self.connect()
+            if (failed) throw new Error(failed)
 
             self.mine = mine
             self.onChunk = onChunk
-            self.sawFinalChunk = false
             self.stopped = new Promise((resolve) => { self.stoppedReached = resolve })
+            const started = new Promise((resolve) => { self.startedReached = resolve })
 
-            // The prefix goes with the command, so this recording's chunks are named after
-            // it. Were the prefix the one the server was started with, every recording
-            // would be named after the warmup and each session's chunks would overwrite the
-            // last session's — both true of the Lua version.
-            if (!self.commandSend({command: "start_recording", filename_prefix: mine.prefix})) {
+            // Everything about the recording goes with the command, because the server is
+            // shared: it keeps none of one client's settings for the next.
+            const device = inputDeviceChoose(config.streamingAudioInputDevice)
+            const sent = self.commandSend({
+                command: "start_recording",
+                filename_prefix: mine.prefix,
+                output_dir: config.tempDir,
+                audio_input: device,
+                silence_threshold: config.streamingSilenceThreshold,
+                min_chunk_duration: config.streamingMinChunkDuration,
+                max_chunk_duration: config.streamingMaxChunkDuration,
+                perfect_silence_duration: 0
+            })
+            if (!sent) {
+                self.sessionRelease()
                 throw new Error("Could not reach the streaming server")
+            }
+
+            // The server answers once the microphone is open, which after a pause takes
+            // the device's opening time; it gives up on a microphone after 10 s itself.
+            let refused
+            try {
+                refused = await promiseTimeout(started, 15, "the streaming server starting to record")
+            } catch (e) {
+                refused = e.message
+            }
+            if (refused) {
+                self.sessionRelease()
+                throw new Error(refused)
             }
         },
 
         async stop(mine, onChunk) {
             const self = recorders.streaming
             if (!self.commandSend({command: "stop_recording"})) {
+                self.sessionRelease()
                 throw new Error("Could not reach the streaming server")
             }
 
@@ -1375,88 +1378,48 @@ const recorders = {
             } catch (e) {
                 notify("recording", "warning", e.message)
             }
+            self.sessionRelease()
+        },
+
+        sessionRelease() {
+            const self = recorders.streaming
+            self.startedReached = null
             self.stoppedReached = null
             self.onChunk = null
             self.mine = null
         },
 
         /**
-         * Stop the server and do not return until the process has gone.
+         * Restart the server through launchd, and connect to the new one.
          *
-         * Waiting matters for a restart: the input device cannot be opened twice, so a
-         * new server started while the old one still holds it blocks inside PortAudio on
-         * the open and never becomes ready. Measured on 2026-10-08: restarting without
-         * waiting timed out after 30 s with the old server still running and no new one.
-         *
-         * Getting rid of it takes all three of asking, SIGTERM and SIGKILL. The shutdown
-         * command is read by the command loop and SIGTERM is handled in Python, so both
-         * need the main thread to come back to Python — which a server blocked on the
-         * device open never does. Version 1 stopped after SIGTERM, which is why reloading
-         * it left servers behind still holding the microphone.
-         *
-         * The process is watched and killed by pid rather than through the task, because
-         * `hs.task` stops reporting a terminated task as running while its process is in
-         * fact still there, and its termination callback does not arrive either, so
-         * neither can answer "has it gone yet".
+         * @returns {Promise<?string>} null once connected again, or why not.
          */
-        async serverStop() {
+        async restart() {
             const self = recorders.streaming
-            const task = self.task
-            self.task = null
-            self.pending = ""
-            self.onChunk = null
-            self.mine = null
-            self.readyReached = null
-            self.stoppedReached = null
+            self.disconnect()
 
-            if (!task) return
-            const pid = task.pid
-
-            // Asking first: it is the only path that closes the audio device tidily.
-            try {
-                task.sendInput(JSON.stringify({command: "shutdown"}) + "\n")
-            } catch (e) {
-                logDebug(`could not ask the streaming server to shut down: ${e.message}`)
-            }
-            try {
-                task.terminate()
-            } catch (e) {
-                logDebug(`could not terminate the streaming server: ${e.message}`)
+            const user = await shell.commandRun("/usr/bin/id", ["-u"])
+            const target = `gui/${(user.out || "").trim()}/${config.streamingLaunchAgent}`
+            const kicked = await shell.commandRun("/bin/launchctl", ["kickstart", "-k", target])
+            if (kicked.code !== 0) {
+                return `launchctl kickstart ${target} failed: ${(kicked.err || kicked.out || "").trim()}`
             }
 
-            const alive = async () => {
-                // kill -0 reports whether the process exists without signalling it.
-                const checked = await shell.commandRun("/bin/kill", ["-0", String(pid)])
-                return checked.code === 0
-            }
-            const pause = () => new Promise((resolve) => timers.later(0.25, resolve))
-
-            // Up to two seconds for it to exit on its own, then kill it.
-            for (let waited = 0; waited < 8; waited += 1) {
-                if (!(await alive())) {
-                    logDebug(`the streaming server (pid ${pid}) stopped when asked`)
-                    return
-                }
+            // The new server loads its model before it listens, which takes a few seconds,
+            // and a connection refused before then fails at once. So try until it answers.
+            const pause = () => new Promise((resolve) => timers.later(0.5, resolve))
+            let failed = null
+            for (let attempt = 0; attempt < 60; attempt += 1) {
+                failed = await self.connect()
+                if (!failed) return null
                 await pause()
             }
-
-            logDebug(`killing the streaming server (pid ${pid})`)
-            await shell.commandRun("/bin/kill", ["-9", String(pid)])
-
-            for (let waited = 0; waited < 8; waited += 1) {
-                if (!(await alive())) return
-                await pause()
-            }
-            notify("recording", "warning",
-                `The streaming server (pid ${pid}) could not be stopped`)
+            return failed
         },
 
         cleanup() {
-            // stop() is not async, and nothing it does should wait, so this is left to
-            // finish on its own. serverRestart() awaits serverStop() directly, because
-            // there it has to be finished before the next server starts.
-            recorders.streaming.serverStop()
-                .catch((e) => logDebug(`stopping the streaming server: ${e.message}`))
+            recorders.streaming.sessionRelease()
+            recorders.streaming.disconnect()
         }
     }
 }
@@ -1757,12 +1720,6 @@ function sessionEnd(mine) {
         stateTransition(STATES.idle, "finished")
     }
     menuBarIdle()
-
-    // A microphone change during the recording was put off until now.
-    if (audioRestartPending) {
-        audioRestartPending = false
-        audioRestartSchedule()
-    }
 }
 
 // MARK: - Pasting
@@ -1815,19 +1772,16 @@ function autoPaste(text) {
 // MARK: - Audio input device changes
 
 /**
- * The input device the recorder in use records from, as text for the menu and messages.
+ * The input device the next recording will use, as text for the menu and messages.
  *
- * For a running streaming server this is the device it was given when it started, because
- * that is the one it has open. Otherwise it is the device the next recording would use.
+ * Both recorders choose the device for each recording, so this is always current.
  */
 function inputDeviceDescribe() {
     const streaming = recorder && recorder.name === "streaming"
     const configured = streaming
         ? config.streamingAudioInputDevice
         : config.soxAudioInputDevice
-    const chosen = streaming && recorders.streaming.task
-        ? recorders.streaming.device
-        : inputDeviceChoose(configured)
+    const chosen = inputDeviceChoose(configured)
 
     const standard = hs.audiodevice.defaultInputDevice()
     if (!chosen) return standard ? `${standard.name} (system default)` : "unknown"
@@ -1840,8 +1794,7 @@ function inputDeviceDescribe() {
     if (standard.transportType === "bluetooth") {
         return `${chosen} (the default, ${standard.name}, is Bluetooth)`
     }
-    // The default changed during a dictation, and the server restarts when it ends.
-    return `${chosen} (until the streaming server restarts)`
+    return chosen
 }
 
 /**
@@ -1887,8 +1840,8 @@ function inputDeviceChoose(configured) {
 /**
  * Record from the named input device, or choose automatically when `name` is null.
  *
- * Restarts the streaming server, because it opens its device when it starts. Refused during
- * a dictation, because the restart would throw away the recording.
+ * Takes effect from the next recording; both recorders are given the device each time.
+ * Refused during a dictation, so that what the menu shows is what is being recorded.
  *
  * @param {?string} name The device's name, as hs.audiodevice reports it.
  * @returns {boolean} Whether the choice was made.
@@ -1904,49 +1857,31 @@ function inputDeviceSet(name) {
     }
     inputDeviceSelected = name
     notify("config", "info", `Microphone: ${name ?? "automatic"}`)
-    if (recorder && recorder.name === "streaming") {
-        serverRestart("the microphone was changed")
-    }
     return true
 }
 
 /**
- * Restart the streaming server so it binds to the input device now in use.
+ * Restart the streaming server through launchd, and connect to the new one.
  *
- * PortAudio resolves the device when the input stream is opened, so a microphone changed
- * afterwards leaves the server reading from the old one.
+ * For a server that has got stuck. It is not needed to change the microphone, which each
+ * recording names for itself.
  */
 async function serverRestart(why) {
     if (!recorder || recorder.name !== "streaming") {
         return "The streaming recorder is not in use, so there is no server to restart"
     }
+    if (state !== STATES.idle) {
+        return "The streaming server cannot be restarted during a dictation"
+    }
 
     notify("init", "info", `Restarting the streaming server (${why})`)
-    // Awaited, not left to finish: the new server cannot open the input device until the
-    // old one has let go of it.
-    await recorders.streaming.serverStop()
-    const failed = await recorders.streaming.warmup()
+    const failed = await recorders.streaming.restart()
     if (failed) {
         notify("init", "error", `Could not restart the streaming server: ${failed}`)
         return failed
     }
     notify("init", "info", "The streaming server restarted")
     return null
-}
-
-function audioRestartSchedule() {
-    if (state !== STATES.idle) {
-        // Restarting now would throw away the recording in progress.
-        audioRestartPending = true
-        logDebug(`input device changed during ${state}; deferring the server restart`)
-        return
-    }
-    if (audioRestartTimer) audioRestartTimer.stop()
-    // Changing a device can produce several notifications in a row, so settle first.
-    audioRestartTimer = hs.timer.doAfter(0.75, () => {
-        audioRestartTimer = null
-        serverRestart("the audio input device changed")
-    })
 }
 
 // MARK: - Language
@@ -2037,8 +1972,9 @@ async function transcribeBegin(callbackOrPaste) {
     // macOS hands a process without this permission samples that have been replaced with
     // zero, with no error of any kind, so without the check the only symptom is an empty
     // transcription. The Lua version had no equivalent and guessed after the fact from the
-    // amplitude.
-    if (!hs.permissions.checkMicrophone()) {
+    // amplitude. The streaming server records in a process of its own, launchd's rather
+    // than Hammerspoon's, so this permission is not the one it needs; it reports its own.
+    if (recorder && recorder.name !== "streaming" && !hs.permissions.checkMicrophone()) {
         notify("recording", "error",
             "Hammerspoon 2 does not have microphone permission, so a recording would be " +
             "silent. Grant it in System Settings → Privacy & Security → Microphone.")
@@ -2272,9 +2208,8 @@ function transcribeAgain(callback) {
 /**
  * Turn detailed logging on or off, without reloading.
  *
- * Also decides whether the streaming server is started with --verbose, which makes it
- * report audio levels. A server already running keeps whatever it was started with, so
- * follow this with serverRestart() to change that.
+ * The streaming server's own log is ~/Library/Logs/whisper-stream.log; for audio levels
+ * there, add --verbose to its LaunchAgent.
  *
  * @param {boolean} enable
  */
@@ -2308,9 +2243,16 @@ function diagnose() {
     }
 
     if (recorder && recorder.name === "streaming") {
-        const task = recorders.streaming.task
-        say(`streaming server: ${task ? `pid ${task.pid} running=${task.isRunning}` : "not running"}`)
-        say(`  device: ${recorders.streaming.device || "(system default)"}`)
+        const streaming = recorders.streaming
+        say(`streaming server: ${config.streamingUrl} ` +
+            (streaming.connected ? "connected" : "not connected") +
+            ` (LaunchAgent ${config.streamingLaunchAgent})`)
+        if (streaming.status) {
+            say(`  recording=${streaming.status.recording} ` +
+                `microphone_open=${streaming.status.microphone_open} ` +
+                `device=${streaming.status.device || "(system default)"}`)
+        }
+        say(`  next recording's device: ${inputDeviceDescribe()}`)
     }
     if (transcriber && transcriber.name === "whisperserver") {
         const task = transcribers.whisperserver.task
@@ -2411,17 +2353,10 @@ async function backendsStart() {
         }
     }
 
-    // The streaming server binds its input device when it opens the stream, so a later
-    // change to the default microphone leaves it reading from the old one.
-    if (recorder.name === "streaming" && !audioListener) {
-        audioListener = () => audioRestartSchedule()
-        hs.audiodevice.on("dIn", audioListener)
-    }
-
     notify("init", "info",
         `hs_whisper-gt ready: ${recorder.name} + ${transcriber.name}`)
 
-    if (!hs.permissions.checkMicrophone()) {
+    if (recorder.name !== "streaming" && !hs.permissions.checkMicrophone()) {
         notify("init", "warning",
             "Hammerspoon 2 has no microphone permission yet, so recordings would be " +
             "silent. Grant it in System Settings → Privacy & Security → Microphone.")
@@ -2438,16 +2373,6 @@ function stop() {
     hotkeys = []
 
     recordingSessionStop()
-
-    if (audioListener) {
-        hs.audiodevice.off("dIn", audioListener)
-        audioListener = null
-    }
-    if (audioRestartTimer) {
-        audioRestartTimer.stop()
-        audioRestartTimer = null
-    }
-    audioRestartPending = false
 
     for (const backend of [recorder, transcriber]) {
         if (backend && backend.cleanup) backend.cleanup()
@@ -2500,5 +2425,13 @@ module.exports = {
 
     bindHotkeys,
     start,
-    stop
+    stop,
+
+    // For tests/live only. Not an interface: these are the Spoon's internals.
+    _test: {
+        recorders,
+        inputDeviceChoose,
+        recorder: () => recorder,
+        transcriber: () => transcriber
+    }
 }

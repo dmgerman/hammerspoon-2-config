@@ -80,6 +80,11 @@ replaced with zero, with no error of any kind, and the only symptom is that noth
 transcribed. So the Spoon checks the permission before it records and says so rather
 than recording silence.
 
+That applies to the =sox= recorder, which records inside Hammerspoon. The =streaming=
+recorder's server is a separate process started by launchd, so it is Python that needs the
+permission, not Hammerspoon. The server reports a microphone it cannot open as an error on
+the first recording; see /The streaming server/ below.
+
 =config.monitorUserActivity= additionally needs *Accessibility*, because it watches for
 typing with an event tap. Without it the Spoon still dictates; it just cannot tell whether
 you moved on while it was recording, so it will not guard auto-paste.
@@ -121,9 +126,10 @@ stopped completely, and started again only when the microphone was closed. Recor
 stopped the sound in the same way as the streaming server, so it does not depend on the
 recorder.
 
-It matters most for the =streaming= recorder, because its server opens the microphone when it
-starts and keeps it open until it exits, not only while you are dictating. Recording from the
-AirPods would stop their sound for as long as the Spoon was running.
+It matters more for the =streaming= recorder, because its server keeps the microphone open
+for =--microphone-idle-timeout= seconds (five minutes) after each dictation, so that the
+next one starts without waiting for the device. Recording from the AirPods would stop their
+sound for that long after every dictation.
 
 macOS usually makes AirPods the default input as well as the default output when they
 connect. Without =bluetoothInputAvoid=, the sound in the AirPods would stop as soon as they
@@ -140,9 +146,11 @@ How the device is chosen:
 4. Otherwise the default input is used. This includes a Mac with no built-in microphone,
    where the headset's microphone is the only one available.
 
-When the default input changes, the streaming server restarts and chooses again. A change
-made during a dictation waits until the dictation has finished. =diagnose()= reports the
-device the server was actually given.
+The device is chosen afresh for every recording and sent with it, so a change of default
+input, or a choice from the menu, applies from the next dictation. Nothing restarts. The
+server reopens the microphone when a recording names a different device from the one it has
+open. =diagnose()= reports the device the next recording will use, and the one the server
+has open.
 
 To dictate into the headset instead, set =bluetoothInputAvoid: false=. Its sound will then
 stop, or play at telephone quality, while the microphone is open.
@@ -175,12 +183,80 @@ Lower both if you want the text to come back in smaller pieces.
 
 =sox= does not chunk: it records one file and transcribes it once you stop.
 
-=streaming= needs =pip install numpy sounddevice scipy torch torchaudio=, and
-=config.streamingPythonPath= pointing at the Python those are installed for. Check it with:
+*** The streaming server
+
+=whisper_stream.py= is a server of its own, started by launchd rather than by the Spoon,
+and the Spoon connects to it over a WebSocket on =config.streamingUrl=
+(=ws://127.0.0.1:12341=). Running it separately does three things:
+
+1. Emacs, or anything else that speaks the protocol below, can use the same server. One
+   client is served at a time; a new connection takes over from an old one, whose recording
+   ends and is kept.
+2. The voice-activity model stays loaded across Hammerspoon reloads, instead of being
+   loaded again by every reload.
+3. The microphone is open only around dictation. The server opens it when a recording
+   starts and closes it once it has gone =--microphone-idle-timeout= seconds (300) without
+   one, so the first dictation after a pause waits for the device to open and the ones after
+   it do not. Measured on 2026-10-15: the built-in microphone opened in 0.03 s.
+
+It needs =pip install numpy sounddevice scipy torch torchaudio websockets= in the Python that
+the LaunchAgent runs, =~/.config/dmg/python/bin/python3=:
 
 #+begin_src sh   :exports both
-python3 whisper_stream.py --check-deps
+~/.config/dmg/python/bin/python3 whisper_stream.py --check-deps
 #+end_src
+
+The LaunchAgent is =launchd/org.turingmachine.whisper-stream.plist=. Install it once:
+
+#+begin_src sh   :exports both
+cp launchd/org.turingmachine.whisper-stream.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/org.turingmachine.whisper-stream.plist
+#+end_src
+
+After changing =whisper_stream.py=, restart it, which is what =serverRestart()= and the menu
+item do:
+
+#+begin_src sh   :exports both
+launchctl kickstart -k gui/$(id -u)/org.turingmachine.whisper-stream
+#+end_src
+
+Its log is =~/Library/Logs/whisper-stream.log=: connections, recordings, and when the
+microphone opens and closes.
+
+The first recording asks macOS for microphone permission for Python, because the server is
+not a child of Hammerspoon. If no prompt appears, grant it in *System Settings → Privacy &
+Security → Microphone*.
+
+**** The protocol
+
+Each message is one JSON object in one WebSocket text frame.
+
+From the client:
+
+| Command                | Fields, all optional                                                     |
+|------------------------+--------------------------------------------------------------------------|
+| =start_recording=      | =filename_prefix=, =output_dir=, =audio_input= (device name, =null= for the default), =silence_threshold=, =min_chunk_duration=, =max_chunk_duration=, =perfect_silence_duration= |
+| =stop_recording=       |                                                                          |
+| =status=               |                                                                          |
+
+Settings left out of =start_recording= take the server's defaults, not the previous
+recording's.
+
+From the server:
+
+| Event               | Fields                                               | When                                         |
+|---------------------+------------------------------------------------------+----------------------------------------------|
+| =server_ready=      | =recording=, =microphone_open=, =device=, =test_file= | on connecting                                |
+| =status=            | the same                                             | in answer to =status=                        |
+| =recording_started= | =device=                                             | once the microphone is open and recording    |
+| =chunk_ready=       | =chunk_num=, =audio_file=, =is_final=, =peak=        | each chunk cut at a pause, and the last one  |
+| =complete_file=     | =file_path=                                          | at the end, before the final chunk           |
+| =recording_stopped= |                                                      | at the end, after everything else            |
+| =silence_warning=   | =message=                                            | the microphone delivers nothing at all       |
+| =error=             | =error=                                              | anything that failed, including a microphone that would not open |
+
+A failed =start_recording= is answered with =error= and then =recording_stopped=, and no
+=recording_started=.
 
 ** Transcribers
 
@@ -324,11 +400,10 @@ whisper.languageSet("ja")
 ** inputDeviceSet(name)
 
 Record from the input device called =name=, as =hs.audiodevice= reports it, or choose
-automatically when =name= is =null=. It does the same as the *Microphone* menu. The streaming
-server restarts so that it opens the new device. It is refused during a dictation, because
-the restart would discard the recording. The choice lasts until the configuration is
-reloaded; to keep a device permanently, set =soxAudioInputDevice= or
-=streamingAudioInputDevice=.
+automatically when =name= is =null=. It does the same as the *Microphone* menu, and applies
+from the next recording. It is refused during a dictation, so that what the menu shows is
+what is being recorded. The choice lasts until the configuration is reloaded; to keep a
+device permanently, set =soxAudioInputDevice= or =streamingAudioInputDevice=.
 
 #+begin_src js   :exports both
 whisper.inputDeviceSet("MacBook Pro Microphone")
@@ -347,11 +422,11 @@ The recordings in =config.tempDir=, newest first, and a prune down to the newest
 
 ** debugSet(enable) / serverRestart() / diagnose()
 
-=debugSet(true)= logs in detail, and makes the next start of the streaming server pass
-=--verbose= so it reports audio levels. =serverRestart()= restarts that server, to pick that
-up or to recover one that has got stuck. =diagnose()= prints a snapshot — state, the
-backends actually in use, the session, the input device, both permissions, how many
-recordings there are — to the console.
+=debugSet(true)= logs in detail. =serverRestart()= asks launchd to restart the streaming
+server and connects to the new one, for a server that has got stuck; it is refused during a
+dictation. =diagnose()= prints a snapshot — state, the backends actually in use, the session,
+the streaming server's connection and what it has open, the input device, both permissions,
+how many recordings there are — to the console.
 
 #+begin_src js   :exports both
 whisper.debugSet(true)
@@ -408,7 +483,8 @@ soxCmd: "/opt/homebrew/bin/sox"
 soxAudioInputDevice: null              // null for the system default
 bluetoothInputAvoid: true              // see below
 
-streamingPythonPath: "/usr/bin/python3"
+streamingUrl: "ws://127.0.0.1:12341"
+streamingLaunchAgent: "org.turingmachine.whisper-stream"
 streamingAudioInputDevice: null
 streamingSilenceThreshold: 2.0         // seconds of silence that ends a chunk
 streamingMinChunkDuration: 3.0
@@ -472,36 +548,26 @@ Something has their microphone open, and they have switched to the headset profi
 The sound starts again once the microphone is closed. =whisper.stop()= closes it. Changing
 the default input in *System Settings → Sound* also closes it, because the server restarts.
 
-** The streaming server will not start
+** The streaming server cannot be reached
 
-First, the Python dependencies:
+=whisper-diagnose= says whether the Spoon is connected. If it is not:
 
 #+begin_src sh   :exports both
-python3 whisper_stream.py --check-deps
+launchctl print gui/$(id -u)/org.turingmachine.whisper-stream | grep -E 'state|pid'
+tail ~/Library/Logs/whisper-stream.log
+~/.config/dmg/python/bin/python3 whisper_stream.py --check-deps
 #+end_src
 
-There is no port to check, because the server speaks over its own standard input and output
-rather than over TCP: Hammerspoon 2 has no socket module, and a pipe turns out to be the
-better of the two anyway — nothing to find free, nothing left listening, and the server
-exits with Hammerspoon.
+The log's first line after a start is ={"status": "listening", "port": 12341, ...}=, written
+once the model has loaded. A server that never gets there has failed to load its model or
+to take the port, and the log says which.
 
-The failure worth knowing is the microphone one, because it does not look like a permission
-problem. With =debugSet(true)= the server gets as far as
+** A recording fails with "The microphone did not open"
 
-: whisper_stream: {"status": "listening", "transport": "stdio"}
-: whisper_stream: Using cache found in .../snakers4_silero-vad_master
-
-and then says nothing more. The next thing it would send is =server_ready=, which comes
-straight after it opens the input stream — so stopping there means the open never returned.
-It does not fail and does not raise: macOS and PortAudio simply block. A server in that state
-also cannot be stopped by asking it or by =SIGTERM=, because its main thread never gets back
-to Python, and while it is there it holds the input device, so the next server to start
-blocks in the same place.
-
-Two things put it there: Hammerspoon 2 having no microphone permission, or another process
-still holding the device. The Spoon checks the permission before starting the server and
-refuses rather than hanging, and kills a server that has stopped answering, by pid, before
-starting another.
+The server gives up on the microphone after =--microphone-open-timeout= seconds (10) rather
+than hanging, because macOS and PortAudio do not fail when a process has no microphone
+permission: the open simply never returns. The usual cause is that Python has no microphone
+permission. The server goes on answering, and the next recording tries again.
 
 ** A command cannot be found
 
@@ -516,12 +582,12 @@ a login shell; a path beginning with =/= is used as given.
 
 #+begin_src js   :exports both
 whisper.debugSet(true)
-whisper.serverRestart()    // only needed to make the streaming server verbose too
 #+end_src
 
-Then dictate and watch the console: each chunk with its file, size and peak amplitude, each
-transcriber invocation and what it returned, and with the streaming server the audio levels
-about once a second.
+Then dictate and watch the console: each chunk with its file, size and peak amplitude, and
+each transcriber invocation and what it returned. The streaming server's side is in
+=~/Library/Logs/whisper-stream.log=; for its audio levels about once a second, add
+=--verbose= to the LaunchAgent's arguments and restart it.
 
 * Differences from the Hammerspoon 1 spoon
 
@@ -550,3 +616,34 @@ Behaviour that deliberately changed, beyond names and the language:
   quote cannot break the command.
 - =diagnose()= *works.* In version 1 it called a function that does not exist, and so failed
   every time it was called.
+- *The streaming server is a service, not a child.* Version 1 started it from the Spoon and
+  spoke to it over TCP; it held the microphone from start to exit, and a reload left servers
+  behind still holding it. Now launchd runs one server, the Spoon connects over a WebSocket,
+  and the microphone is open only around dictation. The server never exits on a client's
+  account: a client leaving, a muted microphone, or a failed send ends the recording, not the
+  server.
+- *The microphone can change without a restart.* Each recording names its device.
+
+* Tests
+
+#+begin_src sh   :exports both
+make test        # the server, with pytest; no Hammerspoon needed (about 90 s)
+make test-quick  # the same without the 45 s real-time fixture
+make test-live   # the Spoon in a running Hammerspoon 2 (about 3 minutes)
+#+end_src
+
+=tests/python/= tests =whisper_stream.py=: the audio helpers, the recorder with a stand-in
+transport, the microphone opening and closing with a fake =sounddevice=, the WebSocket
+transport with real clients, and the server as a real process. A WAV given with
+=--test-file= stands in for the microphone: every recording plays it from the start, in real
+time, and the end of the file ends the recording.
+
+=tests/live/= drives the Spoon through =hs2=. Each script starts its own server with a test
+file on a free port, points the Spoon at it, and puts the configuration and the clipboard
+back when it finishes. =test_dictation_e2e.sh= also needs =whisper-server= on port 8080, and
+=test_reconnect.sh= reloads the configuration and restarts the real server.
+
+The fixtures are two recordings from the version 1 Spoon: =short.wav= (1 s) and =long.wav=
+(43.5 s, cut into several chunks). Their =.txt= files are what version 1's transcriber
+heard; the current =whisper-server= model hears only "happens." of =short.wav=, so the live
+test compares a dictation with =whisper-server='s own transcription of the file.

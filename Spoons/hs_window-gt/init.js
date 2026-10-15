@@ -72,6 +72,9 @@ const config = {
     // Seconds to wait for the number key after attachKeyToWindow() asks for one. The wait
     // ends early on Escape, or on any key that is not a digit.
     attachKeyWait: 5,
+    // Where the attachments are kept, so that start() can attach the same windows again
+    // after Hammerspoon 2 is reloaded or restarted.
+    attachFile: `${hs.appinfo.configDir}/logs/window-keys.json`,
 
     // Seconds between sweeps for records of windows that have closed.
     forgetInterval: 120,
@@ -929,8 +932,10 @@ function tileWith(other, win) {
     setFrameOnScreen(other, new HSRect(screen.x, screen.y, screen.w / 2, screen.h))
     place(window, { cols: 2 }, { col: 1 })
 
-    // Choosing the other window took focus away from this one; give it back.
-    window.focus()
+    // Bring both windows forward, the other one first so that this one ends up in front
+    // with the keyboard focus. Choosing the other window took focus away from this one.
+    focusWindow(other)
+    focusWindow(window)
     return true
 }
 
@@ -1245,7 +1250,18 @@ function captureDigit(report) {
  *        when no watcher is registered for that element and notification — but pointless.
  */
 function detachKey(key, destroyed) {
-    const digit = String(key)
+    if (!keyRelease(String(key), destroyed)) return false
+    attachedKeysSave()
+    return true
+}
+
+/**
+ * Release a number key without updating config.attachFile.
+ *
+ * stop() uses this directly, so that reloading leaves the file as it was and start() can
+ * attach the same windows again.
+ */
+function keyRelease(digit, destroyed) {
     const entry = attachedKeys.get(digit)
     if (!entry) return false
 
@@ -1261,8 +1277,127 @@ function detachKey(key, destroyed) {
 
 /** Release every number key. */
 function detachAllKeys() {
-    for (const digit of [...attachedKeys.keys()]) detachKey(digit)
+    for (const digit of [...attachedKeys.keys()]) keyRelease(digit)
+    attachedKeysSave()
     return true
+}
+
+/** Write the attachments to config.attachFile: digit -> {id, bundleID, title}. */
+function attachedKeysSave() {
+    const saved = {}
+    for (const [digit, entry] of attachedKeys) {
+        saved[digit] = {id: entry.id, bundleID: entry.bundleID, title: entry.title}
+    }
+    hs.fs.mkdir(config.attachFile.replace(/\/[^/]*$/, ""))
+    if (!hs.fs.write(config.attachFile, JSON.stringify(saved, null, 2), false)) {
+        console.error(`[hs_window-gt] could not write ${config.attachFile}`)
+    }
+}
+
+/**
+ * The window an attachment refers to: by id, or failing that by title.
+ *
+ * The id is tried first, and is accepted only when the bundle identifier still matches,
+ * because window ids are reused. When no window has the id, another window of the same
+ * application with the same title is taken instead, provided no other key holds it. That
+ * second match is what lets a key outlive its window: ids change when an application is
+ * quit and opened again, or after a reboot, while titles often do not.
+ *
+ * Two windows with the same title cannot be told apart, so the first one found is taken.
+ *
+ * @param {object} entry `{id, bundleID, title}`.
+ * @param {object[]} windows Every window, from allApplicationWindows().
+ * @param {Set<number>} taken Ids of windows other keys are attached to.
+ * @returns {{window: object, byTitle: boolean}|null}
+ */
+function attachedWindowFind(entry, windows, taken) {
+    const bundleOf = (w) => (w.application ? w.application.bundleID : null)
+    const sameApplication = (w) => !entry.bundleID || bundleOf(w) === entry.bundleID
+
+    const byId = windows.find((w) => w.id === entry.id)
+    if (byId && sameApplication(byId)) return {window: byId, byTitle: false}
+
+    if (!entry.title) return null
+    const byTitle = windows.find((w) => w.title === entry.title && sameApplication(w) &&
+                                        !taken.has(w.id))
+    return byTitle ? {window: byTitle, byTitle: true} : null
+}
+
+/**
+ * Attach the windows listed in config.attachFile again.
+ *
+ * Window ids survive a reload of Hammerspoon 2, so a reload restores every key by id. After
+ * an application has been quit and opened again, or after a reboot, the ids have changed and
+ * the key goes to a window of the same application with the same title, if there is one.
+ * Keys with no such window are reported as gone and dropped from the file.
+ *
+ * Every key is matched by id before any is matched by title, so that a title match cannot
+ * take a window that another key still holds by its id.
+ */
+function attachedKeysRestore() {
+    if (!hs.fs.exists(config.attachFile)) return
+
+    const body = hs.fs.read(config.attachFile, 0, 0)
+    if (!body) return
+
+    let saved = null
+    try {
+        saved = JSON.parse(body)
+    } catch (error) {
+        console.error(`[hs_window-gt] ${config.attachFile} is unreadable, ignoring it: ${error}`)
+        return
+    }
+    if (!saved || typeof saved !== "object") return
+
+    const digits = Object.keys(saved).filter((d) => config.attachKeys.includes(d))
+    if (digits.length === 0) return
+
+    const windows = allApplicationWindows()
+    const keys = config.attachModifiers.join("-")
+    const restored = []
+    const gone = []
+
+    // First pass: every key whose window still has its id. Every window is passed as taken,
+    // so that only the id can match.
+    const taken = new Set()
+    const found = {}
+    for (const digit of digits) {
+        const entry = saved[digit] || {}
+        const match = attachedWindowFind(entry, windows, new Set(windows.map((w) => w.id)))
+        if (match) {
+            found[digit] = match
+            taken.add(match.window.id)
+        }
+    }
+    // Second pass: the rest, by title, among the windows the first pass left free.
+    for (const digit of digits) {
+        if (found[digit]) continue
+        const match = attachedWindowFind(saved[digit] || {}, windows, taken)
+        if (match) {
+            found[digit] = match
+            taken.add(match.window.id)
+        }
+    }
+
+    for (const digit of digits) {
+        const entry = saved[digit] || {}
+        const match = found[digit]
+        const label = `${keys}-${digit} ${entry.title || ""}`
+        if (match && attachDigit(match.window, digit, true)) {
+            // Keep the title it was attached under, which is what attachedWindows() reports
+            // and what the next title match will look for.
+            if (entry.title) attachedKeys.get(digit).title = entry.title
+            restored.push(match.byTitle ? `${label} (by title)` : label)
+        } else {
+            gone.push(label)
+        }
+    }
+    attachedKeysSave()
+
+    const lines = []
+    if (restored.length > 0) lines.push("Window keys restored:", ...restored)
+    if (gone.length > 0) lines.push("Windows gone, keys released:", ...gone)
+    alert(lines.join("\n"))
 }
 
 /**
@@ -1309,17 +1444,32 @@ function attachedWindows() {
  * silently focus a stranger. Comparing the bundle identifier catches another application
  * inheriting the id; a second window of the same application is not distinguishable this
  * way, and is not worth more machinery.
+ *
+ * When no window has the id, a window of the same application with the same title is
+ * attached instead, if no other key holds it. See attachedWindowFind.
  */
 function focusAttached(digit) {
     const entry = attachedKeys.get(digit)
     if (!entry) return false
 
-    const window = allApplicationWindows().find((w) => w.id === entry.id)
-    const bundleID = window && window.application ? window.application.bundleID : null
-    if (!window || (entry.bundleID && bundleID !== entry.bundleID)) {
+    const taken = new Set()
+    for (const [other, held] of attachedKeys) if (other !== digit) taken.add(held.id)
+    const match = attachedWindowFind(entry, allApplicationWindows(), taken)
+    if (!match) {
         detachKey(digit)
         alert(`${digit} was ${entry.title}\nthat window has gone, key released`)
         return false
+    }
+
+    // The window was replaced by one with the same title: attach the key to it, keeping
+    // the title the key was first attached under.
+    const window = match.window
+    if (match.byTitle) {
+        const title = entry.title
+        if (!attachDigit(window, digit, true)) return false
+        attachedKeys.get(digit).title = title
+        attachedKeysSave()
+        alert(`${config.attachModifiers.join("-")}-${digit}\nnow ${title}, found by title`)
     }
 
     // Pressing the key for the window you are already in goes back where you came from, so
@@ -1336,9 +1486,11 @@ function focusAttached(digit) {
  *
  * @param {object} target The window.
  * @param {string} digit One of config.attachKeys.
+ * @param {boolean} [quiet] Attach without an alert. attachedKeysRestore() reports all the
+ *        keys it restores in one alert instead.
  * @returns {boolean} Whether it was attached.
  */
-function attachDigit(target, digit) {
+function attachDigit(target, digit, quiet) {
     if (digit.length !== 1 || !config.attachKeys.includes(digit)) {
         alert(`Cannot attach to "${digit}"\nuse one of ${config.attachKeys}`)
         return false
@@ -1391,7 +1543,8 @@ function attachDigit(target, digit) {
         element: onDestroyed ? element : null,
         onDestroyed: onDestroyed
     })
-    alert(`${config.attachModifiers.join("-")}-${digit}\n${title}`)
+    attachedKeysSave()
+    if (!quiet) alert(`${config.attachModifiers.join("-")}-${digit}\n${title}`)
     return true
 }
 
@@ -1796,6 +1949,8 @@ function start() {
         }
         hs.application.on("didActivate", focusWatcher)
     }
+
+    attachedKeysRestore()
     return module.exports
 }
 
@@ -1803,7 +1958,8 @@ function stop() {
     removeAdvice()
     stopIsolation()
     mouseHighlightClear()
-    detachAllKeys()
+    // Released without saving, so that config.attachFile still lists them for start().
+    for (const digit of [...attachedKeys.keys()]) keyRelease(digit)
     captureStop()
     if (forgetTimer) {
         forgetTimer.stop()
