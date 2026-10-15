@@ -1,10 +1,16 @@
 * hs_emacs-gt
 
 Emacs from Hammerspoon 2: run elisp, forward keys that would otherwise never reach Emacs,
-and show what Emacs has to say.
+edit any application's text field in Emacs, show what Emacs has to say, and tell Emacs
+how long the screen has been unlocked.
 
-A port of the Hammerspoon 1 =hs_emacs_helper=, merged with =editWithEmacs=. The editing
-round trip is not included yet; see /Not here yet/.
+A port of two Hammerspoon 1 Spoons, =hs_emacs_helper= and =editWithEmacs=, merged into one.
+Two Emacs Lisp files ship beside this readme:
+
+| File                              | What it is for                                     |
+|-----------------------------------+----------------------------------------------------|
+| =hammerspoon.el=                  | Every call from Emacs to Hammerspoon 2.            |
+| =hammerspoon-emacs-everywhere.el= | Editing a text field, through =emacs-everywhere=.  |
 
 #+begin_src js   :exports both
 const emacs = hs.loadSpoon("hs_emacs-gt")
@@ -111,13 +117,30 @@ whatever is in front instead, so the key is never simply swallowed.
 | =messageHide()=       | Hides it now.                                            |
 | =setStatus(text)=     | Shows text in the menu bar until it is cleared.          |
 | =clearStatus()=       | Returns the menu bar to its resting icon.                |
+| =windowAlert(text, secs)= | Shows text across the middle of the focused window.  |
+| =windowAlertHide()=   | Removes every window alert still on screen.              |
 
-In Hammerspoon 1 the on-screen message was an =hs.canvas=. Hammerspoon 2 has no canvas, so
-it is an =hs.ui= window, rebuilt at each message — an =hs.ui= window takes its frame when
-it is created, which is also what lets the message follow the primary screen.
+The message is an =hs.canvas= in the upper left of the screen that holds the focused
+window. It is rebuilt at each message rather than moved.
+
+A window alert is as wide as the focused window and one line of large text high. Each
+lasts its own duration, so several can be on screen at once. When no window has focus,
+the text is shown as an ordinary =hs.ui.alert= instead. =windowAlertHide()= is there for
+an alert that has been left on screen; it returns how many it removed.
 
 The menu bar item is created by =start()= and shows =config.menubar.iconEmpty= when there
 is nothing to report.
+
+* Unlock time
+
+=unlockSeconds()= returns the seconds since the screen was last unlocked. Emacs uses it to
+leave time spent away from the computer out of how long it has been without a task.
+
+Any of these =hs.power= events counts as an unlock, because which one macOS sends depends
+on how the computer was locked or put to sleep: =screensDidUnlock=, =screensaverDidStop=,
+=sessionDidBecomeActive=, =screensDidWake= and =systemDidWake=. The listeners are added by
+=start()= and removed by =stop()=. Until the first unlock, the count starts from when the
+Spoon was loaded.
 
 * Configuration
 
@@ -130,7 +153,8 @@ is nothing to report.
 | =alertOnFailure=    | true                        | Show a failed emacsclient on screen. |
 
 =config.message= holds =width=, =height=, =duration=, =font=, =textSize=, =textColor=,
-=background= and =level=. =config.menubar= holds =enabled=, =iconEmpty= and =iconMessage=.
+=background= and =level=. =config.windowAlert= holds =duration=, =textSize=, =textColor=,
+=background=, =cornerRadius= and =level=. =config.menubar= holds =enabled=, =iconEmpty= and =iconMessage=.
 
 * Editing a text field in Emacs
 
@@ -163,13 +187,41 @@ emacs.editAll()         // the whole field
 
 ** Setting it up
 
-Emacs needs =hammerspoon.el=, which ships beside this file, and =emacs-everywhere=. It
-also needs the Hammerspoon command line client installed, and =hs.ipc.start()= in your
+Hammerspoon 2 needs its command line client installed, and =hs.ipc.start()= in your
 configuration:
 
 #+begin_src js   :exports both
 hs.ipc.installBinary("/usr/local/bin")   // from the Hammerspoon console, once
 #+end_src
+
+Emacs needs =emacs-everywhere=, from [[https://github.com/dmgerman/emacs-everywhere][the dmgerman fork]]. The upstream package has
+no way to add a system such as Hammerspoon from outside it. Put this Spoon's directory on
+the =load-path=, and call the setup once =emacs-everywhere= is loaded:
+
+#+begin_src emacs-lisp
+(add-to-list 'load-path "~/.config/Hammerspoon2/Spoons/hs_emacs-gt")
+(require 'hammerspoon)
+
+(use-package emacs-everywhere
+  :config
+  (require 'hammerspoon-emacs-everywhere)
+  (hammerspoon-emacs-everywhere-setup))
+#+end_src
+
+=hammerspoon-emacs-everywhere-setup= does four things:
+
+1. It adds Hammerspoon to =emacs-everywhere='s list of systems.
+2. It makes =emacs-everywhere= treat macOS as Hammerspoon rather than as =quartz=.
+3. It inserts the text with =yank=. The Spoon has already put the text on the pasteboard,
+   so =emacs-everywhere= does not need to read the selection through =osascript=.
+4. It binds =C-c C-c= to =hammerspoon-emacs-everywhere-finish=, which pastes the text back
+   only when it has changed.
+
+Any other way of ending the edit, such as =C-c C-k=, brings the original window forward
+and pastes nothing.
+
+=hammerspoon-emacs-everywhere-info-file= must name the same file as
+=config.editing.infoFile=. Both default to =/tmp/emacs-everywhere.txt=.
 
 An out-of-date client is worse than a missing one: it fails with a connection error that
 looks like Hammerspoon being down. Reinstall it whenever Hammerspoon is updated.
@@ -183,6 +235,78 @@ input, because the Hammerspoon 2 client has no =-c= option. Calls go to
 Pasting back is =window.focus()= followed by a delay of =config.editing.focusDelay= before
 the keystrokes are sent, because the keystrokes go to whatever is frontmost when they are
 sent and the activation is not instant.
+
+** Calling Hammerspoon from Emacs
+
+Emacs code calls these functions rather than writing JavaScript:
+
+| Function                        | What it does                                         |
+|---------------------------------+------------------------------------------------------|
+| =hammerspoon-alert=             | shows an alert in the middle of the screen           |
+| =hammerspoon-window-alert=      | shows an alert over the focused window               |
+| =hammerspoon-message=           | shows text in the Spoon's own message display        |
+| =hammerspoon-status=            | puts text in the Spoon's menu bar item               |
+| =hammerspoon-status-clear=      | removes that text                                    |
+| =hammerspoon-application-focus= | launches an application or brings it forward         |
+| =hammerspoon-unlock-seconds=    | returns the seconds since the screen was unlocked    |
+
+=hammerspoon-application-focus= takes a bundle ID, such as =net.ankiweb.anki=, because
+=hs.application.launchOrFocus= in Hammerspoon 2 does not accept an application name.
+
+Any other JavaScript goes through one of two functions:
+
+- =hammerspoon-do= sends it and returns at once. The client is killed if it is still
+  running after =hammerspoon-async-timeout= seconds (10 by default).
+- =hammerspoon-execute= waits for the result and returns it as a string. It waits at most
+  =hammerspoon-timeout= seconds (2 by default) and returns =nil= if no result arrives.
+
+The client evaluates its input one line at a time, so every command has to be a single
+line. =hammerspoon.el= quotes text as JSON, which writes a newline as =\n=.
+
+** When Hammerspoon does not answer
+
+After =hammerspoon-failure-threshold= failed calls in a row (3 by default), both functions
+do nothing for =hammerspoon-cooldown= seconds (5 minutes by default), and Emacs shows a
+warning when the pause begins. =M-x hammerspoon-reset= resumes the calls at once.
+
+A command that throws is not counted as a failure, because Hammerspoon did answer.
+=hammerspoon-execute= signals =hammerspoon-js-error= with the JavaScript message.
+=hammerspoon-do= shows that message in the echo area.
+
+The client prints =Connected to Hammerspoon 2= on standard output before every result,
+and prints JavaScript errors there too. =hammerspoon.el= removes that line, and it tells a
+result from an error by the client's exit status: 0 means success, 1 means the client
+could not reach Hammerspoon 2, and 65 means the JavaScript threw.
+
+** Running source blocks in Org
+
+Source blocks in the language =hammerspoon= run in Hammerspoon 2, and are edited in
+=js-mode=:
+
+#+begin_example
+,#+begin_src hammerspoon
+hs.window.focusedWindow().application.title
+,#+end_src
+#+end_example
+
+=:results value= returns the block's last expression. A string is returned as it is, and
+anything else as JSON. =:results output= returns what the block passed to =console.log=;
+outside a block, that goes only to the Hammerspoon console. Each =:var= is defined as a
+global before the block runs. A block may run for =hammerspoon-babel-timeout= seconds
+(30 by default).
+
+The JavaScript backend that comes with Org, =ob-js=, cannot be used for this, for two
+reasons:
+
+1. It passes the block to the interpreter as a file name, and the client reads only
+   standard input.
+2. For =:results value=, it wraps the block in Node calls such as =require('process')=,
+   which Hammerspoon 2 does not have.
+
+Instead the whole block is sent as one line, passed as a string to a global =eval=. This
+has two consequences. Definitions made with =var= or =function= remain for later blocks,
+but those made with =const= or =let= do not. A block that returns a Promise returns the
+Promise itself, because nothing waits for it.
 
 ** When an application will not give up its text
 

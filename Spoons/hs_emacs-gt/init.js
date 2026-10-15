@@ -1,12 +1,13 @@
 // hs_emacs-gt — Emacs from Hammerspoon 2.
 //
-// Three things, which were two Spoons in Hammerspoon 1 (hs_emacs_helper and, to come,
+// Four things, which were two Spoons in Hammerspoon 1 (hs_emacs_helper and, to come,
 // editWithEmacs):
 //
 //   1. Running elisp through emacsclient, and bringing Emacs forward.
 //   2. Forwarding a key to Emacs, so a chord that macOS or another application would
 //      otherwise take reaches Emacs instead.
 //   3. Showing what Emacs has to say, on screen and in the menu bar.
+//   4. Telling Emacs how long the screen has been unlocked.
 //
 //     const emacs = hs.loadSpoon("hs_emacs-gt")
 //     emacs.execute("(dmg-agenda)", { raise: true })
@@ -52,8 +53,7 @@ const config = {
         notify: true
     },
 
-    // The on-screen message. In Hammerspoon 1 this was an hs.canvas; Hammerspoon 2 has no
-    // canvas, so it is an hs.ui window.
+    // The on-screen message, in the upper left of the screen.
     message: {
         width: 500,
         height: 120,
@@ -62,6 +62,17 @@ const config = {
         textSize: 30,
         textColor: "#FFFFFF",
         background: "#000000DD",
+        level: "floating"
+    },
+
+    // The alert drawn across the middle of the focused window. It is as wide as the window
+    // and one line of text high.
+    windowAlert: {
+        duration: 3,
+        textSize: 90,
+        textColor: "#FFFFFF",
+        background: "#00000080",
+        cornerRadius: 10,
         level: "floating"
     },
 
@@ -79,6 +90,15 @@ const config = {
 let menubarItem = null
 let messageWindow = null
 let messageTimer = null
+
+// Each window alert on screen, with the timer that will remove it. Several can be on
+// screen at once, since each lasts its own duration.
+const windowAlerts = new Set()
+
+// When the screen was last unlocked, in milliseconds since the epoch. It starts at the
+// time the Spoon was loaded, so that until the first unlock it counts from then.
+let unlockTime = Date.now()
+const unlockListeners = new Map()
 
 // Keyed by "cmd+ctrl+space". Held, since a hotkey with no reference left stops firing.
 const forwardedKeys = new Map()
@@ -586,7 +606,6 @@ function editAll() {
 // hs.ui windows take their frame when they are created, so the window is rebuilt at each
 // message rather than reused, which is also what lets it follow the primary screen.
 
-/** Hide the on-screen message, if one is displayed. */
 // Canvas colours are {red, green, blue, alpha} components in 0..1.
 function canvasColor(value) {
     const text = String(value || "#000000").replace("#", "")
@@ -608,6 +627,7 @@ function currentScreen() {
     return hs.screen.main() || hs.screen.primary()
 }
 
+/** Hide the on-screen message, if one is displayed. */
 function messageHide() {
     if (messageTimer) {
         messageTimer.stop()
@@ -700,6 +720,108 @@ function clearStatus() {
     return module.exports
 }
 
+function windowAlertRemove(alert) {
+    alert.timer.stop()
+    alert.canvas.destroy()
+    windowAlerts.delete(alert)
+}
+
+/**
+ * Show text across the middle of the focused window for a few seconds.
+ *
+ * When no window has focus, the text is shown as an ordinary alert instead.
+ *
+ * @param {string} text What to show.
+ * @param {number} [duration] Seconds. Defaults to `config.windowAlert.duration`.
+ */
+function windowAlert(text, duration) {
+    const settings = config.windowAlert
+    const seconds = duration === undefined ? settings.duration : duration
+    const window = hs.window.focusedWindow()
+    const reference = hs.screen.primary()
+    if (!window || !reference) {
+        hs.ui.alert(String(text)).duration(seconds).show()
+        return module.exports
+    }
+
+    const frame = window.frame
+    const primary = reference.fullFrame
+    const height = settings.textSize + 40
+    const top = frame.y + (frame.h - height) / 2
+
+    // A window frame measures y downwards from the top of the primary display, and a
+    // canvas measures it upwards from the bottom, as in message().
+    const canvas = hs.canvas.create({
+        x: frame.x,
+        y: (primary.y + primary.h) - (top + height),
+        w: frame.w,
+        h: height
+    })
+        .level(settings.level)
+        .ignoreMouseEvents(true)
+        .behaviorList(["canJoinAllSpaces", "stationary"])
+
+    canvas.appendElements([
+        {
+            type: "rectangle",
+            action: "fill",
+            fillColor: canvasColor(settings.background),
+            roundedRectRadii: settings.cornerRadius,
+            frame: { x: 0, y: 0, w: frame.w, h: height }
+        },
+        {
+            type: "text",
+            text: String(text),
+            textSize: settings.textSize,
+            textColor: canvasColor(settings.textColor),
+            textAlignment: "center",
+            frame: { x: 0, y: (height - settings.textSize) / 2 - 2, w: frame.w, h: height }
+        }
+    ])
+    canvas.show()
+
+    const alert = { canvas: canvas, timer: null }
+    alert.timer = hs.timer.doAfter(seconds, () => windowAlertRemove(alert))
+    windowAlerts.add(alert)
+    return module.exports
+}
+
+/**
+ * Remove every window alert still on screen, for when one has been left behind.
+ *
+ * @returns {number} How many were removed.
+ */
+function windowAlertHide() {
+    const count = windowAlerts.size
+    for (const alert of Array.from(windowAlerts)) windowAlertRemove(alert)
+    return count
+}
+
+// MARK: - Unlock time
+//
+// The clock code in Emacs bounds "how long without a task" by how long the screen has been
+// unlocked, so that time spent away from the computer is not counted.
+
+// Each of these means someone is using the computer again. Which of them macOS sends
+// depends on how it was locked or put to sleep, so all of them are counted.
+const UNLOCK_EVENTS = [
+    "screensDidUnlock",
+    "screensaverDidStop",
+    "sessionDidBecomeActive",
+    "screensDidWake",
+    "systemDidWake"
+]
+
+/**
+ * Seconds since the screen was last unlocked, or since the Spoon was loaded when no
+ * unlock has been seen.
+ *
+ * @returns {number}
+ */
+function unlockSeconds() {
+    return Math.round((Date.now() - unlockTime) / 1000)
+}
+
 // MARK: - Lifecycle
 
 function start() {
@@ -707,12 +829,22 @@ function start() {
         menubarItem = hs.menubar.create(false)
         clearStatus()
     }
+    for (const event of UNLOCK_EVENTS) {
+        if (unlockListeners.has(event)) continue
+        const listener = () => { unlockTime = Date.now() }
+        unlockListeners.set(event, listener)
+        hs.power.on(event, listener)
+    }
     return module.exports
 }
 
 function stop() {
     unbindAll()
     messageHide()
+    windowAlertHide()
+
+    for (const [event, listener] of unlockListeners) hs.power.off(event, listener)
+    unlockListeners.clear()
 
     for (const timer of pendingTimers) timer.stop()
     pendingTimers.clear()
@@ -756,6 +888,10 @@ module.exports = {
     messageHide,
     setStatus,
     clearStatus,
+    windowAlert,
+    windowAlertHide,
+    // How long the screen has been unlocked.
+    unlockSeconds,
     start,
     stop
 }

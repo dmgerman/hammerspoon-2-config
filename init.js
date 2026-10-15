@@ -524,10 +524,12 @@ interactive.use("hs_emacs-gt", {
             fn: () => emacs.executeAndRaise("(kitty-gt-claude-sessions)")
         });
     },
-    // The two chords these had in ~/.hammerspoon before they were withdrawn there.
+    // The chords these had in ~/.hammerspoon. The two editing chords were editWithEmacs's.
     keys: {
         "cmd-ctrl .": "emacs-tab-manager",
-        "cmd-ctrl '": "emacs-claude-manager"
+        "cmd-ctrl '": "emacs-claude-manager",
+        "cmd-ctrl-alt e": "emacs-edit-selection",
+        "cmd-ctrl-alt-shift e": "emacs-edit-all"
     }
 });
 
