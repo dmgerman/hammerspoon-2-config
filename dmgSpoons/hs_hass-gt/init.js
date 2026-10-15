@@ -10,8 +10,8 @@
 // The service calls are asynchronous and their results are not read: hass-cli reports a
 // failure to the console, and the light either comes on or it does not.
 
-// Commands go through dmg-libs/shell.js rather than hs.task.shell(), which loses its task
-// to a garbage collection while the child is still running.
+// Commands go through dmg-libs/shell.js, whose result has the same shape whether the
+// command succeeds, fails or cannot be started.
 const shell = require(hs.appinfo.configDir + "/dmg-libs/shell.js")
 
 // MARK: - User-configurable settings
@@ -92,9 +92,8 @@ function service(serviceName, args) {
 
     if (pairs.length > 0) command += " --arguments " + shellQuote(pairs.join(","))
 
-    // hass-cli talks to the network, so its child is one of the longest-lived here and the
-    // most exposed to hs.task losing it — see dmg-libs/shell.js. shellRun never rejects, so
-    // a failure arrives as a non-zero code with the output that did arrive.
+    // shellRun never rejects, so a failure arrives as a non-zero code with the output that
+    // did arrive.
     return shell.shellRun(command).then((result) => {
         if (result.code === 0) return true
         const detail = (result.err || result.out || "").trim()

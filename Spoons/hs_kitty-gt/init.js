@@ -26,11 +26,6 @@
 // hs.execute, so commands run under hs.task and every method that talks to kitty returns a
 // promise. A chooser cannot therefore be built and shown in one call: the tabs have to
 // arrive first.
-//
-// The task object is held in a set until it terminates. An hs.task with nothing referring
-// to it can be collected while its child is still running, and the callback then never
-// fires: the promise neither resolves nor rejects, and nothing is logged. This is the same
-// reason hs.timer handles are kept in variables throughout this configuration.
 
 // MARK: - User-configurable settings
 
@@ -66,10 +61,6 @@ const KITTY_BUNDLE_ID = "net.kovidgoyal.kitty"
 
 // MARK: - State
 
-// hs.task objects are held until they terminate: one with nothing referring to it can be
-// collected while its child is still running, and its callback then never fires.
-const runningTasks = new Set()
-
 // The socket, once found. Cleared when a command fails, so that a kitty which has been
 // restarted is found again rather than being reported unreachable for ever.
 let socketPath = null
@@ -96,7 +87,6 @@ function run(binary, args) {
 
         const task = hs.task.create(binary, args,
             (code) => {
-                runningTasks.delete(task)
                 if (config.logCommands) {
                     log(`${args.join(" ")} -> ${code} in ${Date.now() - started}ms`)
                 }
@@ -113,7 +103,6 @@ function run(binary, args) {
             return
         }
 
-        runningTasks.add(task)
         task.start()
     })
 }

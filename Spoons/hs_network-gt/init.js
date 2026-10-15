@@ -107,10 +107,6 @@ let bannerHideTimer = null
 // bytes accumulated since the last snapshot.
 let polling = false
 
-// hs.task objects are held until they terminate, so a task cannot be collected while it
-// is still running.
-const runningTasks = new Set()
-
 // MARK: - Formatting
 
 function bytesFormat(n) {
@@ -145,7 +141,6 @@ function shellRun(command) {
         let out = ""
         const task = hs.task.create("/bin/sh", ["-c", command],
             (code) => {
-                runningTasks.delete(task)
                 resolve({out: out, code: code})
             },
             null,
@@ -157,7 +152,6 @@ function shellRun(command) {
             resolve({out: "", code: -1})
             return
         }
-        runningTasks.add(task)
         task.start()
     })
 }

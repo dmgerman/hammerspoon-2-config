@@ -30,11 +30,10 @@
 // read by 10 ms and called that async, so Hammerspoon froze for the length of every
 // transcription. Here a transcriber returns a promise and the state machine awaits it.
 //
-// Commands run through dmg-libs/shell.js rather than hs.task.shell(), which loses its task
-// to garbage collection; see that file and ai/issue_267_task-gc.md.
+// Commands run through dmg-libs/shell.js, whose result has the same shape whether the
+// command succeeds, fails or cannot be started.
 
 const shell = require(hs.appinfo.configDir + "/dmg-libs/shell.js")
-const timers = require(hs.appinfo.configDir + "/dmg-libs/timer.js")
 
 // MARK: - User-configurable settings
 
@@ -213,7 +212,7 @@ let userCallback = null
 
 // Choosers are held at module level because a chooser is lost to garbage collection like
 // everything else with no reference: shown from a local variable, it can be collected
-// between being shown and being chosen from. Same reason as dmg-libs/timer.js.
+// between being shown and being chosen from.
 let languageChooser = null
 let filterChooser = null
 let recordingChooser = null
@@ -289,28 +288,6 @@ async function executableResolve(command) {
     return found.code === 0 && path ? path : null
 }
 
-// Timers this Spoon may stop before they fire, held so that a garbage collection cannot
-// take one while it is waiting — the same hazard dmg-libs/timer.js exists for. They are not
-// put through that module because it forgets a timer only when it fires, so one stopped
-// early stays in its count for good; `diagnose()` reports pending timers as a way of
-// noticing a leak, and a count that only ever rises would say nothing.
-const heldTimers = new Set()
-
-function timerAfter(seconds, fn) {
-    const timer = hs.timer.doAfter(seconds, () => {
-        heldTimers.delete(timer)
-        fn()
-    })
-    if (timer) heldTimers.add(timer)
-    return timer
-}
-
-function timerStop(timer) {
-    if (!timer) return
-    timer.stop()
-    heldTimers.delete(timer)
-}
-
 /**
  * Reject if `promise` has not settled within `seconds`, so no await can hang for ever.
  *
@@ -319,11 +296,11 @@ function timerStop(timer) {
 function promiseTimeout(promise, seconds, what) {
     let timer = null
     const limit = new Promise((resolve, reject) => {
-        timer = timerAfter(seconds, () => {
+        timer = hs.timer.doAfter(seconds, () => {
             reject(new Error(`${what} timed out after ${seconds}s`))
         })
     })
-    return Promise.race([promise, limit]).finally(() => timerStop(timer))
+    return Promise.race([promise, limit]).finally(() => { if (timer) timer.stop() })
 }
 
 function firstLine(text) {
@@ -925,8 +902,7 @@ const transcribers = {
 
     whisperserver: {
         fallback: "whispercli",
-        // The server task, when this Spoon started it. Held so it can be stopped again, and
-        // so it is not collected while running.
+        // The server task, when this Spoon started it, kept so that it can be stopped again.
         task: null,
 
         validate: async () => {
@@ -984,7 +960,7 @@ const transcribers = {
                     return null
                 }
                 if (!self.task) return "The whisper server exited while starting"
-                await new Promise((resolve) => timers.later(0.5, resolve))
+                await new Promise((resolve) => hs.timer.doAfter(0.5, resolve))
             }
 
             if (self.task) self.task.terminate()
@@ -1407,7 +1383,7 @@ const recorders = {
 
             // The new server loads its model before it listens, which takes a few seconds,
             // and a connection refused before then fails at once. So try until it answers.
-            const pause = () => new Promise((resolve) => timers.later(0.5, resolve))
+            const pause = () => new Promise((resolve) => hs.timer.doAfter(0.5, resolve))
             let failed = null
             for (let attempt = 0; attempt < 60; attempt += 1) {
                 failed = await self.connect()
@@ -1757,7 +1733,7 @@ function autoPaste(text) {
         }
     }
 
-    timers.later(config.autoPasteDelay, () => {
+    hs.timer.doAfter(config.autoPasteDelay, () => {
         try {
             pasteKeystroke()
             notify("transcription", "info", `Pasted ${text.length} characters`)
@@ -2159,7 +2135,7 @@ async function recordingTranscribe(audioFile, callback) {
     const focused = hs.window.focusedWindow()
     const current = focused ? focused.application : null
     if (app && current && current.bundleID === app.bundleID) {
-        timers.later(config.autoPasteDelay, () => {
+        hs.timer.doAfter(config.autoPasteDelay, () => {
             pasteKeystroke()
             notify("transcription", "info", "Pasted")
         })
@@ -2272,10 +2248,14 @@ function diagnose() {
     say(`recordings in ${config.tempDir}: ${recordings.length} (keeping ` +
         `${config.recordingsKeep || "all"})`)
     say(`debug logging: ${debugEnabled}`)
-    // An idle Spoon should hold no timers, and one task only when the streaming server is
-    // running. Anything else is something that was not put away.
-    say(`held: ${shell.runningCount()} tasks, ${heldTimers.size} timers ` +
-        `(${timers.pendingCount()} pending in dmg-libs/timer.js, shared with other Spoons)`)
+    // Running tasks and pending one-shot timers, from every Spoon and not only this one.
+    // An idle Spoon should leave only the streaming server's task running, so anything
+    // else here is something that was not stopped.
+    const active = hs.activeObjects().map((obj) => obj.toString())
+        .filter((name) => name.startsWith("<HSTask") ||
+            (name.startsWith("<HSTimer") && !name.includes("repeating")))
+    say(`running tasks and pending timers: ${active.length}`)
+    active.forEach((name) => say(`  ${name}`))
     say("--- end ---")
     return module.exports
 }

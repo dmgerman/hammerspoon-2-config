@@ -26,10 +26,6 @@
 //   * There is no hs.dialog, so an entry longer than config.maxEntrySize is truncated
 //     when it is stored instead of prompting. v1's max-size toggle is gone with it.
 
-// The paste delays go through dmg-libs/timer.js, which holds each timer until it fires.
-// An hs.timer.doAfter whose return value is discarded is collected before the deadline.
-const timers = require(hs.appinfo.configDir + "/dmg-libs/timer.js")
-
 // MARK: - User-configurable settings
 
 const config = {
@@ -463,7 +459,7 @@ function pasteboardCapture() {
 function windowRestore(then) {
     if (chooser && chooser.isVisible) chooser.hide()
     if (previousWindow) previousWindow.focus()
-    timers.later(config.pasteDelay, then)
+    hs.timer.doAfter(config.pasteDelay, then)
 }
 
 // v1's "paste all with delimiter": every entry from the given row up to the newest one,
@@ -857,7 +853,7 @@ function chooserSelect(choice) {
         hs.pasteboard.writeImage(image)
         if (previousWindow) previousWindow.focus()
         if (pasteOnSelect) {
-            timers.later(config.pasteDelay, () => hs.eventtap.keyStroke(["cmd"], "v"))
+            hs.timer.doAfter(config.pasteDelay, () => hs.eventtap.keyStroke(["cmd"], "v"))
         }
         return
     }
@@ -867,7 +863,7 @@ function chooserSelect(choice) {
     hs.pasteboard.writeString(choice.data)
     if (previousWindow) previousWindow.focus()
     if (pasteOnSelect) {
-        timers.later(config.pasteDelay, () => hs.eventtap.keyStroke(["cmd"], "v"))
+        hs.timer.doAfter(config.pasteDelay, () => hs.eventtap.keyStroke(["cmd"], "v"))
     }
 }
 

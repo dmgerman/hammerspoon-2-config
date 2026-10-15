@@ -25,11 +25,6 @@
 // positions go on the ring. Undo then returns to where your hand left it, and undo again to
 // where the last command had put it.
 
-// resize()'s retry delay goes through dmg-libs/timer.js, which holds each timer until it
-// fires. An hs.timer.doAfter whose return value is discarded is collected before the
-// deadline.
-const timers = require(hs.appinfo.configDir + "/dmg-libs/timer.js")
-
 // MARK: - User-configurable settings
 
 const config = {
@@ -272,10 +267,10 @@ function focusWindow(window) {
     step("raise", () => window.raise())
 
     // Dropped if another window is asked for first, so the assertion cannot undo a newer
-    // choice. The timer is held by dmg-libs/timer.js until it fires.
+    // choice.
     if (config.focusReassertDelay > 0) {
         focusReassertFor = window.id
-        timers.later(config.focusReassertDelay, () => {
+        hs.timer.doAfter(config.focusReassertDelay, () => {
             if (focusReassertFor !== window.id) return
             focusReassertFor = null
             window.becomeMain()
@@ -860,7 +855,7 @@ function sizeApplied(win, rect) {
  */
 function resize(win, rect, attempts) {
     if (attempts <= 0) return
-    timers.later(config.resizeDelay, () => {
+    hs.timer.doAfter(config.resizeDelay, () => {
         try {
             // The advice recorded where the window was put before these corrections ran.
             // Bring that up to date, or the next move reads the difference as one made by

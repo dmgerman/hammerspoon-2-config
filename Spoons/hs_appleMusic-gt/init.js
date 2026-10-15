@@ -11,8 +11,8 @@
 // album is then chosen by identifier rather than by whichever card came first, which is
 // what kept turning a plain album into its deluxe edition.
 
-// Commands go through dmg-libs/shell.js rather than hs.task.shell(), which loses its task
-// to a garbage collection while the child is still running.
+// Commands go through dmg-libs/shell.js, whose result has the same shape whether the
+// command succeeds, fails or cannot be started.
 const shell = require(hs.appinfo.configDir + "/dmg-libs/shell.js")
 
 // MARK: - User-configurable settings

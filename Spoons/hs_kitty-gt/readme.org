@@ -65,10 +65,6 @@ The consequence is that the chooser cannot be built and shown in one call: kitty
 answer first. On one machine =kitty @ ls= takes about 70 ms, so the chooser appears about
 that long after the key is pressed.
 
-The task object is held in a set until it terminates. An =hs.task= with nothing referring to
-it can be collected while its child is still running, and its callback then never fires:
-the promise neither resolves nor rejects, and nothing is logged.
-
 * Talking to kitty
 
 Through kitty's remote control interface, =kitty @ --to <socket> <command>=. The socket is

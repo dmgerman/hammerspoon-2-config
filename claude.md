@@ -329,7 +329,7 @@ policy, and a draft without one is not ready to file. Name the tool and the mode
 the AI actually did, and say that a human reviewed and edited it. The extent has to be
 accurate: if a measurement needed a hand on the mouse or the keyboard, say so, and do not
 claim work that was not done. The format follows the issues already filed from here —
-`issue_267_task-gc.md` and `resolved_issue_258_canvas-right-click.md`:
+`resolved_issue_267_task-gc.md` and `resolved_issue_258_canvas-right-click.md`:
 
 ```markdown
 ## AI disclosure

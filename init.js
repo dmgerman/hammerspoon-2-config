@@ -403,9 +403,8 @@ interactive.use("hs_clipboard-gt", {
 // Stream Deck by hs_streamdeck-gt. Editing menus.js takes effect on the next reload.
 const menus = require(hs.appinfo.configDir + "/menus.js");
 
-// Commands go through dmg-libs/shell.js rather than hs.task.shell(), which loses its task
-// to a garbage collection while the child is still running. See its header for the
-// measurements, and ai/issue_267_task-gc.md for the report, filed upstream as #267.
+// Commands go through dmg-libs/shell.js, whose result has the same shape whether the
+// command succeeds, fails or cannot be started.
 const shell = require(hs.appinfo.configDir + "/dmg-libs/shell.js");
 
 // Switch to a Chrome tab rather than to Chrome. focusTabChrome.py lists Chrome's tabs,
@@ -1008,10 +1007,16 @@ interactive.use("hs_selectWindow-gt", {
         // back: the second press goes to the most recently used window outside that
         // application. Matched on bundle identifier, so a renamed or localised application
         // is still found.
-        const application = (name, title, bundleID) => interactive.define({
+        //
+        // An optional titlePattern, a RegExp, narrows it to that application's windows whose
+        // title matches. When none does, the application's current window is used and an
+        // alert says the pattern found nothing. For example:
+        //   application("window-select-kitty-notes", "the kitty notes window",
+        //               "net.kovidgoyal.kitty", /^notes/);
+        const application = (name, title, bundleID, titlePattern) => interactive.define({
             name: name,
             doc: `Switch to ${title}, or back to the previous window when already there.`,
-            fn: () => switcher.selectApplicationByBundle(bundleID)
+            fn: () => switcher.selectApplicationByBundle(bundleID, titlePattern)
         });
 
         application("window-select-emacs", "Emacs", "org.gnu.Emacs");
@@ -1046,9 +1051,8 @@ interactive.use("hs_whisper-gt", {
         monitorUserActivity: true,
         pasteWithEmacsYank: true,
 
-        // The Python that numpy, sounddevice, scipy, torch and torchaudio are installed
-        // for, which is not the system one.
-        streamingPythonPath: `${hs.fs.homeDirectory()}/.config/dmg/python/bin/python3`,
+        // The streaming server is the LaunchAgent org.turingmachine.whisper-stream, on the
+        // Spoon's default streamingUrl; see Spoons/hs_whisper-gt/readme.org.
         streamingSilenceThreshold: 3.0,
         streamingMinChunkDuration: 5.0,
 

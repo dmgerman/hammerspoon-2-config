@@ -17,8 +17,8 @@
 // The elisp this Spoon runs is the caller's: nothing here names a function that is not
 // part of Emacs itself.
 
-// Commands go through dmg-libs/shell.js rather than hs.task.shell(), which loses its task
-// to a garbage collection while the child is still running.
+// Commands go through dmg-libs/shell.js, whose result has the same shape whether the
+// command succeeds, fails or cannot be started.
 const shell = require(hs.appinfo.configDir + "/dmg-libs/shell.js")
 
 // MARK: - User-configurable settings
@@ -231,8 +231,7 @@ function runClient(args, retried) {
     const argv = socketPath ? ["--socket-name=" + socketPath].concat(args) : args.slice()
 
     // A failure arrives as a non-zero code rather than a rejection, so both outcomes are
-    // handled in the one then(). See dmg-libs/shell.js for why these do not use hs.task
-    // directly.
+    // handled in the one then().
     return shell.commandRun(config.emacsClient, argv).then((result) => {
         if (result.code === 0) {
             return { ok: true, stdout: String(result.out || ""), stderr: "" }

@@ -1,36 +1,16 @@
-// Running external commands without losing them to a garbage collection.
-//
-// hs.task.shell() and hs.task.runAsync() keep no reference to the task they start, and
-// nothing on the Swift side retains it either: hs.task's activeTasks is a
-// Set<ObjectIdentifier>, which records identities and holds no references. So when a
-// collection runs while the child is still alive, the task is destroyed, the child is sent
-// SIGTERM, and the promise is neither resolved nor rejected for the lifetime of the process.
-//
-// Measured on 2026-10-07 against the app built from main after d55df50:
-//
-//   hs.task.shell("seq 1 200000")              never settled, in 4 runs of 4
-//   this module's shellRun("seq 1 200000")     1288895 bytes, the exact output
-//   this module's shellRun("seq 1 500000")     3388895 bytes
-//
-// Capturing output is what causes the collection: hs.task.runAsync accumulates output into
-// JavaScript strings, so the more output there is to save, the likelier the capture is to
-// destroy the task doing it. Commands producing little output fail at a lower rate rather
-// than not at all — roughly one batch in eight, measured without forcing a collection.
-//
-// The fix is one reference. Every task started here is held in `running` from start() until
-// its termination callback fires, so it cannot be collected while the child is alive.
-// ai/issue_unfiled_task-gc.md has the full report; once hs.task retains running tasks
-// itself, this module becomes a convenience rather than a workaround.
+// Running external commands, resolving to one result shape.
 //
 // Nothing here rejects. A command that cannot be started, or that exits non-zero, resolves
 // with a non-zero `code` and whatever output arrived, so a caller reads one shape in all
 // cases. That also avoids hs.task.runAsync's rejection shape, which is the result object
 // rather than an Error — `e.message` on it is undefined, so a conventional catch logs
 // nothing useful.
-
-// Tasks that have started and not yet terminated. Module level, so a task outlives the
-// function that started it.
-const running = new Set()
+//
+// This module began as a workaround for upstream #267: hs.task kept no reference to a
+// running task, so a garbage collection killed the child and left hs.task.shell()'s promise
+// pending for good. That was fixed in 58f4e39f, which keeps a running task alive until it
+// terminates, so tasks are no longer held here. ai/resolved_issue_267_task-gc.md has the
+// report.
 
 /**
  * Run a command, resolving to its output and exit code.
@@ -47,7 +27,6 @@ function commandRun(launchPath, args) {
 
         const task = hs.task.create(launchPath, args || [],
             (code) => {
-                running.delete(task)
                 resolve({out: out, err: err, code: code})
             },
             null,
@@ -61,7 +40,6 @@ function commandRun(launchPath, args) {
             return
         }
 
-        running.add(task)
         task.start()
     })
 }
@@ -85,7 +63,6 @@ function commandRunInput(launchPath, args, input) {
 
         const task = hs.task.create(launchPath, args || [],
             (code) => {
-                running.delete(task)
                 resolve({out: out, err: err, code: code})
             },
             null,
@@ -99,7 +76,6 @@ function commandRunInput(launchPath, args, input) {
             return
         }
 
-        running.add(task)
         task.start()
         task.sendInput(input)
         task.closeInput()
@@ -107,14 +83,11 @@ function commandRunInput(launchPath, args, input) {
 }
 
 /**
- * Start a long-running command and return it, held until it exits.
+ * Start a long-running command and return it.
  *
  * For a command that outlives the call: a server that is sent requests and answers them,
  * rather than one that is run for an answer. `commandRun` is the wrong shape for that --
  * it resolves only once the command has exited, which this kind never does until told to.
- *
- * The task is held for the same reason as everything else here, and that reason is more
- * acute for a long-lived one: the longer it runs, the likelier a collection reaches it.
  *
  * @param {string} launchPath The executable.
  * @param {string[]} args Passed as an argument list.
@@ -131,7 +104,6 @@ function commandStart(launchPath, args, handlers) {
 
     const task = hs.task.create(launchPath, args || [],
         (code) => {
-            running.delete(task)
             if (options.onExit) options.onExit(code)
         },
         null,
@@ -141,7 +113,6 @@ function commandStart(launchPath, args, handlers) {
 
     if (!task) return null
 
-    running.add(task)
     task.start()
     return task
 }
@@ -179,16 +150,10 @@ function shellRunLogging(label, command) {
     })
 }
 
-/** How many tasks are running, for checking that none are being leaked. */
-function runningCount() {
-    return running.size
-}
-
 module.exports = {
     commandRun: commandRun,
     commandRunInput: commandRunInput,
     commandStart: commandStart,
     shellRun: shellRun,
-    shellRunLogging: shellRunLogging,
-    runningCount: runningCount
+    shellRunLogging: shellRunLogging
 }
