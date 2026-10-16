@@ -49,6 +49,8 @@ nothing is reachable only by a keyboard shortcut you have to remember:
   while one is running
 - *Language*, with the current one ticked
 - *Filter*, with the active one ticked and /No filter/ to clear it
+- *Paste each chunk as it is ready*, ticked when it is on. It is shown only with the
+  =streaming= recorder; see /Pasting each chunk as it is ready/
 - *Microphone*, titled with the input device being recorded from, with /Automatic/ and every
   input device to choose from. When the device is not the system default and was not chosen
   by name, the title says why: either the default is a Bluetooth headset (see /Which
@@ -180,6 +182,41 @@ A pause only ends a chunk if it is longer than =streamingSilenceThreshold= /and/
 so far is longer than =streamingMinChunkDuration=. With the values above, pausing for two
 seconds between sentences will not split them, and neither will a pause four seconds in.
 Lower both if you want the text to come back in smaller pieces.
+
+**** Pasting each chunk as it is ready
+
+When a dictation is being pasted (=transcribeToggle=, or a left click on the menu bar item),
+each chunk is pasted as soon as it has been transcribed, while you carry on speaking. You do
+not have to wait for the end of the dictation. Chunks are pasted in the order they were
+recorded. A chunk that comes back early waits for the ones before it. A chunk that cannot be
+transcribed is skipped and reported, as it is at the end. Consecutive chunks are separated
+by a blank line.
+
+#+begin_src js   :exports both
+whisper.config.streamingChunkInsert = true   // false to paste the whole dictation at the end
+#+end_src
+
+It can also be turned on and off from the menu bar item, or with =chunkInsertToggle()=. That
+change lasts until the configuration is reloaded. A dictation already in progress keeps the
+setting it started with.
+
+It does not apply in three cases, which all fall back to delivering the whole text at the
+end:
+
+1. The dictation goes to the clipboard, or to a callback, rather than being pasted.
+2. A filter is active. A filter runs over the whole text, and pasting chunk by chunk would
+   either bypass it or run it over fragments.
+3. No window had focus when the dictation started.
+
+Each chunk is pasted only into the window that had focus when the dictation started. If
+focus is somewhere else when a chunk is ready, pasting stops for the rest of the dictation.
+With =config.monitorUserActivity= it also stops once you type or click, as auto-paste does;
+the Spoon's own paste keystrokes are not counted. When the dictation ends, the chunks that
+were not pasted are put on the clipboard, so ⌘V back in the original window completes it.
+When every chunk was pasted, the clipboard holds the whole dictation.
+
+The per-chunk text shown by =chunkAlertSeconds= is not shown for a chunk that is pasted,
+because it would only repeat what has just appeared in the application.
 
 =sox= does not chunk: it records one file and transcribes it once you stop.
 
@@ -414,6 +451,12 @@ whisper.inputDeviceSet(null)
 
 Open the filter chooser; see /Filters/ above.
 
+** chunkInsertToggle() / chunkInsertSet(enable)
+
+Turn pasting each chunk as it is ready on or off; see /Pasting each chunk as it is ready/.
+Both set =config.streamingChunkInsert=, and the change lasts until the configuration is
+reloaded.
+
 ** recordingsList() / recordingsPrune()
 
 The recordings in =config.tempDir=, newest first, and a prune down to the newest
@@ -442,8 +485,8 @@ Whether a recording is in progress, and the state machine's state: =IDLE=, =RECO
 ** bindHotkeys(mapping) / start() / stop()
 
 =bindHotkeys= takes any of =transcribeToggle=, =transcribeToClipboardToggle=,
-=languageSelect=, =languageNext=, =filterSelect=, =transcribeAgain= and =transcribeAbort=,
-each holding =[[modifiers], key]=. All are optional. =transcribeToggle= and
+=languageSelect=, =languageNext=, =filterSelect=, =chunkInsertToggle=, =transcribeAgain=
+and =transcribeAbort=, each holding =[[modifiers], key]=. All are optional. =transcribeToggle= and
 =transcribeToClipboardToggle= both call =transcribeToggle()=, with and without the argument
 that says to type the text.
 
@@ -489,6 +532,7 @@ streamingAudioInputDevice: null
 streamingSilenceThreshold: 2.0         // seconds of silence that ends a chunk
 streamingMinChunkDuration: 3.0
 streamingMaxChunkDuration: 600.0
+streamingChunkInsert: true             // paste each chunk as it is ready, when pasting
 
 whisperkitCmd: "/opt/homebrew/bin/whisperkit-cli"
 whisperkitModel: "large-v3"

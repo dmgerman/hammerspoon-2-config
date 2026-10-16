@@ -107,6 +107,11 @@ const config = {
     streamingSilenceThreshold: 2.0,   // seconds of silence that ends a chunk
     streamingMinChunkDuration: 3.0,
     streamingMaxChunkDuration: 600.0,
+    // When pasting, paste each chunk as soon as it and every chunk before it have been
+    // transcribed, instead of pasting the whole dictation once at the end. It applies only
+    // without a filter, because a filter is run over the whole text. Pasting stops, and the
+    // rest goes to the clipboard, once focus leaves the window the dictation began in.
+    streamingChunkInsert: true,
 
     // whisperkit
     whisperkitCmd: "/opt/homebrew/bin/whisperkit-cli",
@@ -153,6 +158,15 @@ const SEVERITY_DURATIONS = {debug: 0, info: 3, warning: 5, error: 10}
 // about 0. Only
 // the first chunk is judged — silence between later phrases is ordinary.
 const SILENCE_PEAK_FLOOR = 0.001
+
+// Placed between the chunks of a dictation, both when they are pasted one at a time and
+// when they are joined at the end.
+const CHUNK_SEPARATOR = "\n\n"
+
+// Seconds to wait after a paste keystroke before the clipboard is written again. The
+// application reads the clipboard when it handles the keystroke, which can be after
+// keyStroke() returns. Writing the next chunk before then pastes the next chunk instead.
+const PASTE_SETTLE_SECONDS = 0.25
 
 const STATES = {
     idle: "IDLE",
@@ -205,7 +219,7 @@ let indicatorCanvas = null
 
 let activityTap = null
 let activityAppListener = null
-let activityCounts = {keys: 0, clicks: 0, itemClicks: 0, appSwitches: 0}
+let activityCounts = {keys: 0, ownKeys: 0, clicks: 0, itemClicks: 0, appSwitches: 0}
 let startingApp = null
 let shouldPaste = false
 let userCallback = null
@@ -384,6 +398,18 @@ function menuBuild() {
             fn: () => filterSet(i)
         })))
     })
+
+    // Decided when a dictation starts, like the language, so not selectable while one runs.
+    // Only the streaming recorder produces more than one chunk, so the entry is offered
+    // only with it.
+    if (recorder && recorder.name === "streaming") {
+        entries.push({
+            title: "Paste each chunk as it is ready",
+            checked: !!config.streamingChunkInsert,
+            disabled: !idle,
+            fn: () => chunkInsertToggle()
+        })
+    }
 
     // The streaming server opens the device when it starts, so changing it restarts the
     // server, which would throw away a dictation in progress. Not selectable while one runs.
@@ -594,7 +620,7 @@ function indicatorHide() {
  * carried a table of them that nothing could ever match.
  */
 function activityMonitorStart() {
-    activityCounts = {keys: 0, clicks: 0, itemClicks: 0, appSwitches: 0}
+    activityCounts = {keys: 0, ownKeys: 0, clicks: 0, itemClicks: 0, appSwitches: 0}
 
     const focused = hs.window.focusedWindow()
     startingApp = focused ? focused.application : null
@@ -646,10 +672,27 @@ function activityClicksElsewhere() {
     return Math.max(0, activityCounts.clicks - activityCounts.itemClicks)
 }
 
+/**
+ * Keystrokes during the recording, leaving out the paste keystrokes this Spoon sent itself.
+ * Those arrive at the event tap like any other once chunks are pasted while recording.
+ */
+function activityKeysElsewhere() {
+    return Math.max(0, activityCounts.keys - activityCounts.ownKeys)
+}
+
+/** Why the user looks to have moved on since the recording started, or null if they have not. */
+function activityMovedOn() {
+    const busy = activityKeysElsewhere() >= config.activityKeyLimit ||
+        activityClicksElsewhere() >= 1 ||
+        activityCounts.appSwitches >= 1
+    return busy ? `you were typing or clicking while recording (${activitySummary()})` : null
+}
+
 function activitySummary() {
     const parts = []
     const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`
-    if (activityCounts.keys > 0) parts.push(plural(activityCounts.keys, "key", "keys"))
+    const keys = activityKeysElsewhere()
+    if (keys > 0) parts.push(plural(keys, "key", "keys"))
     const clicks = activityClicksElsewhere()
     if (clicks > 0) parts.push(plural(clicks, "click", "clicks"))
     if (activityCounts.appSwitches > 0) {
@@ -1477,6 +1520,25 @@ function sessionNew(lang) {
         results: new Map(),
         // {num, reason} for each chunk that could not be transcribed.
         failures: [],
+        // Chunk numbers in the order the recorder delivered them.
+        order: [],
+        // Chunk numbers that have come back, whether with text or not.
+        settled: new Set(),
+
+        // Whether each chunk is pasted as soon as it is ready; see chunksInsert().
+        incremental: false,
+        // The window the dictation began in, as {pid, id}. Chunks are pasted only there.
+        target: null,
+        // How many entries of `order` chunksInsert() has dealt with.
+        insertedUpTo: 0,
+        // Chunk numbers whose text has been pasted.
+        inserted: new Set(),
+        // Why pasting stopped part way, or null while it continues.
+        insertStopped: null,
+        // The pastes queued so far, so that each finishes before the next one writes the
+        // clipboard.
+        insertChain: Promise.resolve(),
+
         recorderDone: false,
         finalizing: false
     }
@@ -1546,15 +1608,18 @@ function chunkReceived(mine, audioFile, chunkNum, isFinal, peak) {
         return
     }
 
+    mine.order.push(chunkNum)
     const work = transcriber.transcribe(audioFile, mine.lang)
         .then((text) => {
             if (!sessionCurrent(mine)) return
             if (text) mine.results.set(chunkNum, text)
+            mine.settled.add(chunkNum)
             chunkSettled(mine, chunkNum, isFinal, text)
         })
         .catch((e) => {
             if (!sessionCurrent(mine)) return
             mine.failures.push({num: chunkNum, reason: e.message})
+            mine.settled.add(chunkNum)
             notify("transcription", "debug", `chunk ${chunkNum} failed: ${e.message}`)
             chunkSettled(mine, chunkNum, isFinal, null)
         })
@@ -1588,13 +1653,86 @@ function chunkSettled(mine, chunkNum, isFinal, text) {
     if (state === STATES.recording) menuBarElapsed()
     else if (state === STATES.transcribing) menuBarTranscribing(mine.lang)
 
+    // Called with or without text: a chunk that failed or said nothing still has to be
+    // passed over before the chunks after it can be pasted.
+    if (mine.incremental) chunksInsert(mine)
+
     if (!text) return
     notify("transcription", "debug", `chunk ${chunkNum}: ${text}`)
+
+    // A chunk being pasted appears in the application, so an alert would only repeat it.
+    if (mine.incremental && !mine.insertStopped) return
 
     const onlyChunk = chunkNum === 1 && isFinal
     if (config.chunkAlertSeconds > 0 && !onlyChunk) {
         notify("transcription", "info", `${chunkNum}: ${text}`, config.chunkAlertSeconds)
     }
+}
+
+/**
+ * Queue a paste for every chunk that is now ready, in the order the recorder delivered them.
+ *
+ * Chunks are transcribed concurrently and can come back in any order. A chunk is pasted only
+ * once every chunk before it has come back, so a slow chunk holds back the ones after it. A
+ * chunk that failed or produced no text is passed over rather than waited for.
+ */
+function chunksInsert(mine) {
+    while (mine.insertedUpTo < mine.order.length) {
+        const num = mine.order[mine.insertedUpTo]
+        if (!mine.settled.has(num)) return
+        mine.insertedUpTo += 1
+        if (!mine.results.has(num)) continue
+        mine.insertChain = mine.insertChain.then(() => chunkInsert(mine, num))
+    }
+}
+
+/** Resolve after `seconds`. */
+function secondsWait(seconds) {
+    return new Promise((resolve) => hs.timer.doAfter(seconds, resolve))
+}
+
+/** Paste one chunk where the dictation began, unless focus has left it. */
+async function chunkInsert(mine, num) {
+    if (!sessionCurrent(mine) || mine.insertStopped) return
+
+    const lost = insertTargetLost(mine)
+    if (lost) {
+        mine.insertStopped = lost
+        notify("transcription", "warning",
+            `Stopped pasting: ${lost}. The rest of the dictation will be put on the clipboard.`)
+        return
+    }
+
+    const text = mine.results.get(num)
+    hs.pasteboard.writeString(mine.inserted.size > 0 ? CHUNK_SEPARATOR + text : text)
+    await secondsWait(config.autoPasteDelay)
+    if (!sessionCurrent(mine)) return
+
+    try {
+        pasteKeystroke()
+    } catch (e) {
+        mine.insertStopped = `the paste failed (${e.message})`
+        notify("transcription", "error",
+            `Could not paste (${e.message}). The rest of the dictation will be put on the ` +
+            "clipboard.")
+        return
+    }
+    mine.inserted.add(num)
+    logDebug(`pasted chunk ${num}`)
+    await secondsWait(PASTE_SETTLE_SECONDS)
+}
+
+/** Why a chunk should not be pasted now, or null if it should. */
+function insertTargetLost(mine) {
+    const focused = hs.window.focusedWindow()
+    if (!focused) return "no window has focus"
+    if (focused.pid !== mine.target.pid) {
+        const app = focused.application
+        return `focus moved to ${app ? app.title : "another application"}`
+    }
+    if (focused.id !== mine.target.id) return "focus moved to another window"
+    if (config.monitorUserActivity) return activityMovedOn()
+    return null
 }
 
 /**
@@ -1633,10 +1771,12 @@ async function sessionFinalize(mine) {
 
     mine.finalizing = true
     await Promise.allSettled(mine.chunks)
+    // Every chunk has settled, so every paste has been queued by now.
+    await mine.insertChain
     if (!sessionCurrent(mine)) return
 
     const numbers = [...mine.results.keys()].sort((a, b) => a - b)
-    const text = numbers.map((n) => mine.results.get(n)).join("\n\n")
+    const text = numbers.map((n) => mine.results.get(n)).join(CHUNK_SEPARATOR)
 
     if (mine.failures.length > 0) {
         const which = mine.failures.map((f) => f.num).sort((a, b) => a - b).join(", ")
@@ -1654,6 +1794,11 @@ async function sessionFinalize(mine) {
             notify("transcription", "warning", "Nothing was transcribed")
         }
         sessionEnd(mine)
+        return
+    }
+
+    if (mine.incremental) {
+        sessionInsertFinish(mine, numbers, text)
         return
     }
 
@@ -1688,6 +1833,37 @@ async function sessionFinalize(mine) {
     autoPaste(filtered)
 }
 
+/**
+ * End a dictation whose chunks were pasted one at a time, leaving the clipboard useful.
+ *
+ * When every chunk was pasted, the clipboard gets the whole dictation, as it would have
+ * without incremental pasting. When pasting stopped part way, it gets only the chunks that
+ * were not pasted, so that ⌘V back in the original window completes the dictation.
+ *
+ * No filter is applied here. Incremental pasting is used only without one, and a filter
+ * chosen during the recording would otherwise run over text that has already been pasted.
+ *
+ * @param {object} mine The session.
+ * @param {number[]} numbers The chunks that produced text, in order.
+ * @param {string} text Those chunks joined.
+ */
+function sessionInsertFinish(mine, numbers, text) {
+    const remaining = numbers.filter((n) => !mine.inserted.has(n))
+    hs.pasteboard.writeString(remaining.length === 0
+        ? text
+        : remaining.map((n) => mine.results.get(n)).join(CHUNK_SEPARATOR))
+    sessionEnd(mine)
+
+    if (remaining.length === 0) {
+        notify("transcription", "info", `Pasted ${text.length} characters`)
+        return
+    }
+    notify("transcription", "warning",
+        `Pasted ${mine.inserted.size} of ${numbers.length} chunks, then stopped because ` +
+        `${mine.insertStopped}. The other ${remaining.length} are on the clipboard — paste ` +
+        "them with ⌘V.")
+}
+
 /** Put the session away and return to idle. */
 function sessionEnd(mine) {
     if (sessionCurrent(mine)) session = null
@@ -1700,7 +1876,37 @@ function sessionEnd(mine) {
 
 // MARK: - Pasting
 
+/**
+ * Whether a dictation started now would paste each chunk as soon as it is ready.
+ *
+ * Only the streaming recorder produces more than one chunk, and only a dictation that
+ * pastes has anywhere to put them. A filter rules it out because it runs over the whole text.
+ */
+function chunkInsertApplies() {
+    return config.streamingChunkInsert && shouldPaste && !userCallback &&
+        !!recorder && recorder.name === "streaming" && filterGet() === null
+}
+
+/**
+ * Turn pasting each chunk as soon as it is ready on or off. It sets
+ * `config.streamingChunkInsert`, so the change lasts until the configuration is reloaded.
+ * A dictation already in progress keeps the setting it started with.
+ *
+ * @param {boolean} enable
+ */
+function chunkInsertSet(enable) {
+    config.streamingChunkInsert = !!enable
+    notify("config", "info",
+        `Paste each chunk as it is ready: ${config.streamingChunkInsert ? "on" : "off"}`)
+    return module.exports
+}
+
+function chunkInsertToggle() {
+    return chunkInsertSet(!config.streamingChunkInsert)
+}
+
 function pasteKeystroke() {
+    activityCounts.ownKeys += 1
     if (config.pasteWithEmacsYank) {
         const focused = hs.window.focusedWindow()
         const app = focused ? focused.application : null
@@ -1716,13 +1922,10 @@ function pasteKeystroke() {
 /** Paste the transcription, unless the user looks to have moved on while it was recorded. */
 function autoPaste(text) {
     if (config.monitorUserActivity) {
-        const busy = activityCounts.keys >= config.activityKeyLimit ||
-            activityClicksElsewhere() >= 1 ||
-            activityCounts.appSwitches >= 1
-        if (busy) {
+        const movedOn = activityMovedOn()
+        if (movedOn) {
             notify("transcription", "warning",
-                `Not pasting: you were typing or clicking while recording ` +
-                `(${activitySummary()}). The text is on the clipboard — paste it with ⌘V.`)
+                `Not pasting: ${movedOn}. The text is on the clipboard — paste it with ⌘V.`)
             return
         }
         if (!sameAppFocused()) {
@@ -1961,6 +2164,13 @@ async function transcribeBegin(callbackOrPaste) {
     if (!dirEnsure(config.tempDir)) return module.exports
 
     const mine = sessionNew(languageGet())
+    if (chunkInsertApplies()) {
+        const focused = hs.window.focusedWindow()
+        if (focused) {
+            mine.incremental = true
+            mine.target = {pid: focused.pid, id: focused.id}
+        }
+    }
     session = mine
     if (!stateTransition(STATES.recording, "starting to record")) {
         session = null
@@ -2209,6 +2419,8 @@ function diagnose() {
 
     const filter = filterActive()
     say(`filter: ${filter ? filter.name : "none"} (${config.filters.length} configured)`)
+    say(`paste each chunk as it is ready: ${config.streamingChunkInsert ? "on" : "off"}` +
+        (config.streamingChunkInsert && filter ? " (but not while a filter is active)" : ""))
 
     if (session) {
         say(`session: ${session.prefix} chunks=${session.chunks.length} ` +
@@ -2267,7 +2479,7 @@ function diagnose() {
  *
  * @param {object} [mapping] Keyed by action name — any of `transcribeToggle`,
  *        `transcribeToClipboardToggle`, `languageSelect`, `languageNext`,
- *        `filterSelect`, `transcribeAgain`, `transcribeAbort` — each holding
+ *        `filterSelect`, `chunkInsertToggle`, `transcribeAgain`, `transcribeAbort` — each holding
  *        `[[modifiers], key]`. Defaults to `config.defaultKeyBindings`.
  */
 function bindHotkeys(mapping) {
@@ -2280,6 +2492,7 @@ function bindHotkeys(mapping) {
         languageSelect: () => languageSelect(),
         languageNext: () => languageNext(),
         filterSelect: () => filterSelect(),
+        chunkInsertToggle: () => chunkInsertToggle(),
         transcribeAgain: () => transcribeAgain(),
         transcribeAbort: () => transcribeAbort()
     }
@@ -2392,6 +2605,9 @@ module.exports = {
     filterGet,
     filterSet,
     filterSelect,
+
+    chunkInsertSet,
+    chunkInsertToggle,
 
     recordingsList,
     recordingsPrune,
