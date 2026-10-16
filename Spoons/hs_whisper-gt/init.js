@@ -85,6 +85,21 @@ const config = {
     // `fn` wins if an entry has both. A filter that fails leaves the text untouched.
     filters: [],
 
+    // Processors, offered by processorSelect(). A processor is how a dictation issues a
+    // command rather than producing text: it is handed the transcription and is responsible
+    // for whatever is done with it, and nothing is pasted or copied. Each entry is
+    // {name, abbrev, cmd} or {name, abbrev, fn}:
+    //   cmd     a shell command reading the text on stdin; WHISPER_LANG is set, and
+    //           WHISPER_CHUNK when it is given one chunk
+    //   fn      a function called as fn(text, {lang, chunk}); it may return a promise
+    // With the streaming recorder the processor is called once for each chunk, as soon as
+    // the chunk and every one before it are transcribed, one call at a time and in order.
+    // Anything the processor prints or returns is shown when it has finished. Only a
+    // dictation started with transcribeToProcessorToggle() goes to a processor, and it goes
+    // to the selected one, which is the first in this list until another is chosen. The
+    // filter is not applied to it.
+    processors: [],
+
     // Transcriber to use for transcribeAgain(), or null for the current one.
     retranscribeTranscriber: null,
     // Recordings offered by transcribeAgain()'s chooser.
@@ -107,6 +122,10 @@ const config = {
     streamingSilenceThreshold: 2.0,   // seconds of silence that ends a chunk
     streamingMinChunkDuration: 3.0,
     streamingMaxChunkDuration: 600.0,
+    // Do not transcribe a chunk in which the server's voice-activity detector found no
+    // speech. Whisper given silence tends to invent text for it, typically "Thank you.",
+    // which would then be pasted or handed to a processor.
+    streamingSilentChunkSkip: true,
     // When pasting, paste each chunk as soon as it and every chunk before it have been
     // transcribed, instead of pasting the whole dictation once at the end. It applies only
     // without a filter, because a filter is run over the whole text. Pasting stops, and the
@@ -209,6 +228,8 @@ let starting = false
 let langIndex = 0
 // Index into config.filters, or null for no filter.
 let activeFilter = null
+// Index into config.processors of the processor that transcribeToProcessorToggle() uses.
+let activeProcessor = 0
 
 let menuBar = null
 let hotkeys = []
@@ -229,6 +250,7 @@ let userCallback = null
 // between being shown and being chosen from.
 let languageChooser = null
 let filterChooser = null
+let processorChooser = null
 let recordingChooser = null
 
 let debugEnabled = false
@@ -333,6 +355,21 @@ function filterAbbrev() {
     return filter && filter.abbrev ? filter.abbrev : null
 }
 
+/** The processor that transcribeToProcessorToggle() uses, or null when none is configured. */
+function processorActive() {
+    return config.processors[activeProcessor] || config.processors[0] || null
+}
+
+/**
+ * The abbreviation shown in brackets in the menu bar: the processor's during a dictation
+ * that goes to one, and the active filter's otherwise. The filter is not applied to a
+ * dictation that goes to a processor, so only the processor is worth showing then.
+ */
+function abbrevShown() {
+    if (session && session.processor) return session.processor.abbrev || null
+    return filterAbbrev()
+}
+
 /** A filename stem naming the language and the moment, unique per session. */
 function sessionPrefix(lang) {
     const now = new Date()
@@ -369,6 +406,13 @@ function menuBuild() {
     } else {
         entries.push({title: "Dictate", fn: () => transcribeToggle(true)})
         entries.push({title: "Dictate to the clipboard", fn: () => transcribeToggle()})
+        const processor = processorActive()
+        if (processor) {
+            entries.push({
+                title: `Dictate to ${processor.name}`,
+                fn: () => transcribeToProcessorToggle()
+            })
+        }
     }
 
     entries.push({title: "-"})
@@ -408,6 +452,20 @@ function menuBuild() {
             checked: !!config.streamingChunkInsert,
             disabled: !idle,
             fn: () => chunkInsertToggle()
+        })
+    }
+
+    // The processor is fixed when a dictation to it starts, so changing it applies to the
+    // next one. Shown only when there is a processor to choose.
+    const processor = processorActive()
+    if (processor) {
+        entries.push({
+            title: `Processor: ${processor.name}`,
+            menu: config.processors.map((entry, i) => ({
+                title: entry.name,
+                checked: entry === processor,
+                fn: () => processorSet(i)
+            }))
         })
     }
 
@@ -512,14 +570,12 @@ function menuBarSet(title, tooltip) {
 }
 
 function menuBarIdle() {
-    const abbrev = filterAbbrev()
+    const abbrev = abbrevShown()
     const filter = filterActive()
     let title = `${icons.idle} (${languageGet()})`
     let tooltip = "Idle"
-    if (abbrev) {
-        title += ` [${abbrev}]`
-        tooltip = `Filter: ${filter.name}`
-    }
+    if (abbrev) title += ` [${abbrev}]`
+    if (filter) tooltip = `Filter: ${filter.name}`
     menuBarSet(title, tooltip)
 }
 
@@ -531,15 +587,16 @@ function menuBarIdle() {
  * says nothing that the transcribing icon does not already say.
  */
 function sessionProgress() {
-    if (!session || session.chunks.length < 2) return ""
-    const settled = session.results.size + session.failures.length
-    return `${settled}/${session.chunks.length}`
+    // Counted from `order` and `settled` rather than from the transcriptions, so that a
+    // chunk skipped for having no speech counts as done.
+    if (!session || session.order.length < 2) return ""
+    return `${session.settled.size}/${session.order.length}`
 }
 
 function menuBarElapsed() {
     if (state !== STATES.recording) return
     const elapsed = startTime ? Math.floor(hs.timer.secondsSinceEpoch() - startTime) : 0
-    const abbrev = filterAbbrev()
+    const abbrev = abbrevShown()
     const progress = sessionProgress()
     let title = `${icons.recording} ${elapsed}s (${languageGet()})`
     // Chunks are transcribed while the recording continues, so the count climbs during it.
@@ -800,6 +857,11 @@ async function filterApply(text) {
     return filtered
 }
 
+/** Quote a string for zsh, so it reaches the command as one word, unchanged. */
+function shellQuote(value) {
+    return `'${String(value).replace(/'/g, "'\\''")}'`
+}
+
 /** The active filter, or null when the transcription is passed through unchanged. */
 function filterGet() {
     return filterActive()
@@ -862,6 +924,117 @@ function filterSelect() {
         menuBarIdle()
     }
     filterChooser.show()
+    return module.exports
+}
+
+// MARK: - Processors
+
+/**
+ * Hand the text to a processor, and report how it went once the processor has finished.
+ *
+ * A processor is how a dictation issues a command rather than producing text. It is
+ * responsible for whatever is done with the words, and nothing comes back to be pasted or
+ * copied. What it prints, or what its function returns, is shown with the report, so it can
+ * say what it did.
+ *
+ * `cmd` reads the text on its standard input, with WHISPER_LANG in its environment, and
+ * WHISPER_CHUNK too when it is given one chunk. `fn` is called as fn(text, details) and may
+ * return a promise.
+ *
+ * @param {object} processor The entry in config.processors.
+ * @param {string} text The transcription, or one chunk of it.
+ * @param {object} details {lang, chunk}. `chunk` is the chunk's number, counting from 1,
+ *        or undefined when the processor is given the whole dictation.
+ */
+async function processorRun(processor, text, details) {
+    logDebug(`sending to processor: ${processor.name}`)
+
+    const failed = (reason) =>
+        notify("transcription", "error", `Processor '${processor.name}' failed` +
+            (details.chunk !== undefined ? ` on chunk ${details.chunk}` : "") + `: ${reason}`)
+    const succeeded = (output) => {
+        const said = typeof output === "string" ? output.trim() : ""
+        notify("transcription", "info",
+            `Sent to '${processor.name}'` +
+            (details.chunk !== undefined ? ` (chunk ${details.chunk})` : "") +
+            (said ? `: ${said}` : ""), said ? 6 : undefined)
+    }
+
+    if (typeof processor.fn === "function") {
+        let result
+        try {
+            result = await processor.fn(text, details)
+        } catch (e) {
+            failed(`threw: ${e.message}`)
+            return
+        }
+        succeeded(result)
+        return
+    }
+
+    if (!processor.cmd) {
+        failed("it has neither cmd nor fn")
+        return
+    }
+
+    // The environment is set inside the shell, rather than given to hs.task, because a task
+    // given an environment gets only that environment and loses everything else, PATH
+    // included.
+    const exports = [`WHISPER_LANG=${shellQuote(details.lang)}`]
+    if (details.chunk !== undefined) exports.push(`WHISPER_CHUNK=${shellQuote(details.chunk)}`)
+    const command = `export ${exports.join(" ")}; ${processor.cmd}`
+    const result = await shell.commandRunInput("/bin/zsh", ["-l", "-c", command], text)
+    if (result.code !== 0) {
+        failed(`exit ${result.code}: ${firstLine(result.err || result.out)}`)
+        return
+    }
+    succeeded(result.out)
+}
+
+/** The processor transcribeToProcessorToggle() uses, or null when none is configured. */
+function processorGet() {
+    return processorActive()
+}
+
+/**
+ * Choose a processor without the chooser.
+ *
+ * @param {string|number} which A processor's `name`, or its index in `config.processors`.
+ * @returns {boolean} Whether it was recognised.
+ */
+function processorSet(which) {
+    const found = typeof which === "number"
+        ? which
+        : config.processors.findIndex((processor) => processor.name === which)
+
+    if (found < 0 || found >= config.processors.length) {
+        notify("config", "warning", `Not a configured processor: ${which}`)
+        return false
+    }
+
+    activeProcessor = found
+    notify("config", "info", `Processor: ${config.processors[found].name}`)
+    menuBarIdle()
+    return true
+}
+
+/** Offer the configured processors, and keep the chosen one until it is changed again. */
+function processorSelect() {
+    const selected = processorActive()
+    const choices = config.processors.map((processor, i) => ({
+        text: (processor === selected ? "● " : "") + processor.name,
+        subText: processor.cmd || (processor.fn ? "(function)" : "(does nothing)"),
+        index: i
+    }))
+
+    processorChooser = hs.chooser.create()
+    processorChooser.placeholder = "Dictation processor"
+    processorChooser.setChoices(choices)
+    processorChooser.onSelect = (choice) => {
+        if (!choice) return
+        processorSet(choice.index)
+    }
+    processorChooser.show()
     return module.exports
 }
 
@@ -1083,8 +1256,9 @@ async function audioPeak(audioFile) {
  * warmup()                   optional, called by start() to absorb startup cost
  * cleanup()                  release anything held, when the Spoon stops
  *
- * onChunk(audioFile, chunkNum, isFinal, peak) is called for each piece of audio ready to
- * transcribe. `peak` may be null when the recorder cannot measure it.
+ * onChunk(audioFile, chunkNum, isFinal, peak, speech) is called for each piece of audio
+ * ready to transcribe. `peak` may be null when the recorder cannot measure it. `speech` is
+ * whether the recorder found speech in the audio, or null when it cannot tell.
  */
 const recorders = {
     sox: {
@@ -1289,10 +1463,12 @@ const recorders = {
 
             case "chunk_ready": {
                 const peak = typeof event.peak === "number" ? event.peak : null
+                // Absent from a server older than the speech flag, which cannot tell.
+                const speech = typeof event.speech === "boolean" ? event.speech : null
                 logDebug(`chunk ${event.chunk_num}: ${event.audio_file} ` +
-                    `peak=${peak} final=${event.is_final}`)
+                    `peak=${peak} speech=${speech} final=${event.is_final}`)
                 if (self.onChunk) {
-                    self.onChunk(event.audio_file, event.chunk_num, event.is_final, peak)
+                    self.onChunk(event.audio_file, event.chunk_num, event.is_final, peak, speech)
                 }
                 break
             }
@@ -1525,23 +1701,58 @@ function sessionNew(lang) {
         // Chunk numbers that have come back, whether with text or not.
         settled: new Set(),
 
-        // Whether each chunk is pasted as soon as it is ready; see chunksInsert().
-        incremental: false,
+        // The processor the dictation goes to, or null when it produces text.
+        processor: null,
+
+        // What happens to each chunk as soon as it, and every chunk before it, has been
+        // transcribed; set by sessionDeliveryChoose():
+        //   null         nothing until the dictation ends, when the whole text is delivered
+        //   "paste"      it is pasted where the dictation began; see chunkInsert()
+        //   "processor"  it is handed to `processor`; see chunkProcess()
+        chunkDelivery: null,
+        // How many entries of `order` chunksDeliver() has dealt with.
+        deliveredUpTo: 0,
+        // The pastes or processor calls queued so far. Each finishes before the next one
+        // starts: a paste before the next one writes the clipboard, and a processor call so
+        // that the processor sees the chunks one at a time and in order.
+        deliverChain: Promise.resolve(),
+
+        // Used only when chunkDelivery is "paste".
         // The window the dictation began in, as {pid, id}. Chunks are pasted only there.
         target: null,
-        // How many entries of `order` chunksInsert() has dealt with.
-        insertedUpTo: 0,
         // Chunk numbers whose text has been pasted.
         inserted: new Set(),
         // Why pasting stopped part way, or null while it continues.
         insertStopped: null,
-        // The pastes queued so far, so that each finishes before the next one writes the
-        // clipboard.
-        insertChain: Promise.resolve(),
 
         recorderDone: false,
         finalizing: false
     }
+}
+
+/**
+ * Decide, as a dictation starts, where its text goes and whether that happens chunk by chunk.
+ *
+ * Only the streaming recorder produces more than one chunk, so with sox a processor or a
+ * paste is given the whole dictation once it ends.
+ *
+ * @param {object} mine The new session.
+ * @param {boolean} toProcessor Whether the dictation goes to the selected processor.
+ */
+function sessionDeliveryChoose(mine, toProcessor) {
+    if (toProcessor) {
+        mine.processor = processorActive()
+        if (recorder.name === "streaming") mine.chunkDelivery = "processor"
+        return
+    }
+    if (!chunkInsertApplies()) return
+
+    // A chunk is pasted only into the window that had focus at the start, so with none
+    // the dictation is pasted once at the end, as auto-paste always has been.
+    const focused = hs.window.focusedWindow()
+    if (!focused) return
+    mine.chunkDelivery = "paste"
+    mine.target = {pid: focused.pid, id: focused.id}
 }
 
 /** Whether `mine` is still the session in flight, or has been overtaken by an abort. */
@@ -1588,16 +1799,17 @@ function recordingSessionStop() {
  * Take one chunk of audio and start transcribing it.
  *
  * Called by the recorder. Chunks from a session that has been abandoned are dropped, which
- * is what `mine` is for.
+ * is what `mine` is for. A chunk the recorder found no speech in is passed over, with
+ * config.streamingSilentChunkSkip, like one that came back empty.
  */
-function chunkReceived(mine, audioFile, chunkNum, isFinal, peak) {
+function chunkReceived(mine, audioFile, chunkNum, isFinal, peak, speech) {
     if (!sessionCurrent(mine)) {
         logDebug(`dropping chunk ${chunkNum} from an abandoned session`)
         return
     }
 
     notify("transcription", "debug",
-        `chunk ${chunkNum} (final=${isFinal}, peak=${peak}): ${audioFile}`)
+        `chunk ${chunkNum} (final=${isFinal}, peak=${peak}, speech=${speech}): ${audioFile}`)
 
     // If the very first chunk is silent then the microphone is not delivering audio, and
     // going on would mean transcribing nothing while the user keeps talking into a
@@ -1609,6 +1821,16 @@ function chunkReceived(mine, audioFile, chunkNum, isFinal, peak) {
     }
 
     mine.order.push(chunkNum)
+
+    // Settled at once with no text, so the chunks after it are not held back waiting for
+    // it, and the dictation ends with "Nothing was transcribed" if every chunk was silent.
+    if (speech === false && config.streamingSilentChunkSkip) {
+        logDebug(`chunk ${chunkNum} has no speech; not transcribing it`)
+        mine.settled.add(chunkNum)
+        chunkSettled(mine, chunkNum, isFinal, null)
+        return
+    }
+
     const work = transcriber.transcribe(audioFile, mine.lang)
         .then((text) => {
             if (!sessionCurrent(mine)) return
@@ -1654,14 +1876,16 @@ function chunkSettled(mine, chunkNum, isFinal, text) {
     else if (state === STATES.transcribing) menuBarTranscribing(mine.lang)
 
     // Called with or without text: a chunk that failed or said nothing still has to be
-    // passed over before the chunks after it can be pasted.
-    if (mine.incremental) chunksInsert(mine)
+    // passed over before the chunks after it can be delivered.
+    if (mine.chunkDelivery) chunksDeliver(mine)
 
     if (!text) return
     notify("transcription", "debug", `chunk ${chunkNum}: ${text}`)
 
-    // A chunk being pasted appears in the application, so an alert would only repeat it.
-    if (mine.incremental && !mine.insertStopped) return
+    // A chunk being pasted appears in the application, so an alert would only repeat it. A
+    // chunk handed to a processor is reported when the processor has finished with it.
+    if (mine.chunkDelivery === "paste" && !mine.insertStopped) return
+    if (mine.chunkDelivery === "processor") return
 
     const onlyChunk = chunkNum === 1 && isFinal
     if (config.chunkAlertSeconds > 0 && !onlyChunk) {
@@ -1670,20 +1894,28 @@ function chunkSettled(mine, chunkNum, isFinal, text) {
 }
 
 /**
- * Queue a paste for every chunk that is now ready, in the order the recorder delivered them.
+ * Queue every chunk that is now ready, in the order the recorder delivered them: a paste,
+ * or a call to the session's processor.
  *
- * Chunks are transcribed concurrently and can come back in any order. A chunk is pasted only
- * once every chunk before it has come back, so a slow chunk holds back the ones after it. A
- * chunk that failed or produced no text is passed over rather than waited for.
+ * Chunks are transcribed concurrently and can come back in any order. A chunk is delivered
+ * only once every chunk before it has come back, so a slow chunk holds back the ones after
+ * it. A chunk that failed or produced no text is passed over rather than waited for.
  */
-function chunksInsert(mine) {
-    while (mine.insertedUpTo < mine.order.length) {
-        const num = mine.order[mine.insertedUpTo]
+function chunksDeliver(mine) {
+    while (mine.deliveredUpTo < mine.order.length) {
+        const num = mine.order[mine.deliveredUpTo]
         if (!mine.settled.has(num)) return
-        mine.insertedUpTo += 1
+        mine.deliveredUpTo += 1
         if (!mine.results.has(num)) continue
-        mine.insertChain = mine.insertChain.then(() => chunkInsert(mine, num))
+        const deliver = mine.chunkDelivery === "processor" ? chunkProcess : chunkInsert
+        mine.deliverChain = mine.deliverChain.then(() => deliver(mine, num))
     }
+}
+
+/** Hand one chunk to the session's processor, and wait for the processor to finish with it. */
+async function chunkProcess(mine, num) {
+    if (!sessionCurrent(mine)) return
+    await processorRun(mine.processor, mine.results.get(num), {lang: mine.lang, chunk: num})
 }
 
 /** Resolve after `seconds`. */
@@ -1771,8 +2003,8 @@ async function sessionFinalize(mine) {
 
     mine.finalizing = true
     await Promise.allSettled(mine.chunks)
-    // Every chunk has settled, so every paste has been queued by now.
-    await mine.insertChain
+    // Every chunk has settled, so every paste or processor call has been queued by now.
+    await mine.deliverChain
     if (!sessionCurrent(mine)) return
 
     const numbers = [...mine.results.keys()].sort((a, b) => a - b)
@@ -1797,8 +2029,23 @@ async function sessionFinalize(mine) {
         return
     }
 
-    if (mine.incremental) {
+    if (mine.chunkDelivery === "paste") {
         sessionInsertFinish(mine, numbers, text)
+        return
+    }
+    // Every chunk has already been handed to the processor.
+    if (mine.chunkDelivery === "processor") {
+        sessionEnd(mine)
+        return
+    }
+
+    // Nothing is pasted, copied or given to a callback. The session stays open until the
+    // processor has finished, so the menu bar shows it is still busy.
+    if (mine.processor) {
+        await processorRun(mine.processor, text, {lang: mine.lang})
+        // An abort while the processor ran may have been followed by a new dictation, which
+        // sessionEnd() would otherwise end.
+        if (sessionCurrent(mine)) sessionEnd(mine)
         return
     }
 
@@ -1837,7 +2084,7 @@ async function sessionFinalize(mine) {
  * End a dictation whose chunks were pasted one at a time, leaving the clipboard useful.
  *
  * When every chunk was pasted, the clipboard gets the whole dictation, as it would have
- * without incremental pasting. When pasting stopped part way, it gets only the chunks that
+ * without pasting chunk by chunk. When pasting stopped part way, it gets only the chunks that
  * were not pasted, so that ⌘V back in the original window completes the dictation.
  *
  * No filter is applied here. Incremental pasting is used only without one, and a filter
@@ -2128,8 +2375,10 @@ function backendsReady() {
 /**
  * Start recording.
  *
- * @param {function|boolean} [callbackOrPaste] A function to be given the transcription
- *        instead of the clipboard, or true to paste the text where the cursor is.
+ * @param {function|boolean|string} [callbackOrPaste] A function to be given the
+ *        transcription instead of the clipboard, true to paste the text where the cursor
+ *        is, or "processor" to hand it to the selected processor; see
+ *        transcribeToProcessorToggle().
  */
 async function transcribeBegin(callbackOrPaste) {
     if (!backendsReady()) return module.exports
@@ -2140,6 +2389,12 @@ async function transcribeBegin(callbackOrPaste) {
         return module.exports
     }
 
+    if (callbackOrPaste === "processor" && !processorActive()) {
+        notify("config", "warning", "No processor is configured; see config.processors")
+        return module.exports
+    }
+
+    const toProcessor = callbackOrPaste === "processor"
     if (typeof callbackOrPaste === "function") {
         userCallback = callbackOrPaste
         shouldPaste = false
@@ -2164,13 +2419,7 @@ async function transcribeBegin(callbackOrPaste) {
     if (!dirEnsure(config.tempDir)) return module.exports
 
     const mine = sessionNew(languageGet())
-    if (chunkInsertApplies()) {
-        const focused = hs.window.focusedWindow()
-        if (focused) {
-            mine.incremental = true
-            mine.target = {pid: focused.pid, id: focused.id}
-        }
-    }
+    sessionDeliveryChoose(mine, toProcessor)
     session = mine
     if (!stateTransition(STATES.recording, "starting to record")) {
         session = null
@@ -2179,7 +2428,8 @@ async function transcribeBegin(callbackOrPaste) {
 
     try {
         await recorder.start(mine,
-            (file, num, isFinal, peak) => chunkReceived(mine, file, num, isFinal, peak))
+            (file, num, isFinal, peak, speech) =>
+                chunkReceived(mine, file, num, isFinal, peak, speech ?? null))
     } catch (e) {
         session = null
         stateTransition(STATES.error, "the recorder would not start")
@@ -2191,7 +2441,7 @@ async function transcribeBegin(callbackOrPaste) {
 
     if (!sessionCurrent(mine)) return module.exports
 
-    const abbrev = filterAbbrev()
+    const abbrev = abbrevShown()
     notify("recording", "info", `${icons.recording} Recording (${mine.lang})` +
         (abbrev ? ` [${abbrev}]` : ""))
     recordingSessionStart()
@@ -2224,7 +2474,8 @@ async function transcribeEnd() {
 
     try {
         await recorder.stop(mine,
-            (file, num, isFinal, peak) => chunkReceived(mine, file, num, isFinal, peak))
+            (file, num, isFinal, peak, speech) =>
+                chunkReceived(mine, file, num, isFinal, peak, speech ?? null))
     } catch (e) {
         notify("recording", "error", `Could not stop recording cleanly: ${e.message}`)
     }
@@ -2243,6 +2494,17 @@ function transcribeToggle(callbackOrPaste) {
     else if (state === STATES.recording) transcribeEnd()
     else notify("recording", "warning", `Busy transcribing — wait or abort`)
     return module.exports
+}
+
+/**
+ * Start a dictation that goes to the selected processor, or stop the one in progress.
+ *
+ * The text is not pasted or copied. It is handed to the processor chosen with
+ * processorSelect() or processorSet(), which is the first in config.processors until
+ * another is chosen. The processor is fixed when the dictation starts.
+ */
+function transcribeToProcessorToggle() {
+    return transcribeToggle("processor")
 }
 
 /** Abandon the recording or transcription in progress. Does nothing when idle. */
@@ -2419,6 +2681,9 @@ function diagnose() {
 
     const filter = filterActive()
     say(`filter: ${filter ? filter.name : "none"} (${config.filters.length} configured)`)
+    const processor = processorActive()
+    say(`processor: ${processor ? processor.name : "none"} ` +
+        `(${config.processors.length} configured)`)
     say(`paste each chunk as it is ready: ${config.streamingChunkInsert ? "on" : "off"}` +
         (config.streamingChunkInsert && filter ? " (but not while a filter is active)" : ""))
 
@@ -2478,9 +2743,10 @@ function diagnose() {
  * Bind keys to this Spoon's actions.
  *
  * @param {object} [mapping] Keyed by action name — any of `transcribeToggle`,
- *        `transcribeToClipboardToggle`, `languageSelect`, `languageNext`,
- *        `filterSelect`, `chunkInsertToggle`, `transcribeAgain`, `transcribeAbort` — each holding
- *        `[[modifiers], key]`. Defaults to `config.defaultKeyBindings`.
+ *        `transcribeToClipboardToggle`, `transcribeToProcessorToggle`, `languageSelect`,
+ *        `languageNext`, `filterSelect`, `processorSelect`, `chunkInsertToggle`,
+ *        `transcribeAgain`, `transcribeAbort` — each holding `[[modifiers], key]`.
+ *        Defaults to `config.defaultKeyBindings`.
  */
 function bindHotkeys(mapping) {
     const actions = {
@@ -2489,9 +2755,11 @@ function bindHotkeys(mapping) {
         // which takes where the text should go as its argument.
         transcribeToggle: () => transcribeToggle(true),
         transcribeToClipboardToggle: () => transcribeToggle(false),
+        transcribeToProcessorToggle: () => transcribeToProcessorToggle(),
         languageSelect: () => languageSelect(),
         languageNext: () => languageNext(),
         filterSelect: () => filterSelect(),
+        processorSelect: () => processorSelect(),
         chunkInsertToggle: () => chunkInsertToggle(),
         transcribeAgain: () => transcribeAgain(),
         transcribeAbort: () => transcribeAbort()
@@ -2580,6 +2848,7 @@ function stop() {
 
     languageChooser = null
     filterChooser = null
+    processorChooser = null
     recordingChooser = null
 
     return module.exports
@@ -2589,6 +2858,7 @@ module.exports = {
     config,
 
     transcribeToggle,
+    transcribeToProcessorToggle,
     transcribeBegin,
     transcribeEnd,
     transcribeAbort,
@@ -2605,6 +2875,10 @@ module.exports = {
     filterGet,
     filterSet,
     filterSelect,
+
+    processorGet,
+    processorSet,
+    processorSelect,
 
     chunkInsertSet,
     chunkInsertToggle,

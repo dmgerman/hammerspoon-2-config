@@ -407,6 +407,9 @@ const menus = require(hs.appinfo.configDir + "/menus.js");
 // command succeeds, fails or cannot be started.
 const shell = require(hs.appinfo.configDir + "/dmg-libs/shell.js");
 
+// Runs a hs_interactive-gt command named in a dictation; used as a hs_whisper-gt processor.
+const voiceCommands = require(hs.appinfo.configDir + "/dmg-libs/voice-commands.js");
+
 // Switch to a Chrome tab rather than to Chrome. focusTabChrome.py lists Chrome's tabs,
 // focuses the first whose URL or title contains what was asked for, and opens the address
 // when none does. Chrome is raised afterwards, on a delay so it does not beat the script:
@@ -537,6 +540,11 @@ interactive.use("hs_appleMusic-gt", {
         const command = (name, doc, fn) => interactive.define({ name: name, doc: doc, fn: fn });
 
         command("appleMusic-play-pause", "Play or pause Apple Music.", () => music.togglePlayPause());
+        command("appleMusic-play", "Start or resume playing in Apple Music.", () => music.play());
+        // Pauses rather than stopping: after a stop, playing again restarts the album.
+        command("appleMusic-pause", "Pause Apple Music, if it is playing.", () => {
+            if (music.isPlaying()) music.togglePlayPause();
+        });
         command("appleMusic-next-track", "Skip to the next track.", () => music.nextTrack());
         command("appleMusic-previous-track", "Go back to the previous track.", () => music.previousTrack());
         command("appleMusic-next-album", "Skip forward to the next album.", () => music.nextAlbum());
@@ -569,6 +577,20 @@ interactive.use("hs_appleMusic-gt", {
                 })
             }],
             fn: (percent) => music.systemVolumeSet(percent)
+        });
+
+        interactive.define({
+            name: "system-volume-adjust",
+            doc: "Change the system's output volume by a percentage, which may be negative.",
+            interactive: [{ name: "delta", reader: interactive.readers.number.prompted, default: 10 }],
+            fn: (delta) => {
+                const now = music.systemVolume();
+                if (now === null) {
+                    hs.alert.show("The output device has no adjustable volume");
+                    return null;
+                }
+                return music.systemVolumeSet(now + Number(delta));
+            }
         });
 
         interactive.define({
@@ -1042,6 +1064,14 @@ interactive.use("hs_selectWindow-gt", {
 // Without it macOS does not refuse to record: it hands over samples replaced with zero and
 // says nothing, so the only symptom would be that nothing is ever transcribed. The Spoon
 // checks before recording and says so instead.
+/**
+ * A JavaScript string as an elisp string literal. Only the backslash and the double quote
+ * need escaping. The literal reaches emacsclient as an argument, not through a shell.
+ */
+function elispStringQuote(text) {
+    return `"${String(text).replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
+}
+
 interactive.use("hs_whisper-gt", {
     config: {
         languages: ["en", "ja", "es"],
@@ -1085,6 +1115,28 @@ interactive.use("hs_whisper-gt", {
                 cmd: `${hs.fs.homeDirectory()}/bin/chatgpt-filter.py ` +
                     `'Correct the grammar and formatting of this text, only respond with the corrected text'`
             }
+        ],
+
+        // A processor takes a dictation started with whisper-transcribe-to-processor-toggle
+        // instead of it being pasted. The first one is used until another is chosen. This
+        // one runs the command it names: a phrase from voiceCommands.PHRASES, such as "volume up", or
+        // any command's name spoken as words, such as "window next screen".
+        processors: [
+            {
+                name: "Hammerspoon command", abbrev: "cmd",
+                fn: (text) => voiceCommands.voiceCommandRun(interactive, text)
+            },
+            {
+                // Brings Emacs forward, with the frame used last, and then calls
+                // (dmg-voice-process "the transcription"), defined in dmg-whisper.org.
+                name: "emacs", abbrev: "emacs",
+                fn: async (text) => {
+                    const emacs = hs.spoons["hs_emacs-gt"];
+                    await emacs.focus();
+                    const ok = await emacs.execute(`(dmg-voice-process ${elispStringQuote(text)})`);
+                    if (!ok) throw new Error("emacsclient failed; the console has its error");
+                }
+            }
         ]
     },
     commands: (interactive, whisper) => {
@@ -1103,12 +1155,19 @@ interactive.use("hs_whisper-gt", {
         });
 
         interactive.define({
+            name: "whisper-transcribe-to-processor-toggle",
+            doc: "Start dictating, or stop and hand what was said to the selected processor, " +
+                "which by default runs it as a Hammerspoon command.",
+            fn: () => whisper.transcribeToProcessorToggle()
+        });
+
+        interactive.define({
             name: "whisper-transcribe-abort",
             doc: "Abandon the dictation in progress, leaving the clipboard alone.",
             fn: () => whisper.transcribeAbort()
         });
 
-        // These three open a chooser, so they wait for the command chooser to close first.
+        // These four open a chooser, so they wait for the command chooser to close first.
         // Created while that one is still closing, their own chooser does not hold the key
         // window and the next thing to draw takes it away.
         interactive.define({
@@ -1130,6 +1189,13 @@ interactive.use("hs_whisper-gt", {
             doc: "Choose what to pass the transcription through before it reaches the clipboard.",
             runDelay: 0.05,
             fn: () => whisper.filterSelect()
+        });
+
+        interactive.define({
+            name: "whisper-processor-select",
+            doc: "Choose which processor whisper-transcribe-to-processor-toggle hands its text to.",
+            runDelay: 0.05,
+            fn: () => whisper.processorSelect()
         });
 
         interactive.define({
@@ -1177,6 +1243,7 @@ interactive.use("hs_whisper-gt", {
     keys: {
         "cmd-ctrl return": "whisper-transcribe-toggle",
         "cmd-ctrl-alt return": "whisper-transcribe-to-clipboard-toggle",
+        "cmd-ctrl-alt-shift return": "whisper-transcribe-to-processor-toggle",
         "cmd-ctrl-alt ;": "whisper-language-select",
         "cmd-ctrl-alt f": "whisper-filter-select"
     }

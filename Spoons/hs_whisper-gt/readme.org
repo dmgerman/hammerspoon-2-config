@@ -49,6 +49,8 @@ nothing is reachable only by a keyboard shortcut you have to remember:
   while one is running
 - *Language*, with the current one ticked
 - *Filter*, with the active one ticked and /No filter/ to clear it
+- *Dictate to <processor>*, while idle, when a processor is configured
+- *Processor*, choosing which processor that entry and =transcribeToProcessorToggle= use
 - *Paste each chunk as it is ready*, ticked when it is on. It is shown only with the
   =streaming= recorder; see /Pasting each chunk as it is ready/
 - *Microphone*, titled with the input device being recorded from, with /Automatic/ and every
@@ -66,6 +68,7 @@ nothing are greyed out rather than hidden. The language cannot be changed part w
 dictation, because it is fixed when the dictation starts. Nor can the microphone, because
 changing it restarts the streaming server, which would discard the recording. The filter can
 be changed, and applies to the dictation in progress, because it runs on the finished text.
+The processor is fixed when a dictation to it starts, so changing it applies to the next one.
 
 With =config.monitorUserActivity=, a click during a recording normally stops the text from
 being pasted. A click on this menu bar item does not count, so a left click can stop a
@@ -218,6 +221,20 @@ When every chunk was pasted, the clipboard holds the whole dictation.
 The per-chunk text shown by =chunkAlertSeconds= is not shown for a chunk that is pasted,
 because it would only repeat what has just appeared in the application.
 
+**** Chunks without speech
+
+A pause long enough to end a chunk can produce a chunk with no speech in it at all, most
+often at the end, when you stop dictating and then press the key. Whisper given such a chunk
+tends to invent text for it, typically "Thank you.", which would be pasted or handed to a
+processor. The server's voice-activity detector reports whether it found speech anywhere in
+each chunk, and a chunk without speech is not transcribed.
+
+#+begin_src js   :exports both
+whisper.config.streamingSilentChunkSkip = false   // transcribe every chunk anyway
+#+end_src
+
+The audio is still saved, so =transcribeAgain= can still be used on the whole recording.
+
 =sox= does not chunk: it records one file and transcribes it once you stop.
 
 *** The streaming server
@@ -286,7 +303,7 @@ From the server:
 | =server_ready=      | =recording=, =microphone_open=, =device=, =test_file= | on connecting                                |
 | =status=            | the same                                             | in answer to =status=                        |
 | =recording_started= | =device=                                             | once the microphone is open and recording    |
-| =chunk_ready=       | =chunk_num=, =audio_file=, =is_final=, =peak=        | each chunk cut at a pause, and the last one  |
+| =chunk_ready=       | =chunk_num=, =audio_file=, =is_final=, =peak=, =speech= | each chunk cut at a pause, and any audio left at the end |
 | =complete_file=     | =file_path=                                          | at the end, before the final chunk           |
 | =recording_stopped= |                                                      | at the end, after everything else            |
 | =silence_warning=   | =message=                                            | the microphone delivers nothing at all       |
@@ -294,6 +311,15 @@ From the server:
 
 A failed =start_recording= is answered with =error= and then =recording_stopped=, and no
 =recording_started=.
+
+=speech= says whether the voice-activity detector found speech anywhere in the chunk.
+Whisper given a chunk without speech tends to invent text for it, such as "Thank you.", so a
+client can skip such a chunk; the Spoon does, with =streamingSilentChunkSkip=. The file is
+written either way.
+
+The chunk with =is_final= set is sent only when audio is left over after the last cut. When
+the recording stops just after a cut there is no final chunk, so the end of a recording is
+=recording_stopped=, not a final chunk.
 
 ** Transcribers
 
@@ -356,6 +382,61 @@ instead. Losing a dictation because a grammar filter broke would be the worse fa
 
 A filter is the one part of this Spoon that can send your words off the machine. One calling
 a cloud API sends every dictation you pass through it to that service.
+
+* Processors
+
+A processor is how a dictation issues a command instead of producing text. It is handed the
+transcription and is responsible for whatever is done with it. Nothing is pasted or copied.
+
+A dictation goes to a processor only when it is started with its own key,
+=transcribeToProcessorToggle=. The other keys go on producing text.
+
+#+begin_src js   :exports both
+whisper.config.processors = [
+    {name: "Speak it", abbrev: "SAY", cmd: "say"},
+    {name: "Log it",   abbrev: "LOG", fn: (text, details) => {
+        hs.fs.append("/tmp/dictations.txt", `${details.lang}: ${text}\n`)
+        return "logged"
+    }}
+]
+
+whisper.bindHotkeys({
+    transcribeToProcessorToggle: [["cmd", "ctrl", "alt", "shift"], "return"],
+    processorSelect:             [["cmd", "ctrl", "alt"], "p"]
+})
+#+end_src
+
+Each entry needs =name= and either:
+
+- =cmd= — a shell command reading the text on its standard input. It runs under =/bin/zsh -l=,
+  like a filter, with =WHISPER_LANG= set to the dictation's language and =WHISPER_CHUNK= to
+  the chunk's number when it is given one chunk.
+- =fn= — a function called as =fn(text, details)=, where =details= is ={lang, chunk}=. It may
+  return a promise.
+
+The first processor in the list is used until another is chosen with =processorSelect=,
+=processorSet= or the menu. The choice lasts until the configuration is reloaded. It is fixed
+when a dictation starts, so changing it applies to the next dictation. While a dictation to
+a processor is recording, the processor's =abbrev= is shown in the menu bar, in place of the
+filter's. The filter is not applied to that dictation.
+
+When the processor has finished, a message says so: =Sent to 'Log it': logged=. Whatever
+the command printed, or whatever the function returned, follows the colon. When it has
+nothing to say, the message is just =Sent to 'Log it'=. A command that exits with a
+non-zero status, or a function that throws, is reported as an error with the first line of
+its standard error. The menu bar shows the transcribing icon until the processor has
+finished.
+
+With the =streaming= recorder, a processor is called once for each chunk (see /Chunking/).
+Each chunk is handed over as soon as it, and every chunk before it, has been transcribed, so
+the processor can act while you are still speaking. Chunks are handed over one at a time and
+in the order they were spoken: the next chunk waits until the processor has finished with
+the one before. A chunk that cannot be transcribed is skipped and reported. Each call is
+reported separately, as =Sent to 'Log it' (chunk 2): logged=. A =cmd= also has the
+chunk's number, counting from 1, in =WHISPER_CHUNK=, and an =fn= has it as =details.chunk=.
+
+With =sox= there is only one chunk, so the processor is given the whole dictation once it
+ends, and =WHISPER_CHUNK= is not set.
 
 * Where the text goes
 
@@ -457,6 +538,16 @@ Turn pasting each chunk as it is ready on or off; see /Pasting each chunk as it 
 Both set =config.streamingChunkInsert=, and the change lasts until the configuration is
 reloaded.
 
+** transcribeToProcessorToggle()
+
+Start a dictation that goes to the selected processor, or stop the one in progress; see
+/Processors/ above. It is =transcribeToggle("processor")=.
+
+** processorSelect() / processorGet() / processorSet(which)
+
+Open the processor chooser, return the selected processor (null when none is configured),
+or choose one by =name= or index; see /Processors/ above.
+
 ** recordingsList() / recordingsPrune()
 
 The recordings in =config.tempDir=, newest first, and a prune down to the newest
@@ -485,8 +576,9 @@ Whether a recording is in progress, and the state machine's state: =IDLE=, =RECO
 ** bindHotkeys(mapping) / start() / stop()
 
 =bindHotkeys= takes any of =transcribeToggle=, =transcribeToClipboardToggle=,
-=languageSelect=, =languageNext=, =filterSelect=, =chunkInsertToggle=, =transcribeAgain=
-and =transcribeAbort=, each holding =[[modifiers], key]=. All are optional. =transcribeToggle= and
+=transcribeToProcessorToggle=, =languageSelect=, =languageNext=, =filterSelect=,
+=processorSelect=, =chunkInsertToggle=, =transcribeAgain= and =transcribeAbort=, each
+holding =[[modifiers], key]=. All are optional. =transcribeToggle= and
 =transcribeToClipboardToggle= both call =transcribeToggle()=, with and without the argument
 that says to type the text.
 
@@ -515,6 +607,7 @@ autoPasteDelay: 0.1
 pasteWithEmacsYank: false    // ctrl-y into Emacs rather than ⌘V
 
 filters: []
+processors: []
 retranscribeTranscriber: null
 retranscribeCount: 10
 #+end_src
@@ -532,6 +625,7 @@ streamingAudioInputDevice: null
 streamingSilenceThreshold: 2.0         // seconds of silence that ends a chunk
 streamingMinChunkDuration: 3.0
 streamingMaxChunkDuration: 600.0
+streamingSilentChunkSkip: true         // do not transcribe a chunk with no speech in it
 streamingChunkInsert: true             // paste each chunk as it is ready, when pasting
 
 whisperkitCmd: "/opt/homebrew/bin/whisperkit-cli"

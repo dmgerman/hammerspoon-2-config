@@ -62,7 +62,7 @@ class TestChunks:
     def test_save_chunk_writes_a_numbered_file(self, make_recorder, tmp_path):
         recorder = make_recorder()
         recorder.current_chunk_audio = [noise()]
-        chunk_file, peak = recorder._save_chunk()
+        chunk_file, peak, speech = recorder._save_chunk()
         assert chunk_file == str(tmp_path / "test_chunk_001.wav")
         assert (tmp_path / "test_chunk_001.wav").exists()
         assert 0.0 < peak <= 1.0
@@ -70,7 +70,7 @@ class TestChunks:
 
     def test_save_chunk_with_no_audio(self, make_recorder):
         recorder = make_recorder()
-        assert recorder._save_chunk() == (None, 0.0)
+        assert recorder._save_chunk() == (None, 0.0, False)
         assert recorder.chunk_num == 0
 
     def test_chunk_numbers_increase(self, make_recorder):
@@ -105,10 +105,11 @@ class TestChunks:
 
     def test_chunk_ready_carries_the_peak(self, make_recorder, transport):
         recorder = make_recorder()
-        recorder._emit_chunk_ready("/path/to/chunk.wav", is_final=False, peak=0.42)
+        recorder._emit_chunk_ready("/path/to/chunk.wav", is_final=False, peak=0.42,
+                                   speech=False)
         assert transport.events[-1] == {"type": "chunk_ready", "chunk_num": 0,
                                         "audio_file": "/path/to/chunk.wav",
-                                        "is_final": False, "peak": 0.42}
+                                        "is_final": False, "peak": 0.42, "speech": False}
 
     def test_a_client_that_has_gone_does_not_stop_the_server(self, make_recorder, transport):
         recorder = make_recorder()
@@ -143,15 +144,44 @@ class TestVoiceActivity:
         assert recorder._detect_voice_activity(noise(512)) is True
         assert transport.types() == ["error"]
 
-    def test_recent_audio_is_the_last_512_samples(self, make_recorder):
-        recorder = make_recorder()
-        recorder.current_chunk_audio = [noise(200) for _ in range(5)]
-        assert len(recorder._get_recent_audio()) == 512
+    def test_every_window_of_the_block_is_scored(self, make_recorder):
+        # Speech only in the first of the block's 15 windows. Scoring only the last window
+        # would miss it.
+        scores = iter([0.9] + [0.0] * 14)
+        windows = []
 
-    def test_not_enough_recent_audio(self, make_recorder):
+        def model(tensor, rate):
+            windows.append(len(tensor))
+            score = next(scores)
+
+            class Result:
+                def item(self):
+                    return score
+            return Result()
+
+        recorder = make_recorder(vad_model=model)
+        assert recorder._detect_voice_activity(noise(8000)) is True
+        assert windows == [512] * 15
+
+    def test_a_block_shorter_than_a_window_is_padded(self, make_recorder, vad):
+        vad.probability = 0.9
+        assert make_recorder()._detect_voice_activity(noise(100)) is True
+
+    def test_speech_marks_the_chunk_until_it_is_saved(self, make_recorder):
         recorder = make_recorder()
-        recorder.current_chunk_audio = [noise(100)]
-        assert recorder._get_recent_audio() is None
+        recorder.current_chunk_audio = [noise()]
+        with patch.object(recorder, '_detect_voice_activity', return_value=True):
+            recorder._process_vad(noise())
+        assert recorder._save_chunk()[2] is True
+        recorder.current_chunk_audio = [noise()]
+        assert recorder._save_chunk()[2] is False
+
+    def test_a_chunk_without_speech_says_so(self, make_recorder):
+        recorder = make_recorder()
+        recorder.current_chunk_audio = [noise()]
+        with patch.object(recorder, '_detect_voice_activity', return_value=False):
+            recorder._process_vad(noise())
+        assert recorder._save_chunk()[2] is False
 
     def test_speech_resets_silence_tracking(self, make_recorder):
         recorder = make_recorder()

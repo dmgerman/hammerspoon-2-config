@@ -26,6 +26,7 @@ from pathlib import Path
 SILENCE_AMPLITUDE_THRESHOLD = 0.01
 VAD_SPEECH_THRESHOLD = 0.25  # Lower threshold = more aggressive speech detection
 VAD_CONSECUTIVE_SILENCE_REQUIRED = 2  # Require 2 consecutive silence detections (1.0s) before considering it real silence
+VAD_WINDOW_SAMPLES = 512  # Silero VAD scores exactly this many samples at a time, 32 ms at 16 kHz
 
 DEFAULT_PORT = 12341
 DEFAULT_OUTPUT_DIR = "/tmp/whisper_dict"
@@ -355,6 +356,8 @@ class ContinuousRecorder:
         self.perfect_silence_start_time = None
         self.startup_silence_check_done = False
         self.consecutive_silence_count = 0  # Count consecutive silence detections
+        # Whether any block of the current chunk contained speech; sent with the chunk.
+        self.chunk_speech = False
 
         # Control
         self.running = True
@@ -519,6 +522,7 @@ class ContinuousRecorder:
         self.startup_silence_check_done = False
         self.mic_off = False
         self.consecutive_silence_count = 0
+        self.chunk_speech = False
 
     def start_recording(self, command):
         """Begin a recording with the settings in COMMAND."""
@@ -583,14 +587,28 @@ class ContinuousRecorder:
 
         threading.Thread(target=feed, daemon=True).start()
 
-    def _detect_voice_activity(self, audio_chunk):
-        """Detect if audio chunk contains voice using Silero VAD."""
+    def _detect_voice_activity(self, audio_block):
+        """Whether a block of audio contains speech.
+
+        Silero VAD scores one window of VAD_WINDOW_SAMPLES at a time. Every window in the
+        block is scored, in order, and the highest score decides. Scoring only the last
+        window, as this did before, missed speech that ended earlier in the block: a 0.5 s
+        block holds 15 windows, so a short word could fall entirely outside the one scored.
+        On the long test fixture it missed speech in three blocks, and scored the speech it
+        did find at 0.3 to 0.6 where the whole block scores 0.99.
+        """
         try:
             import torch
-            audio_float = normalize_audio(audio_chunk)
-            audio_tensor = torch.from_numpy(audio_float)
-            speech_prob = self.vad_model(audio_tensor, self.sample_rate).item()
-            return speech_prob > VAD_SPEECH_THRESHOLD
+            audio = normalize_audio(audio_block)
+            if len(audio) < VAD_WINDOW_SAMPLES:
+                audio = np.pad(audio, (0, VAD_WINDOW_SAMPLES - len(audio)))
+            # Every window is scored, with no early exit, because the model carries state
+            # from one window to the next.
+            best = 0.0
+            for start in range(0, len(audio) - VAD_WINDOW_SAMPLES + 1, VAD_WINDOW_SAMPLES):
+                window = np.ascontiguousarray(audio[start:start + VAD_WINDOW_SAMPLES])
+                best = max(best, self.vad_model(torch.from_numpy(window), self.sample_rate).item())
+            return best > VAD_SPEECH_THRESHOLD
         except Exception as e:
             self.transport.send_event("error", error=f"VAD detection error: {e}")
             return True  # Assume speech to avoid losing audio
@@ -598,12 +616,14 @@ class ContinuousRecorder:
     def _save_chunk(self):
         """Save current chunk audio to WAV file.
 
-        Returns (path, peak) where peak is the max absolute amplitude on the
-        float32 buffer in [0, 1]. The client uses the first chunk's peak to reject a
-        recording early when the microphone is delivering silence.
+        Returns (path, peak, speech). peak is the max absolute amplitude on the float32
+        buffer in [0, 1]. The client uses the first chunk's peak to reject a recording early
+        when the microphone is delivering silence. speech is whether the VAD found speech in
+        any block of the chunk; the client can skip a chunk without it, which Whisper would
+        otherwise transcribe as something like "Thank you."
         """
         if not self.current_chunk_audio:
-            return None, 0.0
+            return None, 0.0, False
 
         self.chunk_num += 1
         chunk_file = self.output_dir / f"{self.filename_prefix}_chunk_{self.chunk_num:03d}.wav"
@@ -620,11 +640,14 @@ class ContinuousRecorder:
         import scipy.io.wavfile
         scipy.io.wavfile.write(str(chunk_file), self.sample_rate, audio_data)
 
+        speech = self.chunk_speech
+
         # Reset for next chunk
         self.current_chunk_audio = []
         self.current_chunk_start_time = time.time()
+        self.chunk_speech = False
 
-        return str(chunk_file), peak
+        return str(chunk_file), peak, speech
 
     def _check_perfect_silence(self, audio_chunk):
         """Check for perfect silence at startup only - verify mic is working."""
@@ -652,7 +675,7 @@ class ContinuousRecorder:
             self.startup_silence_check_done = True
             self._finalize_recording()
 
-    def _emit_chunk_ready(self, chunk_file, is_final=False, peak=0.0):
+    def _emit_chunk_ready(self, chunk_file, is_final=False, peak=0.0, speech=True):
         """Emit chunk_ready event.
 
         A client that has gone simply misses it: the file is on disk either way.
@@ -662,26 +685,17 @@ class ContinuousRecorder:
                                       chunk_num=self.chunk_num,
                                       audio_file=chunk_file,
                                       is_final=is_final,
-                                      peak=peak)
+                                      peak=peak,
+                                      speech=speech)
 
     def _check_max_duration(self):
         """Check if chunk exceeded max duration and save if needed."""
         chunk_duration = time.time() - self.current_chunk_start_time
         if chunk_duration >= self.max_chunk_duration:
-            chunk_file, peak = self._save_chunk()
-            self._emit_chunk_ready(chunk_file, is_final=False, peak=peak)
+            chunk_file, peak, speech = self._save_chunk()
+            self._emit_chunk_ready(chunk_file, is_final=False, peak=peak, speech=speech)
             return True
         return False
-
-    def _get_recent_audio(self):
-        """Get recent audio for VAD analysis."""
-        # Silero VAD requires exactly 512 samples for 16kHz
-        vad_samples = 512
-        recent_audio = np.concatenate(self.current_chunk_audio[-10:])
-
-        if len(recent_audio) >= vad_samples:
-            return recent_audio[-vad_samples:]
-        return None
 
     def _check_silence_boundary(self):
         """Check if silence threshold reached and save chunk if needed."""
@@ -693,18 +707,19 @@ class ContinuousRecorder:
         silence_duration = time.time() - self.silence_start_time
         if silence_duration >= self.silence_threshold:
             if chunk_duration >= self.min_chunk_duration:
-                chunk_file, peak = self._save_chunk()
-                self._emit_chunk_ready(chunk_file, is_final=False, peak=peak)
+                chunk_file, peak, speech = self._save_chunk()
+                self._emit_chunk_ready(chunk_file, is_final=False, peak=peak, speech=speech)
                 self.silence_start_time = None
                 self.consecutive_silence_count = 0
                 return True
         return False
 
-    def _process_vad(self, recent_audio):
-        """Process VAD and update silence tracking."""
-        has_voice = self._detect_voice_activity(recent_audio)
+    def _process_vad(self, audio_block):
+        """Process VAD for one block and update silence tracking."""
+        has_voice = self._detect_voice_activity(audio_block)
 
         if has_voice:
+            self.chunk_speech = True
             # Speech detected - reset silence tracking
             self.silence_start_time = None
             self.consecutive_silence_count = 0
@@ -754,15 +769,16 @@ class ContinuousRecorder:
             # Also accumulate for complete recording file
             self.all_audio.append(audio_chunk)
 
+            # VAD on this block before a cut at the maximum duration, so that the chunk
+            # the block ends is the one credited with any speech in it.
+            self._process_vad(audio_chunk)
+
             # Check max duration boundary
             if self._check_max_duration():
                 return
 
             # Check VAD-based silence boundary
-            recent_audio = self._get_recent_audio()
-            if recent_audio is not None:
-                self._process_vad(recent_audio)
-                self._check_silence_boundary()
+            self._check_silence_boundary()
 
     def _save_complete_recording(self):
         """Save complete recording as single timestamped file."""
@@ -800,8 +816,8 @@ class ContinuousRecorder:
 
         # Don't save or transcribe final chunk if mic was off
         if not self.mic_off and self.current_chunk_audio:
-            chunk_file, peak = self._save_chunk()
-            self._emit_chunk_ready(chunk_file, is_final=True, peak=peak)
+            chunk_file, peak, speech = self._save_chunk()
+            self._emit_chunk_ready(chunk_file, is_final=True, peak=peak, speech=speech)
 
         self.transport.send_event("recording_stopped")
         log("recording stopped")

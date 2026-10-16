@@ -54,6 +54,7 @@ def test_a_short_recording(start_server, connect, short_wav, tmp_path):
     assert chunks[0]["chunk_num"] == 1
     assert chunks[0]["is_final"] is True
     assert chunks[0]["peak"] > 0.01
+    assert chunks[0]["speech"] is True
     assert chunks[0]["audio_file"] == str(tmp_path / "en-short_chunk_001.wav")
     assert Path(chunks[0]["audio_file"]).stat().st_size > 1000
 
@@ -105,9 +106,16 @@ def test_a_long_recording_is_cut_into_chunks(start_server, connect, long_wav, tm
     chunks = chunks_of(client)
     assert len(chunks) > 1
     assert [chunk["chunk_num"] for chunk in chunks] == list(range(1, len(chunks) + 1))
-    assert [chunk["is_final"] for chunk in chunks] == [False] * (len(chunks) - 1) + [True]
+    # Only the last chunk can be final, and it need not be: a final chunk is sent only when
+    # audio is left over after the last cut, and with this fixture the last cut can fall at
+    # its very end.
+    assert not any(chunk["is_final"] for chunk in chunks[:-1])
     assert all(Path(chunk["audio_file"]).exists() for chunk in chunks)
     assert len([e for e in client.events if e["type"] == "complete_file"]) == 1
+    # The fixture is speech followed by about seven seconds of silence, which Whisper
+    # transcribes as "Thank you." The chunks cut from that silence say they have no speech.
+    assert chunks[0]["speech"] is True
+    assert chunks[-1]["speech"] is False
 
 
 def test_a_client_leaving_mid_recording_keeps_the_recording(start_server, connect, long_wav, tmp_path):
