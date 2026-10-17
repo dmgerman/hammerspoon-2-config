@@ -778,6 +778,12 @@ interactive.use("hs_menu-gt", {
         });
 
         interactive.define({
+            name: "menu-show-whisper",
+            doc: "Show the dictation menu on screen.",
+            fn: () => menu.toggleOnScreen(menus.whisperMenu, { name: "Whisper" })
+        });
+
+        interactive.define({
             name: "menu-hide",
             doc: "Dismiss the on-screen menu.",
             fn: () => menu.hideScreen()
@@ -788,6 +794,7 @@ interactive.use("hs_menu-gt", {
     keys: {
         "cmd-ctrl-alt z": "menu-show",
         "cmd-ctrl-alt m": "menu-show-music",
+        "cmd-ctrl-alt w": "menu-show-whisper",
         "alt w": "menu-show-windows"
     }
 });

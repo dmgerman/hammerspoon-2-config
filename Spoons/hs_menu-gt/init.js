@@ -204,7 +204,7 @@ function sizedForTile(image) {
     const height = (current && current.h) || box
     const scale = box / Math.max(width, height)
 
-    const copy = image.copyImage()
+    const copy = image.duplicate()
     copy.size = new HSSize(Math.max(1, Math.round(width * scale)),
                            Math.max(1, Math.round(height * scale)))
     return copy
@@ -535,7 +535,7 @@ function resolveProduced(value, button) {
 
     // An HSImage. Identified by behaviour rather than by type name, so a caller can hand
     // back anything image-shaped.
-    if (typeof value.copyImage === "function") return Promise.resolve(value)
+    if (typeof value.duplicate === "function") return Promise.resolve(value)
 
     // Button fields. Drawn through the ordinary path, so an icon, a label and a
     // background all work, but without the disk cache that buttonImage would apply.
@@ -593,7 +593,7 @@ function renderButton(button, iconSpec) {
     // Nothing to compose: the icon is the whole button. This is the common case, and it is
     // how the Hammerspoon 1 configuration's icon buttons were drawn.
     if (!hasLabel && !isSymbol && !button.background) {
-        const copy = image.copyImage()
+        const copy = image.duplicate()
         copy.size = new HSSize(config.tileSize, config.tileSize)
         return Promise.resolve({ image: copy, complete: true })
     }

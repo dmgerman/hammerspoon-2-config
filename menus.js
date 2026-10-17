@@ -402,6 +402,33 @@ const clipboardMenu = [
     stays({ label: "Clear all", icon: "symbol:trash", key: "c", command: "clipboard-clear" })
 ]
 
+// Dictation, through hs_whisper-gt. The keys follow the commands' own words: t, c and p for
+// the three ways to transcribe, l and f for the two choosers that also have chords.
+//
+// Starting a dictation closes the on-screen menu, so that the text is pasted into the
+// application that had focus and not into the menu. The choosers close it too, because a
+// chooser needs the keyboard. Only the buttons that change a setting in place keep it open.
+const whisperMenu = [
+    { label: "Dictate", icon: "whisper.png", key: "t", command: "whisper-transcribe-toggle" },
+    { label: "To clipboard", icon: "symbol:doc.on.clipboard", key: "c", command: "whisper-transcribe-to-clipboard-toggle" },
+    { label: "To processor", icon: "symbol:gearshape.2", key: "p", command: "whisper-transcribe-to-processor-toggle" },
+    { label: "Abort", icon: "symbol:xmark.circle", key: "a", command: "whisper-transcribe-abort" },
+    { label: "Again", icon: "symbol:arrow.clockwise", key: "g", command: "whisper-transcribe-again" },
+
+    { label: "Language", icon: "symbol:globe", key: "l", command: "whisper-language-select" },
+    { label: "Next language", icon: "symbol:globe.badge.chevron.backward", key: "n", command: "whisper-language-next", keepOpen: true },
+    { label: "Filter", icon: "symbol:line.3.horizontal.decrease.circle", key: "f", command: "whisper-filter-select" },
+    { label: "Processor", icon: "symbol:list.bullet", key: "P", command: "whisper-processor-select" },
+
+    { label: "Diagnose", icon: "symbol:stethoscope", key: "d", command: "whisper-diagnose" },
+    { label: "Debug on", icon: "symbol:ladybug.fill", key: "v", command: "whisper-debug-enable", keepOpen: true },
+    { label: "Debug off", icon: "symbol:ladybug", key: "V", command: "whisper-debug-disable", keepOpen: true },
+    { label: "Restart server", icon: "symbol:arrow.triangle.2.circlepath", key: "s", command: "whisper-server-restart" },
+
+    // Capital X, since it deletes recordings and should not be pressed by accident.
+    { label: "Prune recordings", icon: "symbol:trash", key: "X", command: "whisper-recordings-prune" }
+].map(navigates)
+
 // MARK: - Root
 //
 // The order follows largeMenu in dmg-streamdeck.lua.
@@ -504,7 +531,7 @@ const rootMenu = [
     { label: "Emacs cmds", icon: "emacs-capture.jpg", key: "x", children: emacsMenu },
 
     { label: "Countdown", icon: "tomato.jpeg", key: "t", command: "countdown-start" },
-    todo("Whisper", "whisper.png", "the whisper dictation Spoon"),
+    { label: "Whisper", icon: "whisper.png", key: "d", children: whisperMenu },
     { label: "Paste", icon: "symbol:doc.on.clipboard", key: "v", command: "paste" },
 
     // Capital V, since v sends cmd-v: the same letter for the same subject.
@@ -534,6 +561,7 @@ module.exports = {
     chromeMenu,
     clipboardMenu,
     musicMenu,
+    whisperMenu,
     applicationsMenu,
     windowSwitcherMenu
 }

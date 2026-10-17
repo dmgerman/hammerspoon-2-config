@@ -95,7 +95,7 @@ const config = {
     notchFraction: 0.13,
 
     // The strip that shows the items which cannot be seen. See peek().
-    peekSeconds: 4,          // how long it stays up; 0 to leave it until something hides it
+    peekSeconds: 10,          // how long it stays up; 0 to leave it until something hides it
     peekHeight: 34,
     peekOffset: 6,           // between the bottom of the menu bar and the top of the strip
     peekTextSize: 14,
