@@ -214,6 +214,7 @@ wf.config.moveDebounce = 0.2
 | =titleDebounce=      |     0.1 | The same, for title changes                              |
 | =stateDebounce=      |    0.08 | How long to let a window's properties settle before reading them |
 | =skipApplications=   |  a list | Applications never watched at all                        |
+| =untitledNonStandardSkip= | true | Never watch a window with no title that is not a standard window |
 | =skipInDefault=      |  a list | Applications the default filter leaves out               |
 | =logLevel=           | "error" | ="none"=, ="error"= or ="debug"=                         |
 
@@ -226,6 +227,12 @@ wf.config.moveDebounce = 0.2
   if a spaces module appears.
 
 - *Windows of applications listed in =config.skipApplications=.*
+
+- *Windows with no title that are not standard windows*, while
+  =config.untitledNonStandardSkip= is true. These are alerts, banners, menu bar popovers
+  and the Finder's desktop, none of which can be selected. Hammerspoon 2's own alerts and
+  banners are the main reason: each one that opens and closes would otherwise register six
+  accessibility watchers and leave six errors in the console when they are removed.
 
 * Coming from Hammerspoon 1
 

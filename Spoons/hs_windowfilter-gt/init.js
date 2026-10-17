@@ -63,6 +63,18 @@ const config = {
         "com.apple.WebKit.Networking", "com.apple.WebKit.WebContent"
     ],
 
+    // Never track a window that has no title and is not a standard window. Such windows
+    // cannot be meaningfully selected: alerts, banners, menu bar popovers and the Finder's
+    // desktop. Measured on 2026-10-17, the only windows of other applications this turned
+    // away were Caffeine's popover and the desktop.
+    //
+    // The windows that matter most here are Hammerspoon 2's own alerts and banners, which
+    // last a few seconds. Watching each one registers six accessibility watchers, and
+    // removing them once the window has closed makes Hammerspoon 2 log six errors, because
+    // hs.ax.off() reports a destroyed element as a failure. A banner shown once a minute
+    // therefore put about a dozen lines a minute in the console.
+    untitledNonStandardSkip: true,
+
     // Applications whose windows are tracked but never reported by the default filter.
     // A filter can still ask for them by name.
     skipInDefault: ["Hammerspoon", "Hammerspoon 2"],
@@ -732,6 +744,18 @@ function debounce(id, key, seconds, action) {
 
 // MARK: Windows
 
+/**
+ * Whether a window is worth watching: see config.untitledNonStandardSkip.
+ *
+ * A window that is turned away is not remembered, so it is looked at again on the next scan
+ * of its application. A window whose title is set only after it opens is therefore picked
+ * up once the title arrives.
+ */
+function windowWorthTracking(state) {
+    if (!config.untitledNonStandardSkip) return true
+    return state.title !== "" || state.role === "AXStandardWindow"
+}
+
 function trackWindow(window) {
     if (!window) return
     const id = window.id
@@ -739,6 +763,7 @@ function trackWindow(window) {
 
     const state = windowState(window)
     if (!state) return
+    if (!windowWorthTracking(state)) return
     state.focused = isFocused(id)
 
     const element = window.axElement()

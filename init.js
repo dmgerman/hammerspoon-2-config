@@ -1350,7 +1350,7 @@ interactive.setKeys({
 
     // The window switcher, where hs_select_window had it in the version 1 configuration.
     "alt b": "window-select",
-    "alt <tab>": "window-select-application",
+    "alt tab": "window-select-application",
     "alt m": "window-maximize",
     "alt v": "window-vertical-maximize",
     // alt-t in the version 1 configuration too.
