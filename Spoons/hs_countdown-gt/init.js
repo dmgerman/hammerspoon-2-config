@@ -2,7 +2,7 @@
 // declares itself as CountDown) to Hammerspoon 2.
 //
 // Three progress indicators:
-//   * a horizontal bar along the bottom edge of the primary screen (always on)
+//   * a horizontal bar along the bottom edge of every screen (always on)
 //   * warnings showing the time left, at 1, 2, 4, 8, ... minutes remaining (optional)
 //   * a menu bar item showing the time left, with pause/cancel entries (optional)
 //
@@ -66,6 +66,9 @@ const events = {
     setProgress: "setProgress"
 }
 
+// Hammerspoon 2's own bundle identifier, used to bring it forward before a prompt.
+const OWN_BUNDLE_ID = "net.tenshu.Hammerspoon-2"
+
 // MARK: - State
 
 let tickTimer = null
@@ -81,20 +84,19 @@ let userCallback = null
 let menuBar = null
 let hotkeys = []
 
-let barCanvas = null
-// How many segments the bar was built with. `config.barSegments` is what is asked for;
+// One canvas per screen, all showing the same progress.
+let bars = []
+// How many segments each bar was built with. `config.barSegments` is what is asked for;
 // this is what is there, which is what an index is checked against.
 let barSegments = 0
-// Number of segments currently coloured as elapsed, so a tick only re-colours
+// Number of segments currently coloured as elapsed on every bar, so a tick only re-colours
 // the segments that have just been crossed.
 let barFilled = 0
-// Whether the bar is displayed. hs.ui windows do not report it, and a rebuild after a
-// display change has to know whether to put the new one back on screen.
+// Whether the bars are displayed. Canvases do not report it, and a rebuild after a
+// display change has to know whether to put the new ones back on screen.
 let barShowing = false
-// The screen the bar was built for, so a countdown started on another one is noticed.
-let barScreen = null
-// Held so it can be removed again: the watcher is what notices that the primary screen
-// has changed underneath the bar.
+// Held so it can be removed again: the watcher is what notices that a screen has been
+// added, removed or resized underneath the bars.
 let screenWatcher = null
 
 // MARK: - Helpers
@@ -139,52 +141,29 @@ function barColor(value) {
     }
 }
 
-// The screen the user is on: the one holding the focused window, as the other Spoons do
-// it. Not hs.screen.primary(), which is the display carrying the menu bar — what System
-// Settings calls the Main Display.
-function currentScreen() {
-    const focused = hs.window.focusedWindow()
-    if (focused && focused.screen) return focused.screen
-    return hs.screen.main() || hs.screen.primary()
-}
-
-// The bar's frame, along the bottom edge of the screen in use, at its full width.
-// Returns null when there are no displays at all -- mid-disconnect, or a shut lid with
-// nothing attached.
+// The bar's frame along the bottom edge of `screen`, at its full width.
 //
 // hs.screen measures y downwards from the top of the primary display and a canvas window
 // upwards from its bottom, so the screen's bottom edge has to be converted. On the primary
-// screen this comes out as 0, which is what the bar used when it only ever drew there.
-function barFrame() {
-    const screen = currentScreen()
-    const reference = hs.screen.primary() || screen
-    if (!screen || !reference) return null
-
+// screen this comes out as 0.
+function barFrame(screen, primary) {
     const area = screen.fullFrame
-    const primary = reference.fullFrame
-
+    const reference = primary.fullFrame
     return {
-        screen: screen,
-        frame: {
-            x: area.x,
-            y: (primary.y + primary.h) - (area.y + area.h),
-            w: area.w,
-            h: config.barHeight
-        }
+        x: area.x,
+        y: (reference.y + reference.h) - (area.y + area.h),
+        w: area.w,
+        h: config.barHeight
     }
 }
 
-// Builds the bar. Each segment is a canvas element, recoloured in place by index as the
-// countdown passes it, so a tick touches only the segments just crossed.
-function barBuild() {
-    const placement = barFrame()
-    if (!placement) return
+// Builds one bar on `screen`. Each segment is a canvas element, recoloured in place by
+// index as the countdown passes it, so a tick touches only the segments just crossed.
+function barBuild(screen, primary, count) {
+    const frame = barFrame(screen, primary)
+    const segmentWidth = frame.w / count
 
-    const width = placement.frame.w
-    const count = Math.max(1, Math.floor(config.barSegments))
-    const segmentWidth = width / count
-
-    const canvas = hs.canvas.create(placement.frame)
+    const canvas = hs.canvas.create(frame)
         .level("status")
         // A five point strip along the bottom edge of the screen sits exactly where the
         // Dock does. Without this it would swallow every click along that edge.
@@ -201,86 +180,91 @@ function barBuild() {
         })
     }
     canvas.appendElements(elements)
+    return canvas
+}
 
-    barCanvas = canvas
+// Builds a bar on every screen. Leaves `bars` empty when there are no displays at all --
+// mid-disconnect, or a shut lid with nothing attached.
+//
+// The new bars are shown at once when a countdown is running. Bars can be built from a
+// tick, through barEnsure(), after a moment with no screens, and nothing else would show
+// them then.
+function barsBuild() {
+    const screens = hs.screen.all()
+    const primary = hs.screen.primary() || screens[0]
+    if (!primary || screens.length === 0) return
+
+    const count = Math.max(1, Math.floor(config.barSegments))
+    bars = screens.map((screen) => barBuild(screen, primary, count))
     barSegments = count
-    barScreen = placement.screen.id
+    barFilled = 0
+    if (barShowing) for (const canvas of bars) canvas.show()
+}
+
+function barsDestroy() {
+    for (const canvas of bars) canvas.destroy()
+    bars = []
+    barSegments = 0
     barFilled = 0
 }
 
 function barEnsure() {
-    if (!barCanvas) barBuild()
+    if (bars.length === 0) barsBuild()
 }
 
 // progress is 0.0 to 1.0.
 function barSetProgress(progress) {
     barEnsure()
-    if (!barCanvas) return
+    if (bars.length === 0) return
 
     const target = Math.max(0, Math.min(barSegments, Math.round(progress * barSegments)))
     if (target === barFilled) return
 
     const passed = barColor(config.barColorPassed)
     const toPass = barColor(config.barColorToPass)
-    if (target > barFilled) {
-        for (let i = barFilled; i < target; i++) barCanvas.setElementAttribute(i, "fillColor", passed)
-    } else {
-        for (let i = target; i < barFilled; i++) barCanvas.setElementAttribute(i, "fillColor", toPass)
+    for (const canvas of bars) {
+        if (target > barFilled) {
+            for (let i = barFilled; i < target; i++) canvas.setElementAttribute(i, "fillColor", passed)
+        } else {
+            for (let i = target; i < barFilled; i++) canvas.setElementAttribute(i, "fillColor", toPass)
+        }
     }
     barFilled = target
 }
 
 function barShow() {
-    // The bar outlives a countdown, so the one built for the last one may be on the screen
-    // that countdown was started from. A new countdown belongs on the screen in use now.
-    barReposition()
-
     barEnsure()
-    if (!barCanvas) return
     barSetProgress(0)
-    barCanvas.show()
+    for (const canvas of bars) canvas.show()
     barShowing = true
 }
 
 function barHide() {
     barShowing = false
-    if (!barCanvas) return
+    if (bars.length === 0) return
     barSetProgress(0)
-    barCanvas.hide()
+    for (const canvas of bars) canvas.hide()
 }
 
 /**
- * Put the bar where it belongs for the display arrangement as it now stands.
+ * Rebuild the bars for the display arrangement as it now stands.
  *
- * A canvas can be moved and resized after it is built, so the bar follows the screen
- * rather than being thrown away and made again. Only a change of width needs the segments
- * rebuilt, since each one's frame is a fraction of it; a move alone is a `setFrame`.
+ * A display may have been added or removed, or changed size, so every bar is thrown away
+ * and one is built for each screen there is now. This also runs when there are no bars,
+ * because a moment with no screens at all leaves none, and the bars have to come back when
+ * a screen does.
+ *
+ * The progress is taken from the countdown rather than from the old bars, which do not
+ * exist after a moment with no screens. A paused countdown sends no ticks, so the new bars
+ * have to be set to the right progress here.
  */
 function barReposition() {
-    if (!barCanvas) return
-
-    const placement = barFrame()
-    if (!placement) return
-
-    const current = barCanvas.frame()
-    if (placement.frame.w !== current.w) {
-        // A different width means every segment is the wrong size. Rebuilt at the progress
-        // it was showing, so a countdown in flight does not lose its place.
-        const progress = barSegments ? barFilled / barSegments : 0
-        const wasShowing = barShowing
-        barCanvas.destroy()
-        barCanvas = null
-        barSegments = 0
-        barFilled = 0
-        barEnsure()
-        if (!barCanvas) return
-        barSetProgress(progress)
-        if (wasShowing) barCanvas.show()
-        return
-    }
-
-    barCanvas.setFrame(placement.frame)
-    barScreen = placement.screen.id
+    const progress = timerRunning && timerLenMinutes > 0
+        ? 1 - timeLeft / (timerLenMinutes * 60)
+        : 0
+    barsDestroy()
+    barsBuild()
+    barSetProgress(progress)
 }
 
 // MARK: - Menu bar
@@ -567,7 +551,17 @@ function startFromAnswer(answer, callback) {
  * @param {function} [callback] Called as `(event, minutes)` on each timer event.
  */
 function startForInteractive(callback) {
+    // Hammerspoon is brought forward first, and the window that was in front is focused
+    // again afterwards. hs.ui.textPrompt is a plain NSWindow, which cannot take keyboard
+    // focus while its application is in the background. Started from a key or the menu bar,
+    // Hammerspoon is in the background, so without this the prompt cannot be typed into.
+    //
+    // launchOrFocus rather than setFrontmost: the prompt window does not exist yet, so
+    // there is no main window for setFrontmost to bring forward. hs_interactive-gt does
+    // the same before its prompts.
     const previousWindow = hs.window.focusedWindow()
+    hs.application.launchOrFocus(OWN_BUNDLE_ID)
+
     const hint = "in minutes or specific time (e.g. 10:30 or 9:30 pm)"
     let informative = hint
     let defaultText = String(config.defaultLenMinutes)
@@ -688,7 +682,7 @@ function start() {
 
     // Fires when a display is connected or disconnected, when a resolution or the
     // arrangement changes, and when the menu bar moves to another display — every way the
-    // primary screen the bar was built for can stop being the one it is drawn on.
+    // set of screens the bars were built for can stop matching the screens there are.
     if (!screenWatcher) {
         screenWatcher = () => barReposition()
         hs.screen.on("change", screenWatcher)
@@ -704,12 +698,7 @@ function stop() {
         screenWatcher = null
     }
     barShowing = false
-    if (barCanvas) {
-        barCanvas.destroy()
-        barCanvas = null
-        barSegments = 0
-        barFilled = 0
-    }
+    barsDestroy()
     if (menuBar) {
         menuBar.destroy()
         menuBar = null

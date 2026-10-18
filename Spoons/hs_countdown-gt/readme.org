@@ -1,6 +1,6 @@
 * hs_countdown-gt
 
-A countdown timer, shown as a progress bar along the bottom edge of the screen.
+A countdown timer, shown as a progress bar along the bottom edge of every screen.
 
 While a countdown runs, three indicators report it: the bar, a menu bar item counting down,
 and warnings at 1, 2, 4, 8, ... minutes remaining. When the time is up a sound plays, an
@@ -66,6 +66,9 @@ An answer that is neither is reported in the dialog itself, which is shown again
 rejected answer left in place to be corrected. Cancel abandons the countdown.
 
 The dialog is modal: it blocks Hammerspoon, including running timers, until it is answered.
+
+Hammerspoon is brought to the front before the dialog appears, so that the dialog can be
+typed into. The window that was focused before is focused again once it is closed.
 
 ** pauseOrResume()
 
@@ -197,9 +200,9 @@ countDown.config.alertSound = "Glass"
 - *=useLastTimerAsDefault= changes a setting.* Starting a countdown of 45 minutes with it
   on assigns 45 to =config.defaultLenMinutes=, so later calls with no length use 45 rather
   than the value you configured.
-- *The bar is on the primary screen.* It spans the bottom edge of the primary screen, and
-  is built for that screen's width. It is not moved to the screen holding the focused
-  window.
+- *The bar is on every screen.* Each screen has its own bar along its bottom edge, built
+  for that screen's width, and all of them show the same progress. When a display is
+  connected, disconnected or resized, the bars are rebuilt for the screens there are then.
 - *=barSegments= is the bar's resolution.* The bar is a row of fixed-width rectangles,
   re-coloured as the countdown advances, because element geometry in =hs.ui= is fixed once
   a window is built while a colour is reactive. More segments give a smoother bar and more
