@@ -53,6 +53,9 @@ nothing is reachable only by a keyboard shortcut you have to remember:
 - *Processor*, choosing which processor that entry and =transcribeToProcessorToggle= use
 - *Paste each chunk as it is ready*, ticked when it is on. It is shown only with the
   =streaming= recorder; see /Pasting each chunk as it is ready/
+- *Chunking*, titled with the two settings that decide where a chunk ends, offering a few
+  values for each with the current one ticked. Also shown only with the =streaming=
+  recorder; see /Chunking/
 - *Microphone*, titled with the input device being recorded from, with /Automatic/ and every
   input device to choose from. When the device is not the system default and was not chosen
   by name, the title says why: either the default is a Bluetooth headset (see /Which
@@ -182,7 +185,14 @@ whisper.config.chunkAlertSeconds = 3             // how long each chunk's text i
 #+end_src
 
 A pause only ends a chunk if it is longer than =streamingSilenceThreshold= /and/ the chunk
-so far is longer than =streamingMinChunkDuration=. With the values above, pausing for two
+so far is longer than =streamingMinChunkDuration=. The pause has to last between half a
+second and a second longer than =streamingSilenceThreshold=, because the server starts
+counting only once two half-second blocks in a row have had no speech.
+
+Both can be changed without editing the configuration: from the /Chunking/ entry in the menu
+bar menu, or with =silenceThresholdSet(seconds)= and =minChunkDurationSet(seconds)=. A change
+applies from the next dictation, because the server is given the settings when a recording
+starts, and lasts until the configuration is reloaded. With the values above, pausing for two
 seconds between sentences will not split them, and neither will a pause four seconds in.
 Lower both if you want the text to come back in smaller pieces.
 
@@ -547,6 +557,12 @@ Start a dictation that goes to the selected processor, or stop the one in progre
 
 Open the processor chooser, return the selected processor (null when none is configured),
 or choose one by =name= or index; see /Processors/ above.
+
+** silenceThresholdSet(seconds) / minChunkDurationSet(seconds)
+
+Set =config.streamingSilenceThreshold= (0.5 to 30) or =config.streamingMinChunkDuration= (0
+to =streamingMaxChunkDuration=); see /Chunking/ above. Each returns whether the value was
+accepted, and reports a value out of range instead of setting it.
 
 ** recordingsList() / recordingsPrune()
 

@@ -419,6 +419,9 @@ const whisperMenu = [
     { label: "Next language", icon: "symbol:globe.badge.chevron.backward", key: "n", command: "whisper-language-next", keepOpen: true },
     { label: "Filter", icon: "symbol:line.3.horizontal.decrease.circle", key: "f", command: "whisper-filter-select" },
     { label: "Processor", icon: "symbol:list.bullet", key: "P", command: "whisper-processor-select" },
+    // Both ask for a number, so both close the menu. Capital S, since s restarts the server.
+    { label: "Silence", icon: "symbol:speaker.slash", key: "S", command: "whisper-silence-threshold-set" },
+    { label: "Shortest chunk", icon: "symbol:timer", key: "m", command: "whisper-min-chunk-duration-set" },
 
     { label: "Diagnose", icon: "symbol:stethoscope", key: "d", command: "whisper-diagnose" },
     { label: "Debug on", icon: "symbol:ladybug.fill", key: "v", command: "whisper-debug-enable", keepOpen: true },

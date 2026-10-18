@@ -1205,6 +1205,37 @@ interactive.use("hs_whisper-gt", {
             fn: () => whisper.processorSelect()
         });
 
+        // The streaming recorder's chunking. Each prompt opens showing the value now, and
+        // the change applies from the next dictation until the configuration is reloaded.
+        interactive.define({
+            name: "whisper-silence-threshold-set",
+            doc: "Set how many seconds of silence end a chunk of a dictation.",
+            interactive: [{
+                name: "seconds of silence (0.5-30)",
+                reader: interactive.readers.number.ranged({
+                    min: 0.5,
+                    max: 30,
+                    current: () => whisper.config.streamingSilenceThreshold
+                })
+            }],
+            fn: (seconds) => whisper.silenceThresholdSet(seconds)
+        });
+
+        interactive.define({
+            name: "whisper-min-chunk-duration-set",
+            doc: "Set the shortest a chunk of a dictation can be, in seconds; a pause before " +
+                "then does not end it.",
+            interactive: [{
+                name: "shortest chunk in seconds",
+                reader: interactive.readers.number.ranged({
+                    min: 0,
+                    max: whisper.config.streamingMaxChunkDuration,
+                    current: () => whisper.config.streamingMinChunkDuration
+                })
+            }],
+            fn: (seconds) => whisper.minChunkDurationSet(seconds)
+        });
+
         interactive.define({
             name: "whisper-language-next",
             doc: "Move to the next configured transcription language.",
@@ -1251,6 +1282,9 @@ interactive.use("hs_whisper-gt", {
         "cmd-ctrl return": "whisper-transcribe-toggle",
         "cmd-ctrl-alt return": "whisper-transcribe-to-clipboard-toggle",
         "cmd-ctrl-alt-shift return": "whisper-transcribe-to-processor-toggle",
+        // The keypad's Enter key, alone. Taken from every application, so it no longer
+        // types a return anywhere while Hammerspoon 2 is running.
+        "padenter": "whisper-transcribe-to-processor-toggle",
         "cmd-ctrl-alt ;": "whisper-language-select",
         "cmd-ctrl-alt f": "whisper-filter-select"
     }

@@ -178,6 +178,12 @@ const SEVERITY_DURATIONS = {debug: 0, info: 3, warning: 5, error: 10}
 // the first chunk is judged — silence between later phrases is ordinary.
 const SILENCE_PEAK_FLOOR = 0.001
 
+// The values offered for the two chunking settings in the menu bar menu. Any other value can
+// be set with silenceThresholdSet() and minChunkDurationSet(); a value set that way is added
+// to the menu, ticked.
+const SILENCE_THRESHOLD_PRESETS = [1, 1.5, 2, 3, 4, 5]
+const MIN_CHUNK_DURATION_PRESETS = [0, 1, 2, 3, 5, 10]
+
 // Placed between the chunks of a dictation, both when they are pasted one at a time and
 // when they are joined at the end.
 const CHUNK_SEPARATOR = "\n\n"
@@ -444,14 +450,24 @@ function menuBuild() {
     })
 
     // Decided when a dictation starts, like the language, so not selectable while one runs.
-    // Only the streaming recorder produces more than one chunk, so the entry is offered
-    // only with it.
+    // Only the streaming recorder produces more than one chunk, so these entries are
+    // offered only with it.
     if (recorder && recorder.name === "streaming") {
         entries.push({
             title: "Paste each chunk as it is ready",
             checked: !!config.streamingChunkInsert,
             disabled: !idle,
             fn: () => chunkInsertToggle()
+        })
+        entries.push({
+            title: `Chunking: ${config.streamingSilenceThreshold} s of silence, ` +
+                `${config.streamingMinChunkDuration} s shortest`,
+            menu: [{title: "Silence that ends a chunk", disabled: true}]
+                .concat(chunkSettingMenu(SILENCE_THRESHOLD_PRESETS,
+                    config.streamingSilenceThreshold, silenceThresholdSet, idle))
+                .concat([{title: "-"}, {title: "Shortest chunk", disabled: true}])
+                .concat(chunkSettingMenu(MIN_CHUNK_DURATION_PRESETS,
+                    config.streamingMinChunkDuration, minChunkDurationSet, idle))
         })
     }
 
@@ -2121,6 +2137,65 @@ function sessionEnd(mine) {
     menuBarIdle()
 }
 
+// MARK: - Chunking settings
+
+/**
+ * Set one of the streaming recorder's chunking settings, after checking it.
+ *
+ * The server is given the settings when a recording starts, so a change applies to the next
+ * dictation. It lasts until the configuration is reloaded.
+ */
+function chunkSettingSet(key, label, seconds, min, max) {
+    const value = Number(seconds)
+    if (!Number.isFinite(value) || value < min || value > max) {
+        notify("config", "warning",
+            `${label} must be from ${min} to ${max} seconds, not ${seconds}`)
+        return false
+    }
+    config[key] = value
+    notify("config", "info", `${label}: ${value} s`)
+    return true
+}
+
+/**
+ * Set how many seconds of silence end a chunk, `config.streamingSilenceThreshold`.
+ *
+ * The server starts counting only once two half-second blocks in a row have had no speech,
+ * so a pause has to last between half a second and a second longer than this.
+ *
+ * @param {number} seconds From 0.5 to 30.
+ * @returns {boolean} Whether it was accepted.
+ */
+function silenceThresholdSet(seconds) {
+    return chunkSettingSet("streamingSilenceThreshold", "Silence that ends a chunk",
+        seconds, 0.5, 30)
+}
+
+/**
+ * Set the shortest a chunk can be, `config.streamingMinChunkDuration`. A pause before a chunk
+ * is this long does not end it.
+ *
+ * @param {number} seconds From 0 to `config.streamingMaxChunkDuration`.
+ * @returns {boolean} Whether it was accepted.
+ */
+function minChunkDurationSet(seconds) {
+    return chunkSettingSet("streamingMinChunkDuration", "Shortest chunk",
+        seconds, 0, config.streamingMaxChunkDuration)
+}
+
+/** Menu entries for each preset, and for the current value when it is not one of them. */
+function chunkSettingMenu(presets, current, set, enabled) {
+    const values = presets.includes(current)
+        ? presets
+        : presets.concat([current]).sort((a, b) => a - b)
+    return values.map((value) => ({
+        title: `${value} s`,
+        checked: value === current,
+        disabled: !enabled,
+        fn: () => set(value)
+    }))
+}
+
 // MARK: - Pasting
 
 /**
@@ -2684,6 +2759,9 @@ function diagnose() {
     const processor = processorActive()
     say(`processor: ${processor ? processor.name : "none"} ` +
         `(${config.processors.length} configured)`)
+    say(`chunking: ${config.streamingSilenceThreshold} s of silence ends a chunk, ` +
+        `shortest ${config.streamingMinChunkDuration} s, longest ` +
+        `${config.streamingMaxChunkDuration} s`)
     say(`paste each chunk as it is ready: ${config.streamingChunkInsert ? "on" : "off"}` +
         (config.streamingChunkInsert && filter ? " (but not while a filter is active)" : ""))
 
@@ -2882,6 +2960,8 @@ module.exports = {
 
     chunkInsertSet,
     chunkInsertToggle,
+    silenceThresholdSet,
+    minChunkDurationSet,
 
     recordingsList,
     recordingsPrune,
@@ -2902,6 +2982,7 @@ module.exports = {
         recorders,
         inputDeviceChoose,
         recorder: () => recorder,
-        transcriber: () => transcriber
+        transcriber: () => transcriber,
+        menuBuild
     }
 }
