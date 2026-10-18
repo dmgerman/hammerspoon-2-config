@@ -1290,6 +1290,58 @@ interactive.use("hs_whisper-gt", {
     }
 });
 
+// The active Kanata layer, shown on every screen while it is not the base layer. A port of
+// the hs_kanata Spoon in ~/.hammerspoon, loaded there by dmg_load_kanata() in
+// dmg-functions.lua.
+//
+// Kanata sends its messages to every client connected, so with both versions running the
+// layer name is drawn twice, once by each. Comment out the "kanata" section of
+// ~/.hammerspoon/init.lua to leave it to this one.
+interactive.use("hs_kanata-gt", {
+    // The Spoon connects with hs.socket, which is in my own build of Hammerspoon 2 but not
+    // yet in the released one. Without this test, a released build would load the Spoon and
+    // then fail in start() on hs.socket being undefined.
+    when: () => typeof hs.socket !== "undefined",
+    config: {
+        // Carried over from dmg_load_kanata(). The alert repeats what the Spoon already
+        // draws, and MessagePush "hello" is the test message my kanata.kbd pushes.
+        callbacks: {
+            LayerChange: (msg) => {
+                if (msg.new !== "base") hs.ui.alert(`Kanata layer: ${msg.new ?? "?"}`).duration(2).show();
+            },
+            MessagePush: (msg) => {
+                const payload = Array.isArray(msg.message) ? msg.message[0] : msg.message;
+                if (payload === "hello") hs.ui.alert("hello world").duration(2).show();
+            }
+        }
+    },
+    commands: (interactive, kanata) => {
+        interactive.define({
+            name: "kanata-connection-restart",
+            doc: "Disconnect from Kanata and connect again.",
+            fn: () => kanata.connectionRestart()
+        });
+
+        interactive.define({
+            name: "kanata-connection-close",
+            doc: "Disconnect from Kanata, and stop trying to reconnect until kanata-connection-open.",
+            fn: () => kanata.connectionClose()
+        });
+
+        interactive.define({
+            name: "kanata-connection-open",
+            doc: "Connect to Kanata, retrying for up to five minutes until it answers.",
+            fn: () => kanata.connectionOpen()
+        });
+
+        interactive.define({
+            name: "kanata-status-show",
+            doc: "Show whether Hammerspoon 2 is connected to Kanata, and the active layer.",
+            fn: () => kanata.statusShow()
+        });
+    }
+});
+
 interactive.define({
     name: "paste",
     doc: "Send cmd-v to the focused application.",

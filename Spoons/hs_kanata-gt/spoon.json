@@ -1,0 +1,6 @@
+{
+    "name": "hs_kanata-gt",
+    "author": "Daniel German <dmg@turingmachine.org>",
+    "version": "1.0.0",
+    "description": "Connects to Kanata's TCP server, shows the active layer on every screen, and passes Kanata's messages to callbacks."
+}

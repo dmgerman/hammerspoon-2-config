@@ -1,0 +1,118 @@
+* hs_kanata-gt
+
+Shows the active [[https://github.com/jtroo/kanata][Kanata]] layer on every screen, and passes
+Kanata's messages to callbacks.
+
+Kanata is a keyboard remapper. When it is started with a port, it runs a TCP server and sends
+each connected client one JSON object per line, such as ={"LayerChange":{"new":"nav"}}= when
+the active layer changes. This Spoon connects to that server with =hs.socket=. While the active
+layer is not the base layer, its name is drawn on every screen.
+
+This is a port of the Hammerspoon 1 /hs_kanata/ Spoon to Hammerspoon 2 and JavaScript.
+
+* Requirements
+
+The Spoon needs =hs.socket=, which released builds of Hammerspoon 2 do not have yet. On those
+builds =start()= fails because =hs.socket= is undefined. A configuration that is also run on
+released builds can load the Spoon only when the module exists:
+
+#+begin_src js
+if (typeof hs.socket !== "undefined") {
+    const kanata = hs.loadSpoon("hs_kanata-gt")
+    kanata.start()
+}
+#+end_src
+
+* Starting Kanata
+
+Kanata has to be started with the port the Spoon connects to, 12340 by default:
+
+#+begin_src bash
+kanata --port 12340 --cfg ~/.config/kanata/kanata.kbd
+#+end_src
+
+The Spoon does not need Kanata to be running when it starts. If Kanata is not answering, or
+exits later, the Spoon tries again every =reconnectInterval= seconds, and reconnects when
+Kanata is back. The version 1 Spoon had to be restarted by hand after Kanata was restarted.
+
+If Kanata has not answered after =reconnectTimeout= seconds, five minutes by default, the
+Spoon stops trying and shows an alert saying so. =connectionOpen()= starts it trying again,
+and the five minutes are counted afresh from then.
+
+* Simple usage
+
+#+begin_src js
+const kanata = hs.loadSpoon("hs_kanata-gt")
+
+kanata.config.callbacks = {
+    LayerChange: (msg) => console.log(`Kanata layer: ${msg.new}`),
+    MessagePush: (msg) => console.log(`Kanata pushed: ${JSON.stringify(msg.message)}`)
+}
+
+kanata.start()
+#+end_src
+
+Each callback receives the message with its type added and its payload spread into it.
+={"LayerChange":{"new":"nav"}}= arrives as ={type: "LayerChange", new: "nav"}=. A payload
+that is not an object arrives as ={type, value}=.
+
+Kanata sends a =LayerChange= for the current layer as soon as a client connects, so the layer
+is known from the moment the connection is made.
+
+* Methods
+
+| Method                  | What it does                                                          |
+|-------------------------+-----------------------------------------------------------------------|
+| =start()=               | Connect to Kanata and start watching for screen changes.              |
+| =stop()=                | Disconnect, take down the layer name, and stop watching screens.       |
+| =connectionOpen()=      | Connect, retrying until Kanata answers or =reconnectTimeout= passes.  |
+| =connectionClose()=     | Disconnect, and stop retrying until =connectionOpen()=.               |
+| =connectionRestart()=   | Disconnect and connect again.                                         |
+| =connectionIsOpen()=    | Whether the Spoon is connected.                                       |
+| =layer()=               | The name of the active layer, or =null= while not connected.          |
+| =messageSend(message)=  | Send a request, such as ={ChangeLayer: {new: "nav"}}=. Returns false when not connected. |
+| =statusShow()=          | Show the connection state and the active layer in an alert.           |
+
+=messageSend()= sends whatever object it is given as one line of JSON. Which requests Kanata
+accepts is documented with its TCP server.
+
+* Configuration
+
+Set these on =kanata.config= before =start()=. Layer name settings take effect the next time
+the name is drawn.
+
+| Setting             | Default        | Description                                                  |
+|---------------------+----------------+--------------------------------------------------------------|
+| =host=              | ="127.0.0.1"=  | Kanata's host.                                               |
+| =port=              | =12340=        | Kanata's port.                                               |
+| =reconnectInterval= | =5=            | Seconds between attempts to connect. =null= stops retrying.  |
+| =reconnectTimeout=  | =300=          | Seconds without an answer after which retrying stops. =null= retries indefinitely. |
+| =baseLayer=         | ="base"=       | The layer during which nothing is shown.                     |
+| =layerShow=         | =true=         | Whether the layer name is drawn on screen.                   |
+| =canvasWidth=       | =400=          | Width of the layer name's box, in points.                    |
+| =canvasHeight=      | =200=          | Height of the layer name's box, in points.                   |
+| =textSize=          | =120=          | Text size in points.                                         |
+| =textColor=         | ="#FF0000"=    | A ="#RRGGBB"= string, or ={red, green, blue, alpha}= in 0..1. |
+| =xPos=              | =0.5=          | Horizontal centre of the name: 0 is the left edge, 1 the right. |
+| =yPos=              | =0.75=         | Vertical centre of the name: 0 is the top edge, 1 the bottom. |
+| =callbacks=         | ={}=           | Functions keyed by message type.                             |
+
+=xPos= and =yPos= are fractions of each screen's usable area, which excludes the menu bar and
+the Dock.
+
+The layer name ignores the mouse. It stays on screen for as long as the layer is held, often
+while typing or clicking, so it must not take the clicks behind it.
+
+* Differences from the version 1 Spoon
+
+- Settings are camelCase: =canvas_width= is =canvasWidth=, =x_pos= is =xPos=, and so on.
+- The callbacks are set in =config.callbacks= rather than passed to =init()=.
+- =restart()=, =close()= and =status()= are =connectionRestart()=, =connectionClose()= and
+  =statusShow()=.
+- The Spoon reconnects by itself when Kanata is restarted.
+- The layer name is taken down while the Spoon is not connected, since the layer is not known
+  then.
+- The layer name is redrawn when screens are added, removed or rearranged.
+- =messageSend()= and =layer()= are new.
+- A line that is not a Kanata message is skipped, as before, and is now also logged to the
+  Console. A last line cut short by the connection closing is skipped too.
