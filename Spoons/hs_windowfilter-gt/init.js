@@ -54,6 +54,9 @@ const config = {
     // accessibility properties settle before reading them. They do not all change at once,
     // so reading immediately can catch a window half way through a transition.
     stateDebounce: 0.08,
+    // How long after a window is created to look at its application's windows a second
+    // time, for a window that had no title yet at the first look.
+    createdRescanDelay: 1.5,
 
     // Applications never tracked. The Lua module calls these noWindows and transient: they
     // have no windows worth reporting, and watching them costs an observer each.
@@ -526,9 +529,9 @@ class WindowFilter {
 //
 // Two levels of watcher:
 //
-//   Per application — windowCreated and focusedWindowChanged. These are posted by the
-//   application element, so one registration covers all of its windows, including windows
-//   that do not exist yet.
+//   Per application — windowCreated, created and focusedWindowChanged. These are posted by
+//   the application element, so one registration covers all of its windows, including
+//   windows that do not exist yet.
 //
 //   Per window — uIElementDestroyed, windowMoved, windowResized, windowMiniaturized,
 //   windowDeminiaturized and titleChanged. These are posted by the window element and do
@@ -565,6 +568,12 @@ const APPLICATION_NOTIFICATIONS = () => [
     hs.ax.notificationTypes.windowCreated,
     hs.ax.notificationTypes.focusedWindowChanged
 ]
+
+// Some applications post AXCreated for a new window and never AXWindowCreated. Zoom does:
+// measured on 2026-10-21, opening its Settings window posted focusedWindowChanged and
+// created, and nothing else. Registered on its own, after the notifications above, so that an
+// application refusing it keeps the others: hs.ax.on with an array is all or nothing.
+const CREATED_NOTIFICATION = () => hs.ax.notificationTypes.created
 
 // hs.application events that change which windows are focused or on screen, without any
 // window being created or destroyed. They are handled identically — see trackerStart.
@@ -854,10 +863,33 @@ function trackApplication(application) {
     const element = application.axElement()
     if (!element) return
 
-    const handler = timed("app", (notification) => {
+    // The new window is not always readable the instant the notification arrives. Every way
+    // of noticing a new window goes through these keys, so a window reported twice is
+    // scanned once. The scan still passes each window through windowWorthTracking().
+    //
+    // The second, later scan is for windows that get their title after they are created.
+    // windowWorthTracking() turns an untitled window away and nothing watches it, so without
+    // this it waited until it was focused. Zoom's meeting window was missed this way on
+    // 2026-10-21. A window that is still untitled by then, such as an alert, is turned away
+    // again, and no watcher is registered for it.
+    const scanSoon = () => {
+        debounce(pid, `app${pid}:created`, 0.05, () => scanApplication(application))
+        debounce(pid, `app${pid}:createdLater`, config.createdRescanDelay, () => scanApplication(application))
+    }
+
+    const handler = timed("app", (notification, created) => {
         if (notification === "windowCreated") {
-            // The new window is not always readable the instant the notification arrives.
-            debounce(pid, `app${pid}:created`, 0.05, () => scanApplication(application))
+            scanSoon()
+        } else if (notification === "created") {
+            // AXCreated is not specific to windows, so anything else is ignored before it
+            // costs a scan.
+            let role = null
+            try {
+                role = created ? created.role : null
+            } catch (e) {
+                // Already gone.
+            }
+            if (role === "AXWindow") scanSoon()
         } else {
             // focusedWindowChanged: which window is focused has moved within this
             // application, so every window of it may have changed focus state. The focused
@@ -866,17 +898,29 @@ function trackApplication(application) {
             for (const [id, record] of tracked) {
                 if (record.state && record.state.pid === pid) refresh(id)
             }
+            // A focused window the tracker does not hold was either created without any
+            // creation notification, or turned away by windowWorthTracking() when it was
+            // scanned and has since changed. Scanning looks at it again; a window that is
+            // still not worth tracking is turned away again.
+            if (focusedId !== null && !tracked.has(focusedId)) scanSoon()
         }
     })
 
+    const notifications = APPLICATION_NOTIFICATIONS()
     try {
-        hs.ax.on(element, APPLICATION_NOTIFICATIONS(), handler)
+        hs.ax.on(element, notifications, handler)
     } catch (e) {
         log("error", `could not watch ${application.title}: ${e && e.message ? e.message : e}`)
         return
     }
+    try {
+        hs.ax.on(element, CREATED_NOTIFICATION(), handler)
+        notifications.push(CREATED_NOTIFICATION())
+    } catch (e) {
+        log("debug", `could not watch ${application.title} for created: ${e && e.message ? e.message : e}`)
+    }
 
-    trackedApps.set(pid, { application: application, element: element, handler: handler })
+    trackedApps.set(pid, { application: application, element: element, handler: handler, notifications: notifications })
     scanApplication(application)
 }
 
@@ -884,7 +928,7 @@ function forgetApplication(pid) {
     const record = trackedApps.get(pid)
     if (!record) return
 
-    hs.ax.off(record.element, APPLICATION_NOTIFICATIONS(), record.handler)
+    hs.ax.off(record.element, record.notifications, record.handler)
     trackedApps.delete(pid)
 
     for (const [id, window] of [...tracked]) {
