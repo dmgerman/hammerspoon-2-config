@@ -1342,6 +1342,23 @@ interactive.use("hs_kanata-gt", {
     }
 });
 
+// Extends the desktop to the iPad mini with Sidecar, ten seconds after it is plugged in by
+// USB. The Spoon names its function displayExtend(); the command is prefixed with ipadmini
+// rather than sidecar because the command is about the iPad, not about Sidecar.
+interactive.use("hs_sidecar-gt", {
+    config: {
+        ipadName: "iPad mini",
+        usbSerialNumber: "00008110001438820A78801E"
+    },
+    commands: (interactive, sidecar) => {
+        interactive.define({
+            name: "ipadmini-display-extend",
+            doc: "Extend the desktop to the iPad mini now, with Sidecar.",
+            fn: () => sidecar.displayExtend()
+        });
+    }
+});
+
 interactive.define({
     name: "paste",
     doc: "Send cmd-v to the focused application.",

@@ -1,0 +1,6 @@
+{
+    "name": "hs_sidecar-gt",
+    "author": "Daniel German <dmg@turingmachine.org>",
+    "version": "1.0.0",
+    "description": "Extends the desktop to an iPad with Sidecar when the iPad is connected by USB."
+}
