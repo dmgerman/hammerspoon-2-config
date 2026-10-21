@@ -38,9 +38,10 @@
 //   * Titles and application names are matched with RegExp, exact strings, or a predicate,
 //     rather than Lua patterns.
 //
-//   * No registration retry ladder. The Lua module retries because Hammerspoon 1 could
-//     refuse a watcher registration; registering several windows of one application at once
-//     works first time here, so the machinery is left out until something needs it.
+//   * Retries are kept to applications. An application that has just launched can refuse
+//     watchers, so trackApplication() tries again a few times. Registering the windows of
+//     an application that is already being watched works the first time, so windows are not
+//     retried.
 
 // MARK: - User-configurable settings
 
@@ -57,6 +58,9 @@ const config = {
     // How long after a window is created to look at its application's windows a second
     // time, for a window that had no title yet at the first look.
     createdRescanDelay: 1.5,
+    // When an application refuses accessibility watchers, which one that has just launched
+    // can do, how long to wait before each further attempt, in seconds.
+    applicationRetryDelays: [0.5, 1, 2, 4, 8],
 
     // Applications never tracked. The Lua module calls these noWindows and transient: they
     // have no windows worth reporting, and watching them costs an observer each.
@@ -855,7 +859,18 @@ function forgetWindow(id, destroyed) {
 
 // MARK: Applications
 
-function trackApplication(application) {
+/**
+ * Start watching an application and scan its windows.
+ *
+ * An application that has only just launched can refuse accessibility watchers. Zoom did on
+ * 2026-10-22: Hammerspoon 2 logged five errors 0.35 s after Zoom started, and the tracker
+ * never watched it. A refused registration is therefore tried again after each of
+ * config.applicationRetryDelays, and only the last failure is logged as an error.
+ *
+ * @param {object} application An HSApplication.
+ * @param {number} [attempt] How many retries have already been made.
+ */
+function trackApplication(application, attempt = 0) {
     if (!worthTracking(application)) return
     const pid = application.pid
     if (pid === null || pid === undefined || trackedApps.has(pid)) return
@@ -910,21 +925,54 @@ function trackApplication(application) {
     try {
         hs.ax.on(element, notifications, handler)
     } catch (e) {
-        log("error", `could not watch ${application.title}: ${e && e.message ? e.message : e}`)
+        const message = e && e.message ? e.message : e
+        if (attempt < config.applicationRetryDelays.length) {
+            log("debug", `could not watch ${application.title} yet, trying again: ${message}`)
+            debounce(pid, `app${pid}:retry`, config.applicationRetryDelays[attempt],
+                () => trackApplication(application, attempt + 1))
+        } else {
+            log("error", `could not watch ${application.title}: ${message}`)
+        }
         return
     }
-    try {
-        hs.ax.on(element, CREATED_NOTIFICATION(), handler)
-        notifications.push(CREATED_NOTIFICATION())
-    } catch (e) {
-        log("debug", `could not watch ${application.title} for created: ${e && e.message ? e.message : e}`)
-    }
 
-    trackedApps.set(pid, { application: application, element: element, handler: handler, notifications: notifications })
+    const record = { application: application, element: element, handler: handler, notifications: notifications }
+    trackedApps.set(pid, record)
+    createdWatch(record, 0)
     scanApplication(application)
 }
 
+/**
+ * Register for `created` on an application already being watched, retrying as
+ * trackApplication() does. Separate because the application is useful without it: only the
+ * applications that never post windowCreated depend on it.
+ */
+function createdWatch(record, attempt) {
+    const pid = record.application.pid
+    if (trackedApps.get(pid) !== record) return
+    try {
+        hs.ax.on(record.element, CREATED_NOTIFICATION(), record.handler)
+        record.notifications.push(CREATED_NOTIFICATION())
+    } catch (e) {
+        const message = e && e.message ? e.message : e
+        if (attempt < config.applicationRetryDelays.length) {
+            debounce(pid, `app${pid}:createdRetry`, config.applicationRetryDelays[attempt],
+                () => createdWatch(record, attempt + 1))
+        } else {
+            log("debug", `could not watch ${record.application.title} for created: ${message}`)
+        }
+    }
+}
+
 function forgetApplication(pid) {
+    // Including a retry for an application that was never watched.
+    for (const [key, timer] of [...pending]) {
+        if (key.startsWith(`app${pid}:`)) {
+            timer.stop()
+            pending.delete(key)
+        }
+    }
+
     const record = trackedApps.get(pid)
     if (!record) return
 
@@ -979,6 +1027,12 @@ function trackerStart() {
         const previouslyFocused = focusedId
         readFocusedId()
         const pid = application ? application.pid : null
+
+        // An application that is not being watched is watched from now on. Its watchers may
+        // have been refused at launch more times than trackApplication() retries, or it may
+        // have become a standard application only after launching. trackApplication()
+        // returns at once for an application already watched or not worth watching.
+        if (pid !== null && !trackedApps.has(pid)) trackApplication(application)
 
         for (const [id, record] of tracked) {
             const state = record.state
