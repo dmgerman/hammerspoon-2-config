@@ -1062,6 +1062,7 @@ function processorSelect() {
  * validate()                      resolves to null when usable, or to why it is not
  * transcribe(audioFile, lang)     resolves to the text, or throws
  * cleanup()                       release anything held, when the Spoon stops
+ * warm()                          get the model ready, called when a recording starts
  * fallback                        the name to try instead if validate fails
  *
  * The Lua version wrote this as 160 lines of one near-identical branch per backend, each
@@ -1199,6 +1200,29 @@ const transcribers = {
             self.task = null
             return `The whisper server did not answer within ` +
                 `${config.whisperserverStartupTimeout}s`
+        },
+
+        /**
+         * Transcribe a quarter of a second of silence, so that the model is in memory by the
+         * time the first chunk arrives.
+         *
+         * The server keeps its model loaded for as long as it runs. After it has gone unused
+         * for a while, macOS compresses or swaps those pages out, and the next transcription
+         * has to bring them back first. Measured on 2026-10-23 with large-v3-turbo, the
+         * server's resident memory was 8 MB of a 1.8 GB footprint. The first request took
+         * 1.0s and the one after it 0.38s. Doing this when a recording starts moves that
+         * cost to while you are speaking.
+         */
+        async warm() {
+            const started = hs.timer.secondsSinceEpoch()
+            try {
+                await transcribers.whisperserver.transcribe(`${spoonDir}/assets/silence.wav`, "en")
+            } catch (e) {
+                logDebug(`warming the whisper server: ${e.message}`)
+                return
+            }
+            logDebug(`warmed the whisper server in ` +
+                `${(hs.timer.secondsSinceEpoch() - started).toFixed(2)}s`)
         },
 
         // The audio goes as multipart/form-data, which hs.http cannot send: hs.http.post
@@ -2500,6 +2524,9 @@ async function transcribeBegin(callbackOrPaste) {
         session = null
         return module.exports
     }
+
+    // Not awaited: the model gets ready while the microphone opens and you speak.
+    if (transcriber.warm) transcriber.warm()
 
     try {
         await recorder.start(mine,

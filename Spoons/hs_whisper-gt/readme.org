@@ -351,6 +351,11 @@ brew install whisper-cpp             # whispercli, plus a model to point at
 =whisperserverModelPath= as well and the Spoon will start one when nothing answers, and stop
 it again when the Spoon stops.
 
+The server keeps its model loaded, but after a while unused macOS compresses or swaps it out
+of memory, and the next transcription waits while it is brought back. To keep that wait out of
+the first chunk, the Spoon sends the server a quarter of a second of silence
+(=assets/silence.wav=) the moment a recording starts.
+
 ** Falling back
 
 A recorder or transcriber that cannot be used does not leave the Spoon unusable. =streaming=
