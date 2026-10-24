@@ -20,11 +20,9 @@
 // order they were last focused.
 //
 // Asking hs.window instead is what made this slow. allWindows(), orderedWindows() and
-// visibleWindows() each walk every running process rather than every application. Upstream
-// reduced the accessibility timeout for issue #219, so allWindows() and visibleWindows()
-// now cost about 330 ms for 27 windows here rather than about 1540 ms; orderedWindows() was
-// not covered and still costs about 1560 ms. Per application the same windows take 18 ms,
-// and asking the tracker takes 1 ms.
+// visibleWindows() each took about 1.5 s when this was written. They took about 0.1 s for
+// 35 windows on 2026-10-24, which is still a visible pause when the switcher opens. Asking
+// the tracker takes 1 ms.
 //
 // Their front-to-back order also leaves out minimized windows and windows of a hidden
 // application, which a switcher is precisely for.
@@ -104,7 +102,6 @@ let sessionWindows = new Map()
 // Only reached when hs_window-gt is not loaded; it owns the same delay as a config setting.
 // See focusWindowById, and focusWindow() in hs_window-gt for the measurements.
 const FOCUS_REASSERT_DELAY = 0.3
-let reassertTimer = null
 let reassertFor = null
 
 // The last few openings, kept so a slow one can be looked at afterwards. The console has no
@@ -152,8 +149,9 @@ function startTrackingFocus() {
 
     // Seed with what is open now, so the order is useful before anything has been focused.
     // Beyond the focused window below, the seeding order is arbitrary: the tracker holds
-    // its windows by id rather than front to back. One focus change corrects it, and
-    // reading a front-to-back order still costs about 1560 ms. See switchableRecords().
+    // its windows by id rather than front to back. One focus change corrects it.
+    // hs.window.orderedWindows() would not give a front-to-back order either, because it
+    // keeps each application's windows together. See switchableRecords().
     for (const record of filter.records()) noteFocused(record.state.id)
 
     // The focused window belongs at the front. Taken from the tracker, which knows which
@@ -184,13 +182,9 @@ function recordsByUse(records) {
  * window it watches, along with its title, application, screen and flags, kept current by
  * the notifications it subscribes to. Asking it costs nothing.
  *
- * Enumerating instead is what made this Spoon slow: hs.window.allWindows(),
- * orderedWindows() and visibleWindows() all walk every running process rather than every
- * application. Upstream reduced the accessibility timeout for issue #219, so allWindows()
- * and visibleWindows() now measure about 330 ms for 27 windows on one machine rather than
- * about 1540 ms; orderedWindows() was not covered and still measures about 1560 ms.
- * Against 18 ms for the same windows gathered per application, and 1 ms for asking the
- * tracker.
+ * Enumerating instead is what made this Spoon slow. hs.window.allWindows(),
+ * orderedWindows() and visibleWindows() took about 0.1 s for 35 windows on 2026-10-24,
+ * against 1 ms for asking the tracker.
  *
  * @returns {Array} `{window, state}` objects, in no particular order.
  */
@@ -258,8 +252,8 @@ function firstRecordPerApplication() {
  * wider than the space beside the chooser.
  *
  * Hammerspoon 1 read the chooser's own y by searching hs.window.allWindows() for
- * Hammerspoon's "Chooser" window. hs.chooser exposes no frame here, and that search costs a
- * about 1560 ms on this machine, so the position is computed from the screen and the
+ * Hammerspoon's "Chooser" window. hs.chooser exposes no frame here, and that search costs
+ * about 0.1 s while the chooser is opening, so the position is computed from the screen and the
  * chooser's width fraction instead. config.thumbnailTopRatio sets the height it sits at.
  */
 function thumbnailFrame(image) {
@@ -668,10 +662,8 @@ function focusWindowById(id) {
 
     // And again once the application has answered the activation, because until then it can
     // pick its own main window — the one on the screen in use rather than the one asked for.
-    // Held in a variable: a timer with no reference left is collected before it fires.
     reassertFor = window.id
-    reassertTimer = hs.timer.doAfter(FOCUS_REASSERT_DELAY, () => {
-        reassertTimer = null
+    hs.timer.doAfter(FOCUS_REASSERT_DELAY, () => {
         if (reassertFor !== window.id) return
         reassertFor = null
         window.becomeMain()

@@ -59,13 +59,6 @@ let order = "mru"
 const lastUsed = new Map()          // name -> use number
 let useCount = 0
 
-// Choosers and the alerts they raise must outlive the call that created them, or
-// JavaScriptCore collects the object and the callback never fires.
-let activeChooser = null
-
-// The command chosen from the chooser, when it is run from a timer rather than from the
-// chooser's own callback; see the note there. Held for the same reason as activeChooser.
-let runTimer = null
 
 // MARK: - Prompt observers
 //
@@ -226,13 +219,11 @@ function pick(options) {
         chooser.searchSubText = true
         chooser.setChoices(rows)
         chooser.onSelect = (item) => {
-            activeChooser = null
             promptClosed()
             if (!item) resolve(CANCEL)
             else if (item.skip) resolve(SKIP)
             else resolve(item.value)
         }
-        activeChooser = chooser
         promptOpened()
         chooser.show()
     })
@@ -793,8 +784,6 @@ function execute() {
         return row
     }))
     chooser.onSelect = (item) => {
-        activeChooser = null
-
         if (!item) {
             promptClosed()
             return
@@ -816,15 +805,11 @@ function execute() {
         const after = chosen ? chosen.runDelay : 0
 
         if (after > 0) {
-            runTimer = hs.timer.doAfter(after, () => {
-                runTimer = null
-                run()
-            })
+            hs.timer.doAfter(after, run)
         } else {
             run()
         }
     }
-    activeChooser = chooser
     promptOpened()
     chooser.show()
 }
@@ -889,7 +874,7 @@ function setKey(chord, name) {
         return null
     }
 
-    // The map owns the hotkey: nothing else holds it, and an unheld hotkey is collected.
+    // The map keeps the hotkey so that stop() and unbinding can destroy it.
     const binding = { chord, mods, key, command: name, hotkey }
     keymap.set(chord, binding)
     return binding
@@ -1221,7 +1206,6 @@ function init() {
 function stop() {
     for (const binding of keymap.values()) binding.hotkey.destroy()
     keymap.clear()
-    activeChooser = null
 
     // Whoever was listening is going away with this layer, and a prompt cannot survive it.
     if (promptDepth > 0) {

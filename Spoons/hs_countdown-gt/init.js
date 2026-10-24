@@ -443,8 +443,7 @@ function startFor(minutes, callback) {
     endingTime = nowSeconds() + minutes * 60
     timerRunning = true
     timeLeft = minutes * 60
-    // The handle is kept: pauseOrResume() and resetTimer() need it, and a timer with no
-    // remaining reference is garbage collected, which stops the countdown.
+    // The handle is kept because pauseOrResume() and resetTimer() need it.
     tickTimer = hs.timer.doEvery(1, () => tick())
 
     menuBarUpdate(false)

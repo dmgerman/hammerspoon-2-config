@@ -74,11 +74,6 @@ const config = {
     // Seconds between sweeps for records of windows that have closed.
     forgetInterval: 120,
 
-    // Reapplying a size after moving a window to another screen: how many attempts, and
-    // how long to wait between them. See setFrameOnScreen for why one is not enough.
-    resizeAttempts: 5,
-    resizeDelay: 0.05,
-
     // Seconds after focusing a window before asserting again that it is its application's
     // main window. See focusWindow() for the measurements. 0 switches the second assertion
     // off, which loses windows on a screen other than the one in use.
@@ -125,7 +120,7 @@ let highlightTimer = null
 let mouseNextIndex = 0
 let mouseNextOrder = ""
 
-// Held: a timer with no reference left is collected before it fires.
+// Kept so that stop() can stop it.
 let forgetTimer = null
 
 // Window ids, for previousWindow(): what is focused now, and what was before it.
@@ -146,43 +141,27 @@ function alert(message) {
 /**
  * Every window of every ordinary application.
  *
- * Not hs.window.allWindows(), orderedWindows() or visibleWindows(). Those walk every
- * running process rather than every application, so their cost is set by the slowest
- * process rather than by the number of windows.
- *
- * Upstream reduced the accessibility timeout for allWindows() and visibleWindows() in
- * response to issue #219, and both now measure about 330ms here rather than the 1540ms
- * they did. orderedWindows() was not covered and still measures about 1560ms.
- *
- * 330ms is still a stutter on anything that runs from a timer, and asking the tracker
- * costs 1ms, so the per-application walk stays.
+ * Windows of accessory applications, such as Notification Centre, are left out.
+ * hs.window.allWindows() measured 100 to 120 ms for 27 such windows on 2026-10-24. That was
+ * faster than asking each application for its windows, which took about 200 ms. Asking the
+ * tracker costs 1 ms, so anything that runs often should use trackedWindows() instead.
  *
  * Ordering is by application rather than front to back, so a caller that needs the order
  * has to say so; see orderedByFront().
  */
 function allApplicationWindows() {
-    const windows = []
-    for (const application of hs.application.runningApplications()) {
-        if (application.kind !== "standard") continue
-        try {
-            for (const window of (application.allWindows || [])) windows.push(window)
-        } catch (e) {
-            // An application that will not answer is skipped rather than failing the walk.
-        }
-    }
-    return windows
+    return hs.window.allWindows().filter((window) => {
+        const application = window.application
+        return application !== null && application.kind === "standard"
+    })
 }
 
 /**
- * Windows front to back.
+ * Windows in the order hs.window.orderedWindows() gives them.
  *
- * The only call here that needs hs.window.orderedWindows(): the z-order comes from the
- * window server and cannot be reconstructed per application.
- *
- * It is the one enumeration upstream's fix for issue #219 did not cover: allWindows() and
- * visibleWindows() came down from about 1540ms to about 330ms, while this still measures
- * about 1560ms. Asking the tracker costs 1ms. So it is used only where the front-to-back
- * order is itself the point, which is swapWithPrevious() and sendToBack().
+ * That order is by application, most recently active first, with each application's
+ * windows kept together. It is used only where that order is itself the point, which is
+ * swapWithPrevious() and sendToBack(). It measured about 100 ms on 2026-10-24.
  */
 function orderedByFront() {
     return hs.window.orderedWindows()
@@ -803,74 +782,13 @@ function moveToScreen(direction, win) {
 
     // Otherwise keep the window where it sat within its screen, proportionally, so a
     // window on the right of one display arrives on the right of the next.
-    setFrameOnScreen(window, remembered || new HSRect(
+    window.frame = remembered || new HSRect(
         to.x + ((frame.x - from.x) / from.w) * to.w,
         to.y + ((frame.y - from.y) / from.h) * to.h,
         frame.w * (to.w / from.w),
         frame.h * (to.h / from.h)
-    ))
+    )
     return true
-}
-
-/**
- * Set a frame that lies on a different screen than the window is on now.
- *
- * A single frame assignment is clamped by the screen the window currently occupies, so a
- * window moving from a small display to a large one arrives at the small display's width.
- * Hammerspoon 1 has the same problem and works around it in setFrameWithWorkarounds:
- * apply the size, move, then apply the size again, the second one taking effect now that
- * the window is on a screen with room for it.
- */
-function setFrameOnScreen(win, rect) {
-    // The frame assignment moves the window and is what the undo advice records. Its size
-    // is unreliable here: the accessibility API clamps a size to the screen the window is
-    // on at the time of the call, so a window growing as it moves to a larger display
-    // arrives at the smaller display's dimensions.
-    win.frame = copyFrame(rect)
-
-    // A window that was already on the target screen is not clamped, so it has the size now
-    // and there is nothing to correct.
-    if (sizeApplied(win, rect)) return
-
-    // Apply the size again once the window is on the target screen. The application only
-    // accepts the larger size after it has handled the move on its own run loop, which it
-    // cannot do while this function runs, so reapplying here in a loop changes nothing and
-    // the attempts are scheduled instead. Each one reads the size back and stops once it
-    // matches.
-    resize(win, rect, config.resizeAttempts)
-}
-
-/** Whether a window has the size of a rectangle, to the nearest point. */
-function sizeApplied(win, rect) {
-    const size = win.size
-    return Math.abs(size.w - rect.w) < 1 && Math.abs(size.h - rect.h) < 1
-}
-
-/**
- * Reapply a size until the application accepts it, or the attempts run out.
- *
- * The window is held rather than looked up by id on each attempt: hs.window.allWindows()
- * takes a fifth of a second, and an HSWindow still reports its frame and takes a new size
- * long after it was obtained. Only properties set on one are lost, and none are set here.
- */
-function resize(win, rect, attempts) {
-    if (attempts <= 0) return
-    hs.timer.doAfter(config.resizeDelay, () => {
-        try {
-            // The advice recorded where the window was put before these corrections ran.
-            // Bring that up to date, or the next move reads the difference as one made by
-            // hand.
-            const entry = history.get(win.id)
-            if (entry) entry.applied = copyFrame(win.frame)
-
-            if (sizeApplied(win, rect)) return
-            win.size = new HSSize(rect.w, rect.h)
-        } catch (e) {
-            // The window closed between attempts. Nothing left to correct.
-            return
-        }
-        resize(win, rect, attempts - 1)
-    })
 }
 
 // MARK: - Windows among themselves
@@ -892,7 +810,7 @@ function movable(windows, destinations) {
         return false
     }
 
-    // fullscreenScreenIds() enumerates every window, which takes a fifth of a second. Nothing
+    // fullscreenScreenIds() enumerates every window, which takes about 0.1 s. Nothing
     // is arriving on a screen when the windows stay where they are, so skip it in that case.
     if (!destinations.length) return true
 
@@ -924,7 +842,7 @@ function tileWith(other, win) {
 
     // Both halves are of this window's screen, so the other window may be crossing to it.
     const screen = window.screen.frame
-    setFrameOnScreen(other, new HSRect(screen.x, screen.y, screen.w / 2, screen.h))
+    other.frame = new HSRect(screen.x, screen.y, screen.w / 2, screen.h)
     place(window, { cols: 2 }, { col: 1 })
 
     // Bring both windows forward, the other one first so that this one ends up in front
@@ -949,10 +867,8 @@ function swapWithWindow(other, win) {
     const mine = copyFrame(window.frame)
     const theirs = copyFrame(other.frame)
 
-    // Either window may be crossing to the other's screen, where a single frame assignment
-    // is clamped to the screen it is leaving.
-    setFrameOnScreen(window, theirs)
-    setFrameOnScreen(other, mine)
+    window.frame = theirs
+    other.frame = mine
 
     window.focus()
     return true

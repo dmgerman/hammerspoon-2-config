@@ -207,7 +207,7 @@ function show() {
 
     if (config.hotkey) {
         // Bound only while the clock is displayed, so Escape reaches other applications
-        // at all other times. The handle is kept: an unheld hotkey is garbage collected.
+        // at all other times. The handle is kept so that hide() can destroy it.
         cancelHotkey = hs.hotkey.bind(config.hotkeyMods, config.hotkey, () => hide(), null)
         if (!cancelHotkey) {
             console.error(`[hs_time-gt] could not bind ${config.hotkey} to dismiss the clock`)

@@ -120,12 +120,6 @@ const config = {
     logTimings: false
 }
 
-// Held so it cannot be collected before it fires; see invokeEntryWhenClear().
-let pressTimer = null
-
-// The chooser, held so it cannot be collected while it is on screen. See choose().
-let chooser = null
-
 // The strip, and the timer that takes it away again. See peek().
 let peekCanvas = null
 let peekTimer = null
@@ -663,8 +657,7 @@ function chooseWithin(item) {
         return false
     }
 
-    // The module's chooser, not a local one; see choose() for why it is held there.
-    chooser = hs.chooser.create()
+    const chooser = hs.chooser.create()
     chooser.placeholder = describe(item)
     chooser.visibleRows = config.rowsToDisplay
     chooser.width = config.chooserWidth
@@ -724,15 +717,9 @@ function invokeEntry(entry) {
  * A menu bar menu is dismissed by anything else taking focus, and a chooser or a menu is
  * still holding it when a choice is made. Pressing immediately opens the menu and the
  * dismissal then closes it again, which looks like the menu appearing and vanishing.
- *
- * The timer is held in a variable: an hs.timer with nothing referring to it can be
- * collected before it fires.
  */
 function invokeEntryWhenClear(entry) {
-    pressTimer = hs.timer.doAfter(config.pressDelay, () => {
-        pressTimer = null
-        invokeEntry(entry)
-    })
+    hs.timer.doAfter(config.pressDelay, () => invokeEntry(entry))
     return true
 }
 
@@ -767,10 +754,7 @@ function pressNamed(name, itemsOnly) {
  * choose() for why that difference matters.
  */
 function pressNamedWhenClear(name, itemsOnly) {
-    pressTimer = hs.timer.doAfter(config.pressDelay, () => {
-        pressTimer = null
-        pressNamed(name, itemsOnly)
-    })
+    hs.timer.doAfter(config.pressDelay, () => pressNamed(name, itemsOnly))
     return true
 }
 
@@ -891,14 +875,11 @@ function namedSecondaryPress(name) {
 /**
  * Right-click by name once whatever is showing has had time to close.
  *
- * Same reasoning as pressNamedWhenClear(), and the same timer: only one press is ever in
- * flight, and the scan happens inside the timer so the position used is the current one.
+ * Same reasoning as pressNamedWhenClear(): the scan happens inside the timer, so the
+ * position used is the current one.
  */
 function namedSecondaryPressWhenClear(name) {
-    pressTimer = hs.timer.doAfter(config.pressDelay, () => {
-        pressTimer = null
-        namedSecondaryPress(name)
-    })
+    hs.timer.doAfter(config.pressDelay, () => namedSecondaryPress(name))
     return true
 }
 
@@ -943,12 +924,7 @@ function choose(deep) {
         return icons.get(bundleID)
     }
 
-    // Held in a module variable rather than only in this function. A chooser referred to by
-    // nothing is collected while it is still on screen — HSChooser's deinit takes the window
-    // with it — and the chooser then disappears with nobody having touched it. Every other
-    // Spoon here that opens one holds it this way: the clipboard, the window switcher, kitty,
-    // and hs_interactive-gt for the command chooser itself. See ai/chooser-collected.md.
-    chooser = hs.chooser.create()
+    const chooser = hs.chooser.create()
     chooser.placeholder = deep === true ? "Menu bar, everything" : "Menu bar"
     chooser.searchSubText = true       // so the mb- names can be typed
     chooser.visibleRows = config.rowsToDisplay

@@ -424,14 +424,12 @@ const chromeTab = (() => {
     const script = "/Users/dmg/bin/focusTabChrome.py";
     const path = "/Users/dmg/.config/dmg/python/bin:/opt/homebrew/bin";
     const quote = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
-    let raiseTimer = null;
 
     return (field, match, fallback) => {
         const command = `PATH=${quote(path)}:"$PATH" ${quote(script)} ` +
             `${quote(field)} ${quote(match)} ${quote(fallback)}`;
 
-        // Held: a timer with no reference left is garbage collected before it fires.
-        raiseTimer = hs.timer.doAfter(0.4, () => {
+        hs.timer.doAfter(0.4, () => {
             const chrome = hs.application.matchingBundleID("com.google.Chrome");
             if (chrome) chrome.setFrontmost(false);
             else hs.application.launchOrFocus("com.google.Chrome");

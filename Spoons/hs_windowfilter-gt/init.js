@@ -76,10 +76,8 @@ const config = {
     // away were Caffeine's popover and the desktop.
     //
     // The windows that matter most here are Hammerspoon 2's own alerts and banners, which
-    // last a few seconds. Watching each one registers six accessibility watchers, and
-    // removing them once the window has closed makes Hammerspoon 2 log six errors, because
-    // hs.ax.off() reports a destroyed element as a failure. A banner shown once a minute
-    // therefore put about a dozen lines a minute in the console.
+    // last a few seconds. Watching each one would register six accessibility watchers for a
+    // window that closes before anything could select it.
     untitledNonStandardSkip: true,
 
     // Applications whose windows are tracked but never reported by the default filter.
@@ -552,7 +550,7 @@ const trackedApps = new Map()           // pid -> {application, element, handler
 // when the tracker is stopped. Held because off() matches on function identity.
 let applicationListeners = null
 
-// Debounce timers, by window id, held so they are not collected before they fire.
+// Debounce timers, by window id, kept so that a newer event can cancel an older one.
 const pending = new Map()
 
 // The focused window's id. See readFocusedId() for why this is cached rather than asked
@@ -584,26 +582,13 @@ const CREATED_NOTIFICATION = () => hs.ax.notificationTypes.created
 const PRESENCE_EVENTS = ["didActivate", "didDeactivate", "didHide", "didUnhide"]
 
 /**
- * Every window of every ordinary application.
+ * Every window of every application worth tracking.
  *
- * Not hs.window.allWindows(), orderedWindows() or visibleWindows(). All three walk every
- * running process rather than every application: measured on one machine at one moment,
- * about 330 ms for 27 windows against 18 ms for the same windows gathered per application,
- * and 1560 ms for orderedWindows(), which upstream's fix for issue #219 did not cover.
- * The difference is the 126 agents and daemons among the 143 processes, some of which
- * answer accessibility slowly.
+ * hs.window.allWindows() measured 100 to 120 ms for 27 such windows on 2026-10-24. That was
+ * faster than asking each application for its windows, which took about 200 ms.
  */
 function applicationWindows() {
-    const windows = []
-    for (const application of hs.application.runningApplications()) {
-        if (!worthTracking(application)) continue
-        try {
-            for (const window of (application.allWindows || [])) windows.push(window)
-        } catch (e) {
-            // An application that will not answer is skipped rather than failing the walk.
-        }
-    }
-    return windows
+    return hs.window.allWindows().filter((window) => worthTracking(window.application))
 }
 
 /** Whether an application is worth watching at all. */

@@ -144,7 +144,6 @@ const config = {
     // start a server when one is not already answering.
     whisperserverHost: "127.0.0.1",
     whisperserverPort: 8080,
-    whisperserverCurlCmd: "/usr/bin/curl",
     whisperserverCmd: null,
     whisperserverModelPath: null,
     whisperserverStartupTimeout: 10,
@@ -251,13 +250,6 @@ let startingApp = null
 let shouldPaste = false
 let userCallback = null
 
-// Choosers are held at module level because a chooser is lost to garbage collection like
-// everything else with no reference: shown from a local variable, it can be collected
-// between being shown and being chosen from.
-let languageChooser = null
-let filterChooser = null
-let processorChooser = null
-let recordingChooser = null
 
 let debugEnabled = false
 
@@ -349,6 +341,40 @@ function firstLine(text) {
     if (!text) return ""
     const line = String(text).trim().split("\n")[0]
     return line.length > 200 ? line.slice(0, 200) + "…" : line
+}
+
+/**
+ * A multipart/form-data body holding text fields and one file.
+ *
+ * FormData cannot carry the file: its Blob converts a Uint8Array part with toString(), so
+ * the bytes would arrive as "82,73,70,…". The body is therefore assembled by hand. There is
+ * no TextEncoder either, so the field names, values and file name must be ASCII.
+ *
+ * @param {object} fields Field name -> text value.
+ * @param {string} fileField Name of the file field.
+ * @param {string} fileName File name sent with the file.
+ * @param {Uint8Array} bytes Contents of the file.
+ * @returns {{body: Uint8Array, contentType: string}}
+ */
+function multipartBodyBuild(fields, fileField, fileName, bytes) {
+    const boundary = `----hswhisper${Date.now()}`
+    const ascii = (text) => Uint8Array.from(text, (c) => c.charCodeAt(0))
+
+    let head = ""
+    for (const [name, value] of Object.entries(fields)) {
+        head += `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n` +
+            `${value}\r\n`
+    }
+    head += `--${boundary}\r\nContent-Disposition: form-data; name="${fileField}"; ` +
+        `filename="${fileName}"\r\nContent-Type: application/octet-stream\r\n\r\n`
+
+    const start = ascii(head)
+    const end = ascii(`\r\n--${boundary}--\r\n`)
+    const body = new Uint8Array(start.length + bytes.length + end.length)
+    body.set(start, 0)
+    body.set(bytes, start.length)
+    body.set(end, start.length + bytes.length)
+    return { body: body, contentType: `multipart/form-data; boundary=${boundary}` }
 }
 
 function filterActive() {
@@ -929,7 +955,7 @@ function filterSelect() {
         })
     })
 
-    filterChooser = hs.chooser.create()
+    const filterChooser = hs.chooser.create()
     filterChooser.placeholder = "Transcription filter"
     filterChooser.setChoices(choices)
     filterChooser.onSelect = (choice) => {
@@ -1043,7 +1069,7 @@ function processorSelect() {
         index: i
     }))
 
-    processorChooser = hs.chooser.create()
+    const processorChooser = hs.chooser.create()
     processorChooser.placeholder = "Dictation processor"
     processorChooser.setChoices(choices)
     processorChooser.onSelect = (choice) => {
@@ -1139,9 +1165,6 @@ const transcribers = {
         task: null,
 
         validate: async () => {
-            const curl = await executableResolve(config.whisperserverCurlCmd)
-            if (!curl) return `curl not found at ${config.whisperserverCurlCmd}`
-
             if (await transcribers.whisperserver.isAnswering()) {
                 logDebug("whisper server is already answering")
                 return null
@@ -1155,9 +1178,12 @@ const transcribers = {
 
         async isAnswering() {
             const url = `http://${config.whisperserverHost}:${config.whisperserverPort}/health`
-            const result = await shell.commandRun(config.whisperserverCurlCmd,
-                ["-s", "--connect-timeout", "2", "-o", "/dev/null", url])
-            return result.code === 0
+            try {
+                await fetch(url, { signal: AbortSignal.timeout(2000) })
+                return true
+            } catch (e) {
+                return false
+            }
         },
 
         /** Start a server and wait for it to answer. Resolves to null, or to the error. */
@@ -1225,23 +1251,28 @@ const transcribers = {
                 `${(hs.timer.secondsSinceEpoch() - started).toFixed(2)}s`)
         },
 
-        // The audio goes as multipart/form-data, which hs.http cannot send: hs.http.post
-        // takes a String body, so there is no way to attach a file or any binary content.
-        // Hence curl. See ai/issue_unfiled_http-multipart-body.md.
+        // The audio goes as multipart/form-data, through fetch(). hs.http.post takes only a
+        // String body, so it cannot send the audio.
         transcribe: async (audioFile, lang) => {
             const url = `http://${config.whisperserverHost}:${config.whisperserverPort}/inference`
-            const result = await shell.commandRun(config.whisperserverCurlCmd, [
-                "-s", "-S",
-                "-X", "POST", url,
-                "-F", `file=@${audioFile}`,
-                "-F", "response_format=text",
-                "-F", `language=${lang}`
-            ])
-            if (result.code !== 0) {
-                throw new Error(`curl exited ${result.code}: ${firstLine(result.err)}`)
-            }
+            const file = hs.fs.open(audioFile, "r")
+            if (!file) throw new Error(`Could not open ${audioFile}`)
+            const audio = file.readBytes(file.size)
+            file.close()
+            if (!audio) throw new Error(`Could not read ${audioFile}`)
 
-            const body = result.out || ""
+            const form = multipartBodyBuild({ response_format: "text", language: lang },
+                "file", "audio.wav", audio)
+            const response = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": form.contentType },
+                body: form.body
+            })
+
+            const body = await response.text()
+            if (!response.ok) {
+                throw new Error(`The whisper server answered ${response.status}: ${firstLine(body)}`)
+            }
             if (!body) throw new Error("The whisper server returned nothing")
             if (/^\s*\{\s*"error"/.test(body)) {
                 throw new Error(`The whisper server reported: ${firstLine(body)}`)
@@ -1369,8 +1400,7 @@ const recorders = {
 
     streaming: {
         fallback: "sox",
-        // The connection to the server. Held here because hs.http keeps only a weak
-        // reference to it, so without this one it would be collected while still open.
+        // The connection to the server, kept so that it can be used and closed.
         socket: null,
         // True from the server's server_ready until the connection fails or closes.
         connected: false,
@@ -2449,7 +2479,7 @@ function languageSelect() {
         lang: lang
     }))
 
-    languageChooser = hs.chooser.create()
+    const languageChooser = hs.chooser.create()
     languageChooser.placeholder = "Transcription language"
     // setChoices(), not a `choices` property: assigning one of those is accepted in
     // silence and leaves the chooser empty. Same for onSelect, which is a property.
@@ -2740,7 +2770,7 @@ function transcribeAgain(callback) {
         path: recording.path
     }))
 
-    recordingChooser = hs.chooser.create()
+    const recordingChooser = hs.chooser.create()
     recordingChooser.placeholder = "Transcribe which recording again"
     // The filename is in the subtext, and it carries the language and the time, so
     // searching it is how a particular recording is found.
@@ -2950,11 +2980,6 @@ function stop() {
         menuBar.destroy()
         menuBar = null
     }
-
-    languageChooser = null
-    filterChooser = null
-    processorChooser = null
-    recordingChooser = null
 
     return module.exports
 }

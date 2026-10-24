@@ -67,8 +67,7 @@ let defaultMenu = null
 // One listener per hs.streamdeck event. Held, because off() matches on function identity.
 let onDeckConnected = null
 let onDeckDisconnected = null
-// Adjusts every deck as the time of day changes. Held, because a timer with no reference
-// left is garbage collected before it fires.
+// Adjusts every deck as the time of day changes. Kept so that it can be stopped.
 let brightnessTimer = null
 // Blanks the decks while the screen is locked: hs.power event name -> listener. Held for
 // the same reason as the deck listeners above.
@@ -361,13 +360,9 @@ function deckPresenter(record) {
 
         // A menu button with `dismiss` closes its session. On a deck, which is always
         // displayed, that means returning to the root rather than going dark. The root is
-        // opened from a timer so that the session finishes closing first; the timer is
-        // held, because one with no reference left is garbage collected before it fires.
+        // opened from a timer so that the session finishes closing first.
         close: function () {
-            record.reopenTimer = hs.timer.doAfter(0, () => {
-                record.reopenTimer = null
-                openRoot(record)
-            })
+            hs.timer.doAfter(0, () => openRoot(record))
         }
     }
 }
@@ -398,7 +393,6 @@ function attach(device) {
         turnPage: null,
         on: true,
         pressed: new Map(),
-        reopenTimer: null,
         idleTimer: null,
         // Set when the screen locking blanked it, so unlocking restores only that.
         blankedBySystem: false,

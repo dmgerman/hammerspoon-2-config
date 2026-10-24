@@ -190,8 +190,6 @@ Settings are properties of =config=.
 | =mouseHighlightWidth=    | =4=         | Thickness of the ring's line |
 | =mouseHighlightSeconds=  | =0.5=       | How long the ring stays on screen. See /Notes/ |
 | =forgetInterval=         | =120=       | Seconds between sweeps for records of closed windows |
-| =resizeAttempts=         | =5=         | Attempts at reapplying a size after a move to another screen |
-| =resizeDelay=            | =0.05=      | Seconds between those attempts |
 
 #+begin_src js   :exports both
 const win = hs.spoons["hs_window-gt"]
@@ -225,10 +223,6 @@ win.config.mouseHighlightColor = "#00FF00"
   with a frame: it refuses to move one, and a window sent to a screen a fullscreen window
   occupies is taken into that window's space, after which neither =hs.window.allWindows()=
   nor its own application lists it. Operations involving either are refused with a message.
-- *A size is reapplied after crossing screens.* A single frame assignment is clamped by the
-  screen the window is on now, so a window moving from a small display to a large one would
-  arrive at the small display's width. The size is applied, the window moved, then the size
-  applied again, up to =config.resizeAttempts= times.
 - *=previousWindow()= is driven by application activation,* the closest event available.
   Moving between two windows of the same application is not seen, so the previous window is
   the previously active application's window.

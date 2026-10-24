@@ -232,7 +232,7 @@ function passwordLike(text) {
 }
 
 // The preview canvas beside the chooser, the row it is showing, and the timer that reads
-// the selection. Held so they cannot be collected before they are used again.
+// the selection. Kept so that they can be updated and then removed when the chooser closes.
 let preview = null
 let previewRow = null
 let previewTimer = null

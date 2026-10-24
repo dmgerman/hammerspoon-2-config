@@ -60,8 +60,6 @@ const MUSIC_BUNDLE_ID = "com.apple.Music"
 let autoPlayTimer = null
 let albumSkipTimer = null
 let playButtonTimer = null
-// Held so it is not collected while displayed.
-let activeChooser = null
 
 // MARK: - Talking to Music
 
@@ -549,11 +547,9 @@ function chooseAlbum(path) {
         entry: entry
     })))
     chooser.onSelect = (item) => {
-        activeChooser = null
         if (!item) return
         playEntry(item.entry)
     }
-    activeChooser = chooser
     chooser.show()
     return module.exports
 }
@@ -799,7 +795,11 @@ function pressPlayWhenReady(description) {
 
         if (button) {
             playButtonTimer = null
-            button.performAction("AXPress")
+            try {
+                button.performAction("AXPress")
+            } catch (e) {
+                alert(`Music refused to press Play for ${description}: ${e.message}`)
+            }
             return
         }
         if (attempts >= deadline) {

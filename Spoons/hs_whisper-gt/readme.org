@@ -657,7 +657,6 @@ whispercliModelPath: "/usr/local/whisper/ggml-large-v3.bin"
 
 whisperserverHost: "127.0.0.1"
 whisperserverPort: 8080
-whisperserverCurlCmd: "/usr/bin/curl"
 whisperserverCmd: null                 // set these two to start a server when none answers
 whisperserverModelPath: null
 whisperserverStartupTimeout: 10

@@ -232,7 +232,7 @@ wf.config.moveDebounce = 0.2
   =config.untitledNonStandardSkip= is true. These are alerts, banners, menu bar popovers
   and the Finder's desktop, none of which can be selected. Hammerspoon 2's own alerts and
   banners are the main reason: each one that opens and closes would otherwise register six
-  accessibility watchers and leave six errors in the console when they are removed.
+  accessibility watchers for a window that is gone a few seconds later.
 
 * Coming from Hammerspoon 1
 
