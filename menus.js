@@ -109,9 +109,9 @@ const hassMenu = [
 function applicationsMenu() {
     return hs.application.runningApplications()
         .filter((app) => app.kind === "standard" && app.bundleID && app.allWindows.length > 0)
-        .sort((a, b) => (a.title || "").localeCompare(b.title || ""))
+        .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
         .map((app) => ({
-            label: app.title,
+            label: app.name,
             app: app.bundleID
         }))
 }

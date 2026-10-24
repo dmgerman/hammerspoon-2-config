@@ -248,7 +248,7 @@ function extras() {
     const found = []
 
     for (const application of hs.application.runningApplications()) {
-        const name = application.title || ""
+        const name = application.name || ""
         if (config.skipApplications.includes(name)) continue
 
         const bar = extrasBarFor(application)

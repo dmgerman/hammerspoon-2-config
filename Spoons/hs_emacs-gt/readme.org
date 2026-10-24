@@ -273,10 +273,12 @@ A command that throws is not counted as a failure, because Hammerspoon did answe
 =hammerspoon-execute= signals =hammerspoon-js-error= with the JavaScript message.
 =hammerspoon-do= shows that message in the echo area.
 
-The client prints =Connected to Hammerspoon 2= on standard output before every result,
-and prints JavaScript errors there too. =hammerspoon.el= removes that line, and it tells a
-result from an error by the client's exit status: 0 means success, 1 means the client
-could not reach Hammerspoon 2, and 65 means the JavaScript threw.
+Clients built before October 23, 2026 print =Connected to Hammerspoon 2= on standard
+output before every result; newer ones leave it out when their input is piped, as it is
+here. =hammerspoon.el= still removes the line, so an older client keeps working. JavaScript
+errors are printed on standard output too, and =hammerspoon.el= tells a result from an
+error by the client's exit status: 0 means success, 1 means the client could not reach
+Hammerspoon 2, and 65 means the JavaScript threw.
 
 ** Running source blocks in Org
 
@@ -285,7 +287,7 @@ Source blocks in the language =hammerspoon= run in Hammerspoon 2, and are edited
 
 #+begin_example
 ,#+begin_src hammerspoon
-hs.window.focusedWindow().application.title
+hs.window.focusedWindow().application.name
 ,#+end_src
 #+end_example
 

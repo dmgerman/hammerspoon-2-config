@@ -123,7 +123,7 @@ function unescape(url) {
 function sendingApplication(senderPID) {
     if (senderPID === undefined || senderPID === null || senderPID < 0) return ""
     const app = hs.application.fromPID(senderPID)
-    return app ? app.title : ""
+    return app ? app.name : ""
 }
 
 // MARK: - Decoding

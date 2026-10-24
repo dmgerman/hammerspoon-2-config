@@ -2000,7 +2000,7 @@ function insertTargetLost(mine) {
     if (!focused) return "no window has focus"
     if (focused.pid !== mine.target.pid) {
         const app = focused.application
-        return `focus moved to ${app ? app.title : "another application"}`
+        return `focus moved to ${app ? app.name : "another application"}`
     }
     if (focused.id !== mine.target.id) return "focus moved to another window"
     if (config.monitorUserActivity) return activityMovedOn()

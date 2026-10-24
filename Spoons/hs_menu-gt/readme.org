@@ -232,12 +232,11 @@ leave a file behind every minute. It is redrawn whenever its state changes, so k
 =imageProvider= cheap, and put anything expensive in =stateProvider= where its result is
 reused.
 
-** Only where the display can change
+** Where they refresh
 
-Buttons refresh on a Stream Deck. On screen they are drawn once when the menu opens and
-not refreshed, because =hs.ui= cannot alter a window after it is built: rebuilding it
-would rebind every letter and take the keyboard with it. Call =session.update(index)= to
-refresh one button on demand.
+Buttons refresh both on screen and on a Stream Deck. A presenter written without
+=progressive= draws them once, when the menu opens; call =session.update(index)= to
+refresh one on demand.
 
 * Icons
 
@@ -374,13 +373,12 @@ The two are different displays whenever the menu bar is not on the one you are u
 =showDelay= is how long a page's letters answer before its window is drawn, in seconds,
 and defaults to 0, which draws it at once. The letters are bound as soon as the page is
 presented, so with a delay set, a press within it acts and no window is ever drawn:
-someone who knows a menu by heart does not see it, and someone who hesitates does. Each
-page is timed separately, so descending into a submenu quickly draws nothing either.
+someone who knows a menu by heart does not see it, and someone who hesitates does. Until
+the menu is drawn, each page is timed separately, so descending into a submenu quickly
+draws nothing either. Once it is on screen, a new page replaces the old one at once.
 
-The delay is counted from the moment the page is presented, which for this presenter is
-after every button image has been drawn. Those are cached on disk, so it is the same
-moment in practice, except on the first display of a menu after the configuration is
-reloaded.
+The delay is counted from the moment the page is presented, before its images are drawn;
+they are painted in as they arrive.
 
 * How buttons are drawn
 
@@ -444,8 +442,9 @@ a menu on one of them and returns the session.
 | =close()=                  | The menu was dismissed.                                        |
 
 A progressive presenter is given the page at once and each image as it is drawn. One that
-cannot change what it displays — an =hs.ui= window cannot — is given the page only when
-every image is ready, with each button's =image= already set.
+cannot change what it displays is given the page only when every image is ready, with each
+button's =image= already set. Both presenters here are progressive: the screen presenter
+draws into one =hs.canvas= for as long as the menu is open.
 
 A presenter that reads the keyboard implements =suspendKeys= and =resumeKeys=. They are
 called when a command run from a button puts a prompt on screen, since a chooser's own key
@@ -469,8 +468,5 @@ not move the menu displayed on another.
 - *Navigating cancels drawing.* A menu can take seconds to draw the first time, which is
   long enough to move on. Images belonging to a menu that is no longer displayed are
   neither drawn nor painted.
-- *The on-screen menu shows nothing until every image is ready*, because =hs.ui= cannot
-  alter a window once it is built. A Stream Deck fills in as each image arrives. Only the
-  first draw of a menu is affected.
 - *Only running applications can be hidden.* =app= buttons start an application that is
   not running, but a long press hides only one that is frontmost.

@@ -3,7 +3,7 @@
 // A menu is an array of button specifications. A session walks that menu, resolving one
 // page at a time, and hands the page to a presenter. The presenter draws the page on some
 // device and reports presses back; the menu holds no knowledge of the device. This Spoon
-// provides a screen presenter, which draws the menu in an hs.ui window where every button
+// provides a screen presenter, which draws the menu in a canvas where every button
 // carries a letter to press. hs_streamdeck-gt adds a presenter for Stream Deck hardware.
 // Both display the same menu definition.
 //
@@ -174,20 +174,6 @@ function alphaFactor() {
     const value = Number(config.alpha)
     if (!isFinite(value)) return 1
     return Math.max(0, Math.min(1, value))
-}
-
-/**
- * A hex colour with `config.alpha` folded into it, for hs.ui, which takes a string.
- *
- * @param {string} value A colour, with or without its own alpha.
- * @returns {string} An eight-digit `#RRGGBBAA`.
- */
-function hexWithAlpha(value, fallback) {
-    const color = canvasColor(value, fallback)
-    color.alpha *= alphaFactor()
-    const byte = (component) => Math.round(Math.max(0, Math.min(1, component)) * 255)
-        .toString(16).padStart(2, "0")
-    return "#" + byte(color.red) + byte(color.green) + byte(color.blue) + byte(color.alpha)
 }
 
 // A canvas draws an image at whatever resolution the image already holds, so a symbol
@@ -850,9 +836,8 @@ function openSession(menu, presenter, options) {
         })
     }
 
-    // Only a presenter that can change what it displays can refresh a button. An hs.ui
-    // window cannot, and rebuilding it once a second would take the keyboard with it, so
-    // its self-drawing buttons are drawn once when the menu opens.
+    // Only a presenter that can change what it displays can refresh a button. One that
+    // cannot has its self-drawing buttons drawn once, when the menu opens.
     function startUpdateTimers(isCurrent) {
         if (!presenter.progressive) return
 
@@ -1156,9 +1141,11 @@ function openSession(menu, presenter, options) {
 
 // MARK: - The screen presenter
 //
-// hs.ui cannot change a window's contents once it is built, so every navigation destroys
-// the window and builds a new one. The menu is driven from the keyboard: each button
-// carries a letter, bound only while the menu is displayed.
+// One canvas displays the menu for as long as it is open: navigating replaces its elements
+// and moves its frame, and button images are painted into it as they are drawn. Until
+// 2026-10 this was an hs.ui window, which cannot be changed once shown, so every navigation
+// rebuilt it and the menu appeared only when every image was ready. The menu is driven
+// from the keyboard: each button carries a letter, bound only while the menu is displayed.
 //
 // The keys and the window are separate: the letters answer from the moment a page is
 // presented, and the window is drawn `config.screen.showDelay` seconds later. A press
@@ -1191,7 +1178,7 @@ function currentScreen() {
  * A frame of the given size, centred on a screen.
  *
  * The two coordinate systems have to be reconciled to place it: hs.screen frames have
- * their origin at the top left of the primary display, while hs.ui window frames have
+ * their origin at the top left of the primary display, while canvas frames have
  * theirs at its bottom left, with y growing upwards. Centring on the primary screen is
  * symmetric and comes out the same either way — which is why drawing there needed no
  * conversion — but on any other screen the two disagree, and by the height of the screen
@@ -1200,7 +1187,7 @@ function currentScreen() {
  * @param {object} target The screen to centre on.
  * @param {number} width The window's width.
  * @param {number} height The window's height.
- * @returns {object} An `{x, y, w, h}` frame in hs.ui's coordinates.
+ * @returns {object} An `{x, y, w, h}` frame in the canvas's screen coordinates.
  */
 function centredOnScreen(target, width, height) {
     const reference = hs.screen.primary() || target
@@ -1217,23 +1204,101 @@ function centredOnScreen(target, width, height) {
     }
 }
 
+/**
+ * Where each button and its letter go on a page of `count` buttons.
+ *
+ * Each cell is the tile with its letter beneath it. A last row that is not full is
+ * centred, as a row in a stack would be.
+ *
+ * @param {number} count The number of buttons.
+ * @returns {object} `{width, height, tiles, letters}`: the panel's size, and a frame per
+ *          button for its tile and for its letter, in the canvas's own coordinates.
+ */
+function screenLayout(count) {
+    const s = config.screen
+    const columns = Math.max(1, s.columnsFor(count))
+    const rows = Math.ceil(count / columns)
+    const letterHeight = s.letterSize + 4
+    const cellHeight = s.tile + 2 + letterHeight
+    const width = columns * s.tile + (columns - 1) * s.spacing + s.padding * 2
+    const height = rows * cellHeight + (rows - 1) * s.spacing + s.padding * 2
+
+    const cells = Array.from({ length: count }, (_, index) => {
+        const row = Math.floor(index / columns)
+        const inRow = Math.min(columns, count - row * columns)
+        const rowWidth = inRow * s.tile + (inRow - 1) * s.spacing
+        const x = (width - rowWidth) / 2 + (index % columns) * (s.tile + s.spacing)
+        const y = s.padding + row * (cellHeight + s.spacing)
+        return {
+            tile: { x: x, y: y, w: s.tile, h: s.tile },
+            letter: { x: x, y: y + s.tile + 2, w: s.tile, h: letterHeight }
+        }
+    })
+
+    return {
+        width: width,
+        height: height,
+        tiles: cells.map((cell) => cell.tile),
+        letters: cells.map((cell) => cell.letter)
+    }
+}
+
+/** A colour for the canvas with `config.alpha` folded into its own alpha. */
+function screenColor(value, fallback) {
+    const color = canvasColor(value, fallback)
+    return Object.assign({}, color, { alpha: color.alpha * alphaFactor() })
+}
+
+// The canvas holds the panel first, then two elements per button: its tile and its letter.
+const tileElement = (index) => 1 + index * 2
+
+/**
+ * The element that draws one button's tile: its image, or a placeholder until there is one.
+ *
+ * `config.alpha` reaches the tile here and the panel through its colour, so the menu is
+ * see-through as one piece. The letters stay solid, to be read.
+ */
+function screenTile(frame, image) {
+    if (image) {
+        return {
+            type: "image",
+            image: image,
+            frame: frame,
+            imageScaling: "scaleProportionally",
+            imageAlignment: "center",
+            imageAlpha: alphaFactor()
+        }
+    }
+    return {
+        type: "rectangle",
+        action: "fill",
+        fillColor: screenColor(config.background),
+        roundedRectRadii: { xRadius: 8, yRadius: 8 },
+        frame: frame
+    }
+}
+
 function screenPresenter() {
-    let win = null
+    let canvas = null
     let hotkeys = []
     // Binds the current page's keys. Set by present(), called again after a prompt. Also
-    // says whether a page is displayed, since `win` is null while the draw is pending.
+    // says whether a page is displayed, since `canvas` is null while the first draw is
+    // pending.
     let takeKeys = null
-    // The pending draw, when the window has not been built yet.
+    // The pending first draw.
     let showTimer = null
     // Whether a prompt has the keyboard. Held across pages: a menu redraws itself while a
     // chooser is up — a self-drawing button on its timer is enough — and the new page must
     // not take back the keys the prompt is using.
     let suspended = false
-    // The screen the menu was raised on, held for as long as it is displayed. Every
-    // navigation destroys the window and builds a new one, and asking again each time
-    // would let a submenu open on a different screen from the menu it came from: by then
-    // the focused window may be the menu's own, or nothing at all.
+    // The screen the menu was raised on, held for as long as it is displayed, so that a
+    // submenu opens on the same screen as the menu it came from: by then the focused
+    // window may be the menu's own, or nothing at all.
     let screen = null
+    // The page's images so far, by button. setImage() can arrive before the first draw.
+    let images = []
+    // Where the page's tiles go, for setImage(). Null until the page is drawn.
+    let layout = null
 
     function releaseKeys() {
         for (const hotkey of hotkeys) {
@@ -1242,14 +1307,10 @@ function screenPresenter() {
         hotkeys = []
     }
 
-    function destroyWindow() {
-        if (showTimer) {
-            showTimer.stop()
-            showTimer = null
-        }
-        if (!win) return
-        win.destroy()
-        win = null
+    function stopTimer() {
+        if (!showTimer) return
+        showTimer.stop()
+        showTimer = null
     }
 
     function bind(mods, key, down, up) {
@@ -1258,19 +1319,63 @@ function screenPresenter() {
         else console.error(`[hs_menu-gt] could not bind ${key} for the on-screen menu`)
     }
 
+    // Draws the page into the canvas, creating it the first time. Later pages reuse it:
+    // its frame changes with the grid, and its elements are replaced.
+    function draw(letters) {
+        const s = config.screen
+        layout = screenLayout(images.length)
+
+        if (!screen) screen = currentScreen()
+        const frame = centredOnScreen(screen, layout.width, layout.height)
+
+        const elements = [{
+            type: "rectangle",
+            action: "fill",
+            fillColor: screenColor(s.background, config.background),
+            frame: { x: 0, y: 0, w: layout.width, h: layout.height }
+        }]
+        images.forEach((image, index) => {
+            elements.push(screenTile(layout.tiles[index], image))
+            elements.push({
+                type: "text",
+                text: letters[index] ? letters[index] : " ",
+                textFont: config.font || undefined,
+                textSize: s.letterSize,
+                textColor: canvasColor(s.letterColor),
+                textAlignment: "center",
+                frame: layout.letters[index]
+            })
+        })
+
+        if (canvas) {
+            canvas.setFrame(frame)
+            canvas.replaceElements(elements)
+            return
+        }
+        canvas = hs.canvas.create(frame)
+            .level(s.level)
+            // Driven from the keyboard; clicks go to whatever is beneath.
+            .ignoreMouseEvents(true)
+        canvas.appendElements(elements)
+        canvas.show()
+    }
+
     return {
-        // hs.ui windows cannot be altered after they are shown.
-        progressive: false,
+        // The canvas is changed in place: images are painted as they arrive, and
+        // self-drawing buttons refresh.
+        progressive: true,
 
         // This presenter can hide, so a button's `keepOpen` applies to it.
         canHide: true,
 
         present: function (session, buttons) {
             releaseKeys()
-            destroyWindow()
+            stopTimer()
 
             const s = config.screen
             const letters = session.letters()
+            images = buttons.map((button) => button.image || null)
+            layout = null
 
             // A letter is bound with both handlers, so a hold is distinguishable from a
             // tap exactly as it is on the Stream Deck.
@@ -1301,66 +1406,25 @@ function screenPresenter() {
             // Bound before the window is drawn, so the letters answer during the delay.
             if (!suspended) takeKeys()
 
-            const draw = () => {
-                const count = buttons.length
-                const columns = Math.max(1, s.columnsFor(count))
-                const rows = Math.ceil(count / columns)
-
-                // Each cell is the tile with its letter beneath it.
-                const cellHeight = s.tile + s.letterSize + 6
-                const width = columns * s.tile + (columns - 1) * s.spacing + s.padding * 2
-                const height = rows * cellHeight + (rows - 1) * s.spacing + s.padding * 2
-
-                if (!screen) screen = currentScreen()
-                win = hs.ui.window(centredOnScreen(screen, width, height))
-                    .titled(false)
-                    .level(s.level)
-                    .backgroundColor(hexWithAlpha(s.background, config.background))
-
-                win.vstack().spacing(s.spacing).padding(s.padding)
-                for (let row = 0; row < rows; row++) {
-                    win.hstack().spacing(s.spacing)
-                    for (let column = 0; column < columns; column++) {
-                        const index = row * columns + column
-                        if (index >= count) break
-
-                        win.vstack().spacing(2)
-                        if (buttons[index].image) {
-                            win.image(buttons[index].image)
-                                .resizable()
-                                .aspectRatio("fit")
-                                // Dims the button entire — background, icon and label —
-                                // so the menu is see-through as one piece.
-                                .opacity(alphaFactor())
-                                .frame({ w: s.tile, h: s.tile })
-                        } else {
-                            win.rectangle()
-                                .fill(config.background)
-                                .cornerRadius(8)
-                                .frame({ w: s.tile, h: s.tile })
-                        }
-                        win.text(letters[index] ? letters[index] : " ")
-                            .font(HSFont.customSize(config.font, s.letterSize))
-                            .foregroundColor(s.letterColor)
-                        win.end()
-                    }
-                    win.end()
-                }
-                win.end()
-                win.show()
-            }
-
-            // A press before the timer fires navigates or closes, and both destroy the
-            // window, which stops the timer: the page is then never drawn.
+            // Once the menu is on screen, a new page replaces the old one at once: hiding
+            // it for the delay would only make it flicker. Before then, each page waits
+            // the delay afresh, and a press before the timer fires navigates or closes,
+            // which stops the timer: that page is then never drawn.
             const delay = Number(s.showDelay) || 0
-            if (delay > 0) {
+            if (canvas || delay <= 0) {
+                draw(letters)
+            } else {
                 showTimer = hs.timer.doAfter(delay, () => {
                     showTimer = null
-                    draw()
+                    draw(letters)
                 })
-            } else {
-                draw()
             }
+        },
+
+        setImage: function (index, image) {
+            if (index < 0 || index >= images.length) return
+            images[index] = image
+            if (canvas && layout) canvas.assignElement(screenTile(layout.tiles[index], image), tileElement(index))
         },
 
         // A chooser or a text prompt has the keyboard, and a hotkey outranks it: the menu
@@ -1371,8 +1435,8 @@ function screenPresenter() {
             releaseKeys()
         },
 
-        // `takeKeys` rather than `win`: a page whose window is still pending is displayed
-        // in every sense that matters here, and must take its keys back.
+        // `takeKeys` rather than `canvas`: a page whose first draw is still pending is
+        // displayed in every sense that matters here, and must take its keys back.
         resumeKeys: function () {
             suspended = false
             if (takeKeys && !hotkeys.length) takeKeys()
@@ -1380,12 +1444,18 @@ function screenPresenter() {
 
         close: function () {
             releaseKeys()
+            stopTimer()
             takeKeys = null
             suspended = false
             // Released with the menu, so the next one is raised on whichever screen is
             // current then rather than on the one this menu was opened on.
             screen = null
-            destroyWindow()
+            images = []
+            layout = null
+            if (canvas) {
+                canvas.destroy()
+                canvas = null
+            }
         }
     }
 }

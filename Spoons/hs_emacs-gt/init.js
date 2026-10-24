@@ -437,7 +437,7 @@ function windowInfo(id) {
     if (!window) return "0||0||0||0||unknown||unknown"
 
     const frame = window.frame
-    const application = window.application ? window.application.title : "unknown"
+    const application = window.application ? window.application.name : "unknown"
     return [
         Math.floor(frame.x), Math.floor(frame.y),
         Math.floor(frame.w), Math.floor(frame.h),
@@ -536,7 +536,7 @@ function beginEditing(everything) {
         return Promise.resolve(false)
     }
 
-    const application = window.application ? window.application.title : "unknown"
+    const application = window.application ? window.application.name : "unknown"
     const title = window.title || ""
 
     // Written to a file rather than answered over IPC: Emacs reads it while Hammerspoon

@@ -24,6 +24,38 @@ Hammerspoon2 is a replacement for Hammerspoon that uses **JavaScript instead of 
 2. **Syntax:** Use modern JavaScript features (arrow functions, const/let, template literals)
 3. **API Structure:** Similar to original Hammerspoon but adapted for JavaScript
 
+## API changes to remember
+
+Upstream renames do not throw: an old property name reads as `undefined`, so code that
+uses one keeps running and quietly does the wrong thing. Use the current names:
+
+| Old                          | Current                                        | Since      |
+|------------------------------|------------------------------------------------|------------|
+| `HSApplication.title`        | `HSApplication.name`                           | 2026-10-23 |
+| `HSFont.customSize(name, n)` | `HSFont.custom(name, n)`                       | 2026-10-21 |
+| `HSImage.copyImage()`        | `HSImage.duplicate()`                          | 2026-10-17 |
+
+Behaviour that changed:
+
+- `setAttributeValue()` and `performAction()` on an `hs.ax` element throw an `Error` when
+  the Accessibility API refuses, with the AX error name in `err.code`. They used to return
+  `false`. A value of the wrong type (a plain `{x, y}` for `AXPosition` instead of
+  `new HSPoint(x, y)`) throws too.
+- `hs.window.allWindows()`, `windowsForApp()` and `app.allWindows` include windows in native
+  fullscreen and on other Spaces. Reading `AXMainWindow` directly is no longer needed.
+- `hs.eventtap.keyStroke(mods, key, app)` sends a keystroke, modifiers included, to one
+  application without activating it. Prefer it to activating the app and sending a global
+  keystroke.
+- Functions that return nothing give `null`, not `undefined`.
+- `JSON.stringify()` shows the values of windows, applications, screens, colours and
+  geometry objects, where it used to give `{}`.
+- `hs.osascript` async scripts run in parallel and resolve in completion order; chain them
+  when the order matters.
+
+Newer capabilities worth knowing: `hs.canvas` with `imageFromCanvas()` for drawing images
+offscreen, `HSWindow.snapshot()`, `hs.eventtap.systemKeyStroke()` for media keys,
+`require('node:sqlite')`, `hs.dockicon.setMenu()` and `hs.onOpenFile`.
+
 ## Naming
 
 Two conventions, and they do not mix. Ported Hammerspoon 1 code is renamed to match these
@@ -184,7 +216,7 @@ const windows = hs.window.allWindows();
 // Window properties
 windows.forEach(win => {
     const title = win.title;                    // Window title
-    const app = win.application.title;          // Application name
+    const app = win.application.name;           // Application name
     const frame = win.frame;                    // {x, y, w, h}
     const position = win.position;              // {x, y}
     const size = win.size;                      // {w, h}
@@ -205,7 +237,7 @@ win.close();
 // "The provided handler must be a function".
 function eventHandler(eventName, appObject) {
     if (eventName !== "didLaunch") return;
-    console.log(`App ${appObject.title}: ${eventName}`);
+    console.log(`App ${appObject.name}: ${eventName}`);
 }
 
 hs.application.addWatcher(eventHandler);
@@ -360,7 +392,7 @@ function list_windows() {
 
     windows.forEach((win, index) => {
         const title = win.title || "(no title)";
-        const appName = win.application ? win.application.title : "(unknown app)";
+        const appName = win.application ? win.application.name : "(unknown app)";
         const frame = win.frame;
 
         console.log(`\n[${index}] ${appName}: ${title}`);

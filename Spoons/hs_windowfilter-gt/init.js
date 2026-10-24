@@ -201,7 +201,7 @@ function windowState(window) {
         return {
             id: window.id,
             title: window.title || "",
-            application: application ? (application.title || "") : "",
+            application: application ? (application.name || "") : "",
             bundleID: application ? application.bundleID : null,
             pid: application ? application.pid : null,
             role: window.isStandard ? "AXStandardWindow" : "AXWindow",
@@ -610,7 +610,7 @@ function applicationWindows() {
 function worthTracking(application) {
     if (!application) return false
     if (application.kind !== "standard") return false
-    const title = application.title || ""
+    const title = application.name || ""
     return !config.skipApplications.includes(title)
 }
 
@@ -927,11 +927,11 @@ function trackApplication(application, attempt = 0) {
     } catch (e) {
         const message = e && e.message ? e.message : e
         if (attempt < config.applicationRetryDelays.length) {
-            log("debug", `could not watch ${application.title} yet, trying again: ${message}`)
+            log("debug", `could not watch ${application.name} yet, trying again: ${message}`)
             debounce(pid, `app${pid}:retry`, config.applicationRetryDelays[attempt],
                 () => trackApplication(application, attempt + 1))
         } else {
-            log("error", `could not watch ${application.title}: ${message}`)
+            log("error", `could not watch ${application.name}: ${message}`)
         }
         return
     }
@@ -959,7 +959,7 @@ function createdWatch(record, attempt) {
             debounce(pid, `app${pid}:createdRetry`, config.applicationRetryDelays[attempt],
                 () => createdWatch(record, attempt + 1))
         } else {
-            log("debug", `could not watch ${record.application.title} for created: ${message}`)
+            log("debug", `could not watch ${record.application.name} for created: ${message}`)
         }
     }
 }

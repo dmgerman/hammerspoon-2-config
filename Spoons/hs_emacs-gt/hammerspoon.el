@@ -38,10 +38,12 @@
 ;;   1. It reads JavaScript from standard input, because it has no -c option.
 ;;   2. It evaluates that input one line at a time, so a command must be a
 ;;      single line.  `hammerspoon--js-string' quotes text so that it is.
-;;   3. It prints "Connected to Hammerspoon 2" on standard output before the
-;;      result, and prints JavaScript errors there too.  Only its exit status
-;;      tells them apart: 0 on success, 1 when it could not reach
-;;      Hammerspoon 2, and 65 when the JavaScript threw.
+;;   3. It prints JavaScript errors on standard output, like results.  Only
+;;      its exit status tells them apart: 0 on success, 1 when it could not
+;;      reach Hammerspoon 2, and 65 when the JavaScript threw.  Clients built
+;;      before 2026-10-23 also print "Connected to Hammerspoon 2" there before
+;;      the result; newer ones omit it when input is piped.  It is still
+;;      removed, so an older client keeps working.
 ;;
 ;; Hammerspoon 2 must have run `hs.ipc.start()`, and the client must be
 ;; installed with `hs.ipc.installBinary()` from the Hammerspoon console.
@@ -104,7 +106,7 @@ resume as normal."
 
 (defconst hammerspoon--banner-regexp
   "\\`Connected to Hammerspoon 2\n?"
-  "The line the client prints on standard output before any result.")
+  "The line a client older than 2026-10-23 prints before any result.")
 
 (defconst hammerspoon--colour-regexp "\e\\[[0-9;]*m"
   "A terminal colour code.  The client colours its banner and its errors.")

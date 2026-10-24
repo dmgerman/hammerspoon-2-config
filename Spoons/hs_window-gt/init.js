@@ -1496,7 +1496,7 @@ function attachDigit(target, digit, quiet) {
     // nothing is left holding it.
     detachKey(digit)
 
-    const title = target.title || (target.application ? target.application.title : "window")
+    const title = target.title || (target.application ? target.application.name : "window")
     const hotkey = hs.hotkey.bind(config.attachModifiers, digit, () => focusAttached(digit), null)
     if (!hotkey) {
         alert(`Could not bind ${config.attachModifiers.join("-")}-${digit}`)
@@ -1568,7 +1568,7 @@ function attachKeyToWindow(window, key) {
         return attachDigit(target, String(key).trim())
     }
 
-    alert(`Press a number key for\n${target.title || (target.application ? target.application.title : "window")}`)
+    alert(`Press a number key for\n${target.title || (target.application ? target.application.name : "window")}`)
     captureDigit((digit) => {
         // null is Escape or a timeout: nothing was chosen, so nothing is said.
         if (digit === null) return
@@ -1839,7 +1839,7 @@ function info(win) {
     const app = window.application
     const frame = window.frame
     const text = [
-        app ? app.title : "(unknown application)",
+        app ? app.name : "(unknown application)",
         app && app.bundleID ? app.bundleID : "",
         window.title || "(no title)",
         `${window.screen ? window.screen.name : "?"}  ` +
@@ -1887,7 +1887,7 @@ function screenshot(window) {
         return Promise.resolve(null)
     }
 
-    const application = target.application ? target.application.title : "window"
+    const application = target.application ? target.application.name : "window"
     const directory = hs.fs.pathToAbsolute(config.screenshotDir) || config.screenshotDir
     const name = `${timestamp()}-${application}`.replace(/[^A-Za-z0-9._-]+/g, "_")
     const png = `${directory}/${name}.png`

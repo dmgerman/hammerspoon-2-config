@@ -123,9 +123,9 @@ function notifyPrompt(open) {
 // only where the type's own description reads poorly in a parameter list.
 
 const describers = {
-    HSWindow: (w) => `${w.title || "(untitled)"} — ${w.application ? w.application.title : "?"}`,
+    HSWindow: (w) => `${w.title || "(untitled)"} — ${w.application ? w.application.name : "?"}`,
     HSScreen: (s) => `${s.name} (${s.frame.w}×${s.frame.h})`,
-    HSApplication: (a) => a.title
+    HSApplication: (a) => a.name
 }
 
 /**
@@ -319,7 +319,7 @@ const readers = {
         auto: (context, parameter, snap) => {
             if (snap.window) return snap.window
             if (snap.application) {
-                alertAtChooser(`${snap.application.title} reports no visible window`)
+                alertAtChooser(`${snap.application.name} reports no visible window`)
             }
             return readers.window.prompted(context, parameter, snap)
         },
@@ -357,7 +357,7 @@ const readers = {
                 // easier to name by its application than by its title, and typing matches
                 // `text` whatever the chooser's searchSubText setting happens to be.
                 choices: windows.map((w) => {
-                    const app = w.application ? w.application.title : "?"
+                    const app = w.application ? w.application.name : "?"
                     return {
                         text: `${app} — ${w.title || "(untitled)"}`,
                         subText: `${app}${w.screen ? " · " + w.screen.name : ""}`,
