@@ -109,8 +109,10 @@ behind the fullscreen one and never visible.
 *** fullscreenScreenIds(), screenHasFullscreenWindow(screen)
 
 The ids of the screens showing a fullscreen window, as a =Set=, and whether one particular
-screen is among them. Hammerspoon 2 has no spaces module, so a screen counts as fullscreen
-when a window on it reports =isFullscreen=.
+screen is among them. Hammerspoon 2 has no spaces module, and =hs.window.allWindows()=
+includes windows on Spaces that are not showing. A screen therefore counts as fullscreen
+when the window at its centre reports =isFullscreen=, since that hit test only finds windows
+on the visible Space.
 
 ** Windows among themselves
 

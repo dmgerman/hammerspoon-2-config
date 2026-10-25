@@ -709,15 +709,19 @@ function screenList() {
  * The ids of the screens showing a fullscreen window.
  *
  * Hammerspoon 1 asked hs.spaces for the type of the space on each screen. Hammerspoon 2
- * has no spaces module, so a screen counts as fullscreen when a window on it reports
- * isFullscreen.
+ * has no spaces module, and cannot say which Space a window is on. hs.window.allWindows()
+ * includes windows on other Spaces, so a fullscreen window on a Space that is not showing
+ * would count as well. Instead, the window at the centre of each screen is asked whether
+ * it is fullscreen: the hit test only finds windows that are on the visible Space.
  *
  * @returns {Set<number>}
  */
 function fullscreenScreenIds() {
     const ids = new Set()
-    for (const window of allApplicationWindows()) {
-        if (window.isFullscreen && window.screen) ids.add(window.screen.id)
+    for (const screen of screenList()) {
+        const f = screen.fullFrame
+        const window = hs.window.windowAtPoint(new HSPoint(f.x + f.w / 2, f.y + f.h / 2))
+        if (window && window.isFullscreen) ids.add(screen.id)
     }
     return ids
 }
@@ -810,8 +814,8 @@ function movable(windows, destinations) {
         return false
     }
 
-    // fullscreenScreenIds() enumerates every window, which takes about 0.1 s. Nothing
-    // is arriving on a screen when the windows stay where they are, so skip it in that case.
+    // Nothing is arriving on a screen when the windows stay where they are, so there is no
+    // need to ask fullscreenScreenIds() in that case.
     if (!destinations.length) return true
 
     const occupied = fullscreenScreenIds()
