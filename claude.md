@@ -118,33 +118,6 @@ wrong, for the same reason:
 
 Rename the function and the command together when either changes.
 
-### A command is named after the function it calls
-
-A command name is its function's name in hyphenated words, reordered so the subject comes
-first and prefixed with the subject when the function name does not carry it.
-
-| Function                   | Command                      |
-|----------------------------|------------------------------|
-| `peekToggle()`             | `menubar-peek-toggle`        |
-| `mouseScreenCenterNext()`  | `mouse-screen-center-next`   |
-| `previousWindow()`         | `window-previous`            |
-| `selectApplicationWindow()`| `window-select-in-application` |
-
-Reordering is expected and so is dropping a word the Spoon's own name already supplies:
-`historyShow()` in `hs_clipboard-gt` is `clipboard-show`, not `clipboard-history-show`.
-
-**What may not change is the verb.** A command may not claim to do something its function
-does not. The failure to watch for is a toggle named as though it only shows:
-
-| Wrong                          | Function           | Right                  |
-|--------------------------------|--------------------|------------------------|
-| `menubar-peek`                 | `peekToggle()`     | `menubar-peek-toggle`  |
-
-This is wrong twice over: it hides the toggle from anyone reading the chooser, and it breaks
-the link that makes a command findable from its code and its code findable from the chooser.
-
-Rename the function and the command together when either changes.
-
 ## Writing
 
 Comments, docstrings, readmes, issue drafts and conversation are all held to this.
@@ -318,6 +291,23 @@ indicator in 4 of 60 two-second scans.
 A Spoon depending on a permission should say so in its readme, next to the setting that needs
 it, and should still do something sensible without it. `hs_network-gt` falls back from the
 SSID to naming the interface.
+
+## Memory
+
+`doc/memory-management.md` records how to avoid, find and fix memory leaks in the Spoons,
+including how to run Hammerspoon 2 with allocation tracing. Read it before investigating
+memory, and update it when a leak is found, fixed or re-measured.
+
+Two rules prevent the leaks found so far:
+
+1. Every `hs.timer.doEvery()` needs a place where it is stopped, on every path that ends
+   what it serves: a user closing something, a device going away, and the Spoon's `stop()`.
+   A timer that is never stopped keeps alive everything its callback refers to.
+2. Code that runs during teardown must not open, show or start anything. A deferred
+   callback must check that its object is still registered before acting.
+
+`hs.reload()` leaves the previous JavaScript context alive, about 15 MB each time (#365).
+Restart Hammerspoon 2 instead when memory matters, and avoid reloading in tests.
 
 ## Workarounds, and when to ask upstream
 

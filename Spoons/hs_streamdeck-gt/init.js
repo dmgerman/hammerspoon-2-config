@@ -361,8 +361,15 @@ function deckPresenter(record) {
         // A menu button with `dismiss` closes its session. On a deck, which is always
         // displayed, that means returning to the root rather than going dark. The root is
         // opened from a timer so that the session finishes closing first.
+        //
+        // detach() and stop() close the session too, and by the time the timer fires they
+        // have removed the record from `decks`. Reopening the root then would start a session
+        // that nothing ever closes: its self-drawing buttons' timers would keep it, the
+        // record and the unplugged device alive for good, one more at every unplug.
         close: function () {
-            hs.timer.doAfter(0, () => openRoot(record))
+            hs.timer.doAfter(0, () => {
+                if (decks.get(record.device.serialNumber) === record) openRoot(record)
+            })
         }
     }
 }
