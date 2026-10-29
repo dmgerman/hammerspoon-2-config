@@ -167,6 +167,7 @@ const icons = {
     idle: "🎤",
     recording: "🎙️",
     transcribing: "⏳",
+    filtering: "🧹",
     language: "🌐"
 }
 
@@ -202,6 +203,8 @@ const STATES = {
     idle: "IDLE",
     recording: "RECORDING",
     transcribing: "TRANSCRIBING",
+    // Waiting for a filter, which can be a slow command such as a call to an LLM.
+    filtering: "FILTERING",
     error: "ERROR"
 }
 
@@ -209,7 +212,8 @@ const STATES = {
 const TRANSITIONS = {
     IDLE: {RECORDING: true, ERROR: true},
     RECORDING: {TRANSCRIBING: true, IDLE: true, ERROR: true},
-    TRANSCRIBING: {IDLE: true, ERROR: true},
+    TRANSCRIBING: {FILTERING: true, IDLE: true, ERROR: true},
+    FILTERING: {IDLE: true, ERROR: true},
     ERROR: {IDLE: true}
 }
 
@@ -452,6 +456,11 @@ function menuBuild() {
     } else if (state === STATES.transcribing) {
         entries.push({title: "Transcribing…", disabled: true})
         entries.push({title: "Abort", fn: () => transcribeAbort()})
+    } else if (state === STATES.filtering) {
+        const filter = sessionFilter(session)
+        entries.push({title: `Filtering with ${filter ? filter.name : "a filter"}…`,
+            disabled: true})
+        entries.push({title: "Abort", fn: () => transcribeAbort()})
     } else {
         entries.push({title: "Dictate", fn: () => transcribeToggle(true)})
         entries.push({title: "Dictate to the clipboard", fn: () => transcribeToggle()})
@@ -684,6 +693,11 @@ function menuBarElapsed() {
     if (progress) title += ` ${progress}`
     if (abbrev) title += ` [${abbrev}]`
     menuBarSet(title, progress ? `Recording — ${progress} chunks transcribed` : "Recording…")
+}
+
+function menuBarFiltering(filter, lang) {
+    menuBarSet(`${icons.filtering} ${filter.abbrev || filter.name} (${lang})`,
+        `Filtering with ${filter.name}…`)
 }
 
 function menuBarTranscribing(lang) {
@@ -2180,7 +2194,14 @@ async function sessionFinalize(mine) {
         return
     }
 
-    const filtered = await filterApply(text, sessionFilter(mine))
+    // A filter can take seconds, so the state says it is running. filterApply() passes the
+    // text through unchanged for a filter with neither fn nor cmd, so that is not counted.
+    const filter = sessionFilter(mine)
+    if (filter && (filter.fn || filter.cmd)) {
+        stateTransition(STATES.filtering, `filtering with ${filter.name}`)
+        menuBarFiltering(filter, languageLabel(mine.lang, mine.translate))
+    }
+    const filtered = await filterApply(text, filter)
     if (!sessionCurrent(mine)) return
 
     if (userCallback) {
@@ -2246,7 +2267,8 @@ function sessionInsertFinish(mine, numbers, text) {
 function sessionEnd(mine) {
     if (sessionCurrent(mine)) session = null
     recordingSessionStop()
-    if (state === STATES.transcribing || state === STATES.error) {
+    if (state === STATES.transcribing || state === STATES.filtering ||
+        state === STATES.error) {
         stateTransition(STATES.idle, "finished")
     }
     menuBarIdle()
@@ -2773,7 +2795,7 @@ function transcribeToggle(callbackOrPaste, options) {
         transcribeBegin(callbackOrPaste, options)
     }
     else if (state === STATES.recording) transcribeEnd()
-    else notify("recording", "warning", `Busy transcribing — wait or abort`)
+    else notify("recording", "warning", `Busy ${state.toLowerCase()} — wait or abort`)
     return module.exports
 }
 

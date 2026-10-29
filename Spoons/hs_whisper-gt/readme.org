@@ -33,8 +33,9 @@ Install what that needs with =brew install sox whisperkit-cli=.
 puts it on the clipboard instead, to be pasted wherever you want it. Both start and stop the
 same way: press once to begin, press again to transcribe what was said.
 
-A =🎤 (en)= item appears in the menu bar. While recording it counts the seconds, and while
-transcribing it shows =⏳=.
+A =🎤 (en)= item appears in the menu bar. While recording it counts the seconds, while
+transcribing it shows =⏳=, and while a filter runs it shows =🧹= with the filter's
+abbreviation.
 
 * The menu bar item
 
@@ -635,7 +636,9 @@ whisper.diagnose()
 ** isRecording() / state()
 
 Whether a recording is in progress, and the state machine's state: =IDLE=, =RECORDING=,
-=TRANSCRIBING= or =ERROR=.
+=TRANSCRIBING=, =FILTERING= or =ERROR=. =FILTERING= follows =TRANSCRIBING= only when a filter
+is applied to the text, and lasts until the filter has answered. A dictation that goes to a
+processor is not filtered, so it goes from =TRANSCRIBING= to =IDLE=.
 
 ** bindHotkeys(mapping) / start() / stop()
 
