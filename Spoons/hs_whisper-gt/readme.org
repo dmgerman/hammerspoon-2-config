@@ -519,11 +519,14 @@ back wrong, to try another language or another transcriber without saying it all
 =config.retranscribeCount= is how many are offered. =config.retranscribeTranscriber= names
 one to use instead of the current one, or =null= for the current one.
 
-** Dictating in another language once
+** Dictating once with other settings
 
-=transcribeToggle= and =transcribeBegin= take a second argument, ={lang, translate}=, that
-applies to that dictation only. The language and output selected in the menu are left as
-they were. This dictates in Japanese, translates it into English, and pastes the English:
+=transcribeToggle= and =transcribeBegin= take a second argument, ={lang, translate, filter}=,
+that applies to that dictation only. =filter= is the name of one of =config.filters=, or
+=null= for none. Each one left out is the one selected, and the language, output and filter
+selected in the menu are left as they were. A filter name that is not configured is refused
+before anything is recorded. This dictates in Japanese, translates it into English, and
+pastes the English:
 
 #+begin_src js   :exports both
 whisper.transcribeToggle(true, {lang: "ja", translate: true})

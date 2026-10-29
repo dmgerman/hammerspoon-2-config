@@ -392,9 +392,16 @@ function filterActive() {
     return config.filters[activeFilter] || null
 }
 
-function filterAbbrev() {
-    const filter = filterActive()
+function filterAbbrev(filter = filterActive()) {
     return filter && filter.abbrev ? filter.abbrev : null
+}
+
+/**
+ * The filter a session's text goes through: the one given for that dictation alone, or
+ * otherwise the one selected, which can be changed while the dictation runs.
+ */
+function sessionFilter(mine) {
+    return mine && mine.filter !== undefined ? mine.filter : filterActive()
 }
 
 /** The processor that transcribeToProcessorToggle() uses, or null when none is configured. */
@@ -409,7 +416,7 @@ function processorActive() {
  */
 function abbrevShown() {
     if (session && session.processor) return session.processor.abbrev || null
-    return filterAbbrev()
+    return filterAbbrev(sessionFilter(session))
 }
 
 /** A filename stem naming the language and the moment, unique per session. */
@@ -895,8 +902,7 @@ function recordingsPrune() {
  * throws or returns something that is not a string — is reported and the original text is
  * used. Losing the dictation because a grammar filter broke would be the worse failure.
  */
-async function filterApply(text) {
-    const filter = filterActive()
+async function filterApply(text, filter = filterActive()) {
     if (!filter || (!filter.fn && !filter.cmd)) return text
 
     logDebug(`applying filter: ${filter.name}`)
@@ -1819,6 +1825,10 @@ function sessionNew(lang, translate) {
         // Chunk numbers that have come back, whether with text or not.
         settled: new Set(),
 
+        // The filter given for this dictation alone, null for none, or undefined to use the
+        // selected one; see sessionFilter().
+        filter: undefined,
+
         // The processor the dictation goes to, or null when it produces text.
         processor: null,
 
@@ -1863,7 +1873,7 @@ function sessionDeliveryChoose(mine, toProcessor) {
         if (recorder.name === "streaming") mine.chunkDelivery = "processor"
         return
     }
-    if (!chunkInsertApplies()) return
+    if (!chunkInsertApplies(sessionFilter(mine))) return
 
     // A chunk is pasted only into the window that had focus at the start, so with none
     // the dictation is pasted once at the end, as auto-paste always has been.
@@ -2170,7 +2180,7 @@ async function sessionFinalize(mine) {
         return
     }
 
-    const filtered = await filterApply(text)
+    const filtered = await filterApply(text, sessionFilter(mine))
     if (!sessionCurrent(mine)) return
 
     if (userCallback) {
@@ -2309,9 +2319,9 @@ function chunkSettingMenu(presets, current, set, enabled) {
  * Only the streaming recorder produces more than one chunk, and only a dictation that
  * pastes has anywhere to put them. A filter rules it out because it runs over the whole text.
  */
-function chunkInsertApplies() {
+function chunkInsertApplies(filter = filterActive()) {
     return config.streamingChunkInsert && shouldPaste && !userCallback &&
-        !!recorder && recorder.name === "streaming" && filterGet() === null
+        !!recorder && recorder.name === "streaming" && filter === null
 }
 
 /**
@@ -2625,8 +2635,9 @@ function backendsReady() {
  *        is, or "processor" to hand it to the selected processor; see
  *        transcribeToProcessorToggle().
  * @param {object} [options] Settings for this dictation only, leaving the selected ones
- *        alone: `lang`, a language code or "auto", and `translate`, true to translate into
- *        English. Each defaults to the one selected.
+ *        alone: `lang`, a language code or "auto"; `translate`, true to translate into
+ *        English; and `filter`, the name of one of config.filters, or null for none. Each
+ *        defaults to the one selected.
  */
 async function transcribeBegin(callbackOrPaste, options = {}) {
     if (!backendsReady()) return module.exports
@@ -2640,6 +2651,19 @@ async function transcribeBegin(callbackOrPaste, options = {}) {
     if (callbackOrPaste === "processor" && !processorActive()) {
         notify("config", "warning", "No processor is configured; see config.processors")
         return module.exports
+    }
+
+    // Checked before anything is changed, so that a misspelt name leaves the Spoon as it was.
+    let filter = undefined
+    if (options.filter === null) {
+        filter = null
+    } else if (options.filter !== undefined) {
+        filter = config.filters.find((f) => f.name === options.filter)
+        if (!filter) {
+            notify("config", "warning", `Not a configured filter: ${options.filter}. ` +
+                `Configured: ${config.filters.map((f) => f.name).join(", ")}`)
+            return module.exports
+        }
     }
 
     const toProcessor = callbackOrPaste === "processor"
@@ -2668,6 +2692,7 @@ async function transcribeBegin(callbackOrPaste, options = {}) {
 
     const mine = sessionNew(options.lang ?? languageGet(),
         options.translate ?? config.translate)
+    mine.filter = filter
     sessionDeliveryChoose(mine, toProcessor)
     session = mine
     if (!stateTransition(STATES.recording, "starting to record")) {
