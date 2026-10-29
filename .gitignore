@@ -28,3 +28,6 @@ default.profraw
 *.profraw
 
 .DS_Store
+
+# Python bytecode, left by the hs_whisper-gt server scripts
+__pycache__/

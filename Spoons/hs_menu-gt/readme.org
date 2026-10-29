@@ -314,8 +314,9 @@ globally, so typing goes to the menu until it is dismissed.
 | Escape   | Dismisses the menu.           |
 | Delete   | Returns to the parent menu.   |
 
-Bind a key to a command that calls =toggleOnScreen=, rather than binding one here, so the
-menu is reachable the same way as everything else.
+Bind a key to a command that calls =showOnScreen=, rather than binding one here, so the
+menu is reachable the same way as everything else. Pressing that key again while the menu
+is displayed reopens it where it was rather than dismissing it; Escape dismisses it.
 
 * Configuration
 
