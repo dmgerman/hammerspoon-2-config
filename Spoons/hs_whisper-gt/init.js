@@ -38,8 +38,14 @@ const shell = require(hs.appinfo.configDir + "/dmg-libs/shell.js")
 // MARK: - User-configurable settings
 
 const config = {
-    // Languages offered by the chooser. The first is selected at startup.
+    // Languages offered by the chooser. The first is selected at startup. The Spoon adds
+    // "auto" after them, which lets Whisper detect the language of each recording or chunk.
     languages: ["en"],
+
+    // Translate into English instead of transcribing in the language spoken. Whisper can
+    // translate only into English. Models with "turbo" in their name were not trained to
+    // translate, and often return the spoken language unchanged.
+    translate: false,
 
     // Which backends to use. A name not in `recorders` or `transcribers` is an error.
     recorder: "sox",            // "sox" | "streaming"
@@ -212,6 +218,10 @@ const TRANSITIONS = {
 const spoonDir = __dirname
 
 const EMACS_BUNDLE_ID = "org.gnu.Emacs"
+
+// The language code that asks Whisper to detect the language. Always offered, after
+// config.languages; see languagesOffered().
+const LANGUAGE_AUTO = "auto"
 
 // MARK: - State
 
@@ -453,12 +463,31 @@ function menuBuild() {
     // do nothing to the dictation in progress. Shown, but not selectable, while one runs.
     entries.push({
         title: `Language: ${languageGet()}`,
-        menu: config.languages.map((lang) => ({
-            title: lang,
+        menu: languagesOffered().map((lang) => ({
+            title: lang === LANGUAGE_AUTO ? "auto (detect)" : lang,
             checked: lang === languageGet(),
             disabled: !idle,
             fn: () => languageSet(lang)
         }))
+    })
+
+    // Fixed when a dictation starts, like the language.
+    entries.push({
+        title: `Output: ${config.translate ? "English" : "same as input"}`,
+        menu: [
+            {
+                title: "Same as input",
+                checked: !config.translate,
+                disabled: !idle,
+                fn: () => translateSet(false)
+            },
+            {
+                title: "English (translate)",
+                checked: !!config.translate,
+                disabled: !idle,
+                fn: () => translateSet(true)
+            }
+        ]
     })
 
     // The filter runs on the assembled text at the end, so changing it during a dictation
@@ -614,7 +643,7 @@ function menuBarSet(title, tooltip) {
 function menuBarIdle() {
     const abbrev = abbrevShown()
     const filter = filterActive()
-    let title = `${icons.idle} (${languageGet()})`
+    let title = `${icons.idle} (${languageLabel(languageGet(), config.translate)})`
     let tooltip = "Idle"
     if (abbrev) title += ` [${abbrev}]`
     if (filter) tooltip = `Filter: ${filter.name}`
@@ -640,7 +669,10 @@ function menuBarElapsed() {
     const elapsed = startTime ? Math.floor(hs.timer.secondsSinceEpoch() - startTime) : 0
     const abbrev = abbrevShown()
     const progress = sessionProgress()
-    let title = `${icons.recording} ${elapsed}s (${languageGet()})`
+    // The session's language, which an option to transcribeBegin() can make differ from the
+    // selected one.
+    const label = session ? languageLabel(session.lang, session.translate) : languageGet()
+    let title = `${icons.recording} ${elapsed}s (${label})`
     // Chunks are transcribed while the recording continues, so the count climbs during it.
     if (progress) title += ` ${progress}`
     if (abbrev) title += ` [${abbrev}]`
@@ -1086,7 +1118,9 @@ function processorSelect() {
  * Each transcriber is {validate, transcribe, cleanup?, fallback?}.
  *
  * validate()                      resolves to null when usable, or to why it is not
- * transcribe(audioFile, lang)     resolves to the text, or throws
+ * transcribe(audioFile, lang, translate)
+ *                                 resolves to the text, or throws. `lang` may be "auto";
+ *                                 `translate` true asks for English instead
  * cleanup()                       release anything held, when the Spoon stops
  * warm()                          get the model ready, called when a recording starts
  * fallback                        the name to try instead if validate fails
@@ -1108,13 +1142,16 @@ const transcribers = {
         // whisperkit-cli writes the transcription to stdout and nothing else, so stdout is
         // the text. The Lua version appended 2>&1, which mixed any warning the tool emitted
         // into the transcription.
-        transcribe: async (audioFile, lang) => {
-            const result = await shell.commandRun(config.whisperkitCmd, [
+        // whisperkit-cli has no "auto" language; it detects the language when given none.
+        transcribe: async (audioFile, lang, translate) => {
+            const args = [
                 "transcribe",
                 "--model", config.whisperkitModel,
                 "--audio-path", audioFile,
-                "--language", lang
-            ])
+                "--task", translate ? "translate" : "transcribe"
+            ]
+            if (lang !== LANGUAGE_AUTO) args.push("--language", lang)
+            const result = await shell.commandRun(config.whisperkitCmd, args)
             if (result.code !== 0) {
                 throw new Error(`whisperkit-cli exited ${result.code}: ` +
                     firstLine(result.err || result.out))
@@ -1139,14 +1176,16 @@ const transcribers = {
 
         // whisper-cli's stdout is timestamped segments; --output-txt writes the plain text
         // beside the audio, and that is what is wanted.
-        transcribe: async (audioFile, lang) => {
+        transcribe: async (audioFile, lang, translate) => {
             const textFile = `${audioFile}.txt`
-            const result = await shell.commandRun(config.whispercliCmd, [
+            const args = [
                 "-np",
                 "-m", config.whispercliModelPath,
                 "-l", lang,
                 "--output-txt", audioFile
-            ])
+            ]
+            if (translate) args.push("--translate")
+            const result = await shell.commandRun(config.whispercliCmd, args)
             if (result.code !== 0) {
                 throw new Error(`whisper-cli exited ${result.code}: ` +
                     firstLine(result.err || result.out))
@@ -1253,7 +1292,9 @@ const transcribers = {
 
         // The audio goes as multipart/form-data, through fetch(). hs.http.post takes only a
         // String body, so it cannot send the audio.
-        transcribe: async (audioFile, lang) => {
+        // The server resets its parameters after every request, so a request that does not
+        // ask to translate is transcribed even after one that did.
+        transcribe: async (audioFile, lang, translate) => {
             const url = `http://${config.whisperserverHost}:${config.whisperserverPort}/inference`
             const file = hs.fs.open(audioFile, "r")
             if (!file) throw new Error(`Could not open ${audioFile}`)
@@ -1261,7 +1302,12 @@ const transcribers = {
             file.close()
             if (!audio) throw new Error(`Could not read ${audioFile}`)
 
-            const form = multipartBodyBuild({ response_format: "text", language: lang },
+            const fields = {
+                response_format: "text",
+                language: lang,
+                translate: translate ? "true" : "false"
+            }
+            const form = multipartBodyBuild(fields,
                 "file", "audio.wav", audio)
             const response = await fetch(url, {
                 method: "POST",
@@ -1754,11 +1800,13 @@ function stateTransition(next, why) {
     return true
 }
 
-function sessionNew(lang) {
+function sessionNew(lang, translate) {
     generation += 1
     return {
         generation: generation,
         lang: lang,
+        // Whether to translate into English, fixed when the dictation starts like `lang`.
+        translate: translate,
         prefix: sessionPrefix(lang),
         // One promise per chunk, each settling when that chunk has been transcribed.
         chunks: [],
@@ -1901,7 +1949,7 @@ function chunkReceived(mine, audioFile, chunkNum, isFinal, peak, speech) {
         return
     }
 
-    const work = transcriber.transcribe(audioFile, mine.lang)
+    const work = transcriber.transcribe(audioFile, mine.lang, mine.translate)
         .then((text) => {
             if (!sessionCurrent(mine)) return
             if (text) mine.results.set(chunkNum, text)
@@ -1943,7 +1991,9 @@ function chunkSettled(mine, chunkNum, isFinal, text) {
     if (!sessionCurrent(mine)) return
 
     if (state === STATES.recording) menuBarElapsed()
-    else if (state === STATES.transcribing) menuBarTranscribing(mine.lang)
+    else if (state === STATES.transcribing) {
+        menuBarTranscribing(languageLabel(mine.lang, mine.translate))
+    }
 
     // Called with or without text: a chunk that failed or said nothing still has to be
     // passed over before the chunks after it can be delivered.
@@ -1985,7 +2035,8 @@ function chunksDeliver(mine) {
 /** Hand one chunk to the session's processor, and wait for the processor to finish with it. */
 async function chunkProcess(mine, num) {
     if (!sessionCurrent(mine)) return
-    await processorRun(mine.processor, mine.results.get(num), {lang: mine.lang, chunk: num})
+    await processorRun(mine.processor, mine.results.get(num),
+        {lang: languageOutput(mine.lang, mine.translate), chunk: num})
 }
 
 /** Resolve after `seconds`. */
@@ -2112,7 +2163,7 @@ async function sessionFinalize(mine) {
     // Nothing is pasted, copied or given to a callback. The session stays open until the
     // processor has finished, so the menu bar shows it is still busy.
     if (mine.processor) {
-        await processorRun(mine.processor, text, {lang: mine.lang})
+        await processorRun(mine.processor, text, {lang: languageOutput(mine.lang, mine.translate)})
         // An abort while the processor ran may have been followed by a new dictation, which
         // sessionEnd() would otherwise end.
         if (sessionCurrent(mine)) sessionEnd(mine)
@@ -2441,22 +2492,42 @@ async function serverRestart(why) {
 
 // MARK: - Language
 
-/** The language transcription is being asked for. */
+/** The languages that can be chosen: `config.languages`, followed by "auto". */
+function languagesOffered() {
+    return config.languages.includes(LANGUAGE_AUTO)
+        ? config.languages
+        : config.languages.concat([LANGUAGE_AUTO])
+}
+
+/** The language transcription is being asked for, which may be "auto". */
 function languageGet() {
-    return config.languages[langIndex]
+    return languagesOffered()[langIndex]
 }
 
 /**
- * Choose a language by code. It has to be one of `config.languages`.
+ * The language the text comes out in: English when translating, otherwise the language
+ * spoken, which is "auto" when it was left to Whisper to detect.
+ */
+function languageOutput(lang, translate) {
+    return translate ? "en" : lang
+}
+
+/** The language for the menu bar and notifications, as "ja" or, when translating, "ja→en". */
+function languageLabel(lang, translate) {
+    return translate && lang !== "en" ? `${lang}→en` : lang
+}
+
+/**
+ * Choose a language by code. It has to be one of `config.languages`, or "auto".
  *
  * @param {string} lang A language code, as "en".
  * @returns {boolean} Whether it was recognised.
  */
 function languageSet(lang) {
-    const found = config.languages.indexOf(lang)
+    const found = languagesOffered().indexOf(lang)
     if (found === -1) {
         notify("config", "warning", `Not a configured language: ${lang}. ` +
-            `Configured: ${config.languages.join(", ")}`)
+            `Configured: ${languagesOffered().join(", ")}`)
         return false
     }
     langIndex = found
@@ -2465,15 +2536,16 @@ function languageSet(lang) {
     return true
 }
 
-/** Move to the next configured language, wrapping round. */
+/** Move to the next configured language, wrapping round. "auto" comes last. */
 function languageNext() {
-    languageSet(config.languages[(langIndex + 1) % config.languages.length])
+    const offered = languagesOffered()
+    languageSet(offered[(langIndex + 1) % offered.length])
     return module.exports
 }
 
-/** Offer the configured languages. */
+/** Offer the configured languages, and "auto". */
 function languageSelect() {
-    const choices = config.languages.map((lang, i) => ({
+    const choices = languagesOffered().map((lang, i) => ({
         text: lang,
         subText: i === langIndex ? "✓ Selected" : "",
         lang: lang
@@ -2489,6 +2561,50 @@ function languageSelect() {
     }
     languageChooser.show()
     return module.exports
+}
+
+/**
+ * Translate into English, or transcribe in the language spoken. Applies from the next
+ * dictation, so it is refused during one, as the menu refuses it.
+ *
+ * @param {boolean} enable True to translate into English.
+ */
+function translateSet(enable) {
+    if (state !== STATES.idle) {
+        notify("config", "warning", "Translation can be changed only between dictations")
+        return module.exports
+    }
+    config.translate = !!enable
+    notify("config", "info", config.translate
+        ? `${icons.language} Output: English (translated)`
+        : `${icons.language} Output: the language spoken`)
+    const warning = translateModelWarning()
+    if (warning) notify("config", "warning", warning)
+    menuBarIdle()
+    return module.exports
+}
+
+function translateToggle() {
+    return translateSet(!config.translate)
+}
+
+/**
+ * Why translation will probably not work with the transcriber in use, or null.
+ *
+ * The turbo models were fine-tuned without translation data, so asked to translate they
+ * often return the spoken language unchanged. Only whisper.cpp's model files are checked,
+ * through any symbolic link, because the file name is all there is to go on.
+ */
+function translateModelWarning() {
+    if (!config.translate || !transcriber) return null
+    const modelPath = transcriber.name === "whisperserver" ? config.whisperserverModelPath
+        : transcriber.name === "whispercli" ? config.whispercliModelPath
+        : config.whisperkitModel
+    if (!modelPath) return null
+    const resolved = hs.fs.pathToAbsolute(modelPath) || modelPath
+    if (!/turbo/i.test(resolved)) return null
+    return `${resolved.split("/").pop()} is a turbo model, which was not trained to ` +
+        "translate. It will often return the language spoken instead of English."
 }
 
 // MARK: - Recording and transcribing
@@ -2508,8 +2624,11 @@ function backendsReady() {
  *        transcription instead of the clipboard, true to paste the text where the cursor
  *        is, or "processor" to hand it to the selected processor; see
  *        transcribeToProcessorToggle().
+ * @param {object} [options] Settings for this dictation only, leaving the selected ones
+ *        alone: `lang`, a language code or "auto", and `translate`, true to translate into
+ *        English. Each defaults to the one selected.
  */
-async function transcribeBegin(callbackOrPaste) {
+async function transcribeBegin(callbackOrPaste, options = {}) {
     if (!backendsReady()) return module.exports
 
     if (state === STATES.error) stateTransition(STATES.idle, "recovering")
@@ -2547,7 +2666,8 @@ async function transcribeBegin(callbackOrPaste) {
 
     if (!dirEnsure(config.tempDir)) return module.exports
 
-    const mine = sessionNew(languageGet())
+    const mine = sessionNew(options.lang ?? languageGet(),
+        options.translate ?? config.translate)
     sessionDeliveryChoose(mine, toProcessor)
     session = mine
     if (!stateTransition(STATES.recording, "starting to record")) {
@@ -2574,7 +2694,8 @@ async function transcribeBegin(callbackOrPaste) {
     if (!sessionCurrent(mine)) return module.exports
 
     const abbrev = abbrevShown()
-    notify("recording", "info", `${icons.recording} Recording (${mine.lang})` +
+    notify("recording", "info",
+        `${icons.recording} Recording (${languageLabel(mine.lang, mine.translate)})` +
         (abbrev ? ` [${abbrev}]` : ""))
     recordingSessionStart()
     return module.exports
@@ -2602,7 +2723,7 @@ async function transcribeEnd() {
     }
     startTime = null
     indicatorHide()
-    menuBarTranscribing(mine.lang)
+    menuBarTranscribing(languageLabel(mine.lang, mine.translate))
 
     try {
         await recorder.stop(mine,
@@ -2620,9 +2741,12 @@ async function transcribeEnd() {
  * Start recording, or stop and transcribe if already recording.
  *
  * @param {function|boolean} [callbackOrPaste] As transcribeBegin().
+ * @param {object} [options] As transcribeBegin(). Used only when a recording starts.
  */
-function transcribeToggle(callbackOrPaste) {
-    if (state === STATES.idle || state === STATES.error) transcribeBegin(callbackOrPaste)
+function transcribeToggle(callbackOrPaste, options) {
+    if (state === STATES.idle || state === STATES.error) {
+        transcribeBegin(callbackOrPaste, options)
+    }
     else if (state === STATES.recording) transcribeEnd()
     else notify("recording", "warning", `Busy transcribing — wait or abort`)
     return module.exports
@@ -2701,14 +2825,16 @@ async function recordingTranscribe(audioFile, callback) {
     }
 
     const lang = languageGet()
+    const translate = config.translate
+    const label = languageLabel(lang, translate)
     const app = hs.window.focusedWindow() ? hs.window.focusedWindow().application : null
 
-    notify("transcription", "info", `Transcribing again with ${using.name} (${lang})…`)
-    menuBarSet(`${icons.transcribing} (${lang})`, `Transcribing again with ${using.name}`)
+    notify("transcription", "info", `Transcribing again with ${using.name} (${label})…`)
+    menuBarSet(`${icons.transcribing} (${label})`, `Transcribing again with ${using.name}`)
 
     let text
     try {
-        text = await using.transcribe(audioFile, lang)
+        text = await using.transcribe(audioFile, lang, translate)
     } catch (e) {
         menuBarIdle()
         notify("transcription", "error", `Could not transcribe again: ${e.message}`)
@@ -2805,8 +2931,11 @@ function diagnose() {
 
     say("--- hs_whisper-gt ---")
     say(`state: ${state}${starting ? " (still starting)" : ""}`)
-    say(`language: ${languageGet()} (${langIndex + 1} of ${config.languages.length}: ` +
-        `${config.languages.join(", ")})`)
+    say(`language: ${languageGet()} (${langIndex + 1} of ${languagesOffered().length}: ` +
+        `${languagesOffered().join(", ")})`)
+    say(`output: ${config.translate ? "English (translated)" : "the language spoken"}`)
+    const translateWarning = translateModelWarning()
+    if (translateWarning) say(translateWarning)
     say(`configured: recorder=${config.recorder} transcriber=${config.transcriber}`)
     say(`in use: recorder=${recorder ? recorder.name : "none"} ` +
         `transcriber=${transcriber ? transcriber.name : "none"}`)
@@ -2893,6 +3022,7 @@ function bindHotkeys(mapping) {
         transcribeToProcessorToggle: () => transcribeToProcessorToggle(),
         languageSelect: () => languageSelect(),
         languageNext: () => languageNext(),
+        translateToggle: () => translateToggle(),
         filterSelect: () => filterSelect(),
         processorSelect: () => processorSelect(),
         chunkInsertToggle: () => chunkInsertToggle(),
@@ -2952,6 +3082,9 @@ async function backendsStart() {
     notify("init", "info",
         `hs_whisper-gt ready: ${recorder.name} + ${transcriber.name}`)
 
+    const translateWarning = translateModelWarning()
+    if (translateWarning) notify("init", "warning", translateWarning)
+
     if (recorder.name !== "streaming" && !hs.permissions.checkMicrophone()) {
         notify("init", "warning",
             "Hammerspoon 2 has no microphone permission yet, so recordings would be " +
@@ -2999,6 +3132,9 @@ module.exports = {
     languageSet,
     languageSelect,
     languageNext,
+
+    translateSet,
+    translateToggle,
 
     inputDeviceSet,
 

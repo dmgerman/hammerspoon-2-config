@@ -136,13 +136,13 @@ interactive.use("hs_time-gt", {
         interactive.define({
             name: "time-show",
             doc: "Show the clock for a few seconds.",
-            fn: () => clock.toggleShow()
+            fn: () => clock.show()
         });
 
         interactive.define({
             name: "time-show-persistent",
             doc: "Show the clock until it is dismissed with Escape.",
-            fn: () => clock.toggleShowPersistent()
+            fn: () => clock.showPersistent()
         });
 
         interactive.define({
@@ -753,32 +753,32 @@ interactive.use("hs_menu-gt", {
     commands: (interactive, menu) => {
         interactive.define({
             name: "menu-show",
-            doc: "Show the main menu on screen, and dismiss it if it is showing.",
-            fn: () => menu.toggleOnScreen(menus.rootMenu, { name: "Root" })
+            doc: "Show the main menu on screen, where it was last left.",
+            fn: () => menu.showOnScreen(menus.rootMenu, { name: "Root" })
         });
 
         interactive.define({
             name: "menu-show-buses",
             doc: "Show the bus menu on screen.",
-            fn: () => menu.toggleOnScreen(menus.busMenu, { name: "Buses" })
+            fn: () => menu.showOnScreen(menus.busMenu, { name: "Buses" })
         });
 
         interactive.define({
             name: "menu-show-windows",
             doc: "Show the window menu on screen.",
-            fn: () => menu.toggleOnScreen(menus.windowMenu, { name: "Windows" })
+            fn: () => menu.showOnScreen(menus.windowMenu, { name: "Windows" })
         });
 
         interactive.define({
             name: "menu-show-music",
             doc: "Show the music menu on screen.",
-            fn: () => menu.toggleOnScreen(menus.musicMenu, { name: "Music" })
+            fn: () => menu.showOnScreen(menus.musicMenu, { name: "Music" })
         });
 
         interactive.define({
             name: "menu-show-whisper",
             doc: "Show the dictation menu on screen.",
-            fn: () => menu.toggleOnScreen(menus.whisperMenu, { name: "Whisper" })
+            fn: () => menu.showOnScreen(menus.whisperMenu, { name: "Whisper" })
         });
 
         interactive.define({
@@ -1164,6 +1164,14 @@ interactive.use("hs_whisper-gt", {
             doc: "Start dictating, or stop and hand what was said to the selected processor, " +
                 "which by default runs it as a Hammerspoon command.",
             fn: () => whisper.transcribeToProcessorToggle()
+        });
+
+        // Japanese is translated often enough to deserve its own command. The language and
+        // output selected in the Spoon's menu are left as they were.
+        interactive.define({
+            name: "dmg-whisper-translate-from-japanese",
+            doc: "Start dictating in Japanese, or stop and paste the English translation.",
+            fn: () => whisper.transcribeToggle(true, { lang: "ja", translate: true })
         });
 
         interactive.define({

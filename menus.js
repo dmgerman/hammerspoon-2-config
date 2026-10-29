@@ -412,6 +412,7 @@ const whisperMenu = [
     { label: "Dictate", icon: "whisper.png", key: "t", command: "whisper-transcribe-toggle" },
     { label: "To clipboard", icon: "symbol:doc.on.clipboard", key: "c", command: "whisper-transcribe-to-clipboard-toggle" },
     { label: "To processor", icon: "symbol:gearshape.2", key: "p", command: "whisper-transcribe-to-processor-toggle" },
+    { label: "Japanese → English", icon: "symbol:character.bubble", key: "j", command: "dmg-whisper-translate-from-japanese" },
     { label: "Abort", icon: "symbol:xmark.circle", key: "a", command: "whisper-transcribe-abort" },
     { label: "Again", icon: "symbol:arrow.clockwise", key: "g", command: "whisper-transcribe-again" },
 

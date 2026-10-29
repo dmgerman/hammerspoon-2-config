@@ -47,7 +47,9 @@ nothing is reachable only by a keyboard shortcut you have to remember:
 
 - *Dictate* and *Dictate to the clipboard* while idle; *Stop and transcribe* and *Abort*
   while one is running
-- *Language*, with the current one ticked
+- *Language*, with the current one ticked. It lists =config.languages= followed by /auto
+  (detect)/
+- *Output*, either /Same as input/ or /English (translate)/; see /Language and translation/
 - *Filter*, with the active one ticked and /No filter/ to clear it
 - *Dictate to <processor>*, while idle, when a processor is configured
 - *Processor*, choosing which processor that entry and =transcribeToProcessorToggle= use
@@ -67,8 +69,8 @@ nothing is reachable only by a keyboard shortcut you have to remember:
 - a last line naming the recorder and transcriber actually in use, so a fallback is visible
 
 The menu is rebuilt each time it opens, so it shows the current state. Entries that would do
-nothing are greyed out rather than hidden. The language cannot be changed part way through a
-dictation, because it is fixed when the dictation starts. Nor can the microphone, because
+nothing are greyed out rather than hidden. The language and the output cannot be changed
+part way through a dictation, because they are fixed when the dictation starts. Nor can the microphone, because
 changing it restarts the streaming server, which would discard the recording. The filter can
 be changed, and applies to the dictation in progress, because it runs on the finished text.
 The processor is fixed when a dictation to it starts, so changing it applies to the next one.
@@ -424,7 +426,8 @@ whisper.bindHotkeys({
 Each entry needs =name= and either:
 
 - =cmd= — a shell command reading the text on its standard input. It runs under =/bin/zsh -l=,
-  like a filter, with =WHISPER_LANG= set to the dictation's language and =WHISPER_CHUNK= to
+  like a filter, with =WHISPER_LANG= set to the language of the text (=en= when translating,
+  =auto= when the language was detected) and =WHISPER_CHUNK= to
   the chunk's number when it is given one chunk.
 - =fn= — a function called as =fn(text, details)=, where =details= is ={lang, chunk}=. It may
   return a promise.
@@ -516,19 +519,56 @@ back wrong, to try another language or another transcriber without saying it all
 =config.retranscribeCount= is how many are offered. =config.retranscribeTranscriber= names
 one to use instead of the current one, or =null= for the current one.
 
+** Dictating in another language once
+
+=transcribeToggle= and =transcribeBegin= take a second argument, ={lang, translate}=, that
+applies to that dictation only. The language and output selected in the menu are left as
+they were. This dictates in Japanese, translates it into English, and pastes the English:
+
+#+begin_src js   :exports both
+whisper.transcribeToggle(true, {lang: "ja", translate: true})
+#+end_src
+
 ** recordingTranscribe(audioFile, callback)
 
 Transcribe one named recording, without the chooser.
 
 ** languageGet() / languageSet(lang) / languageSelect() / languageNext()
 
-The language being asked for, which must be one of =config.languages=. =languageSelect=
-opens a chooser; =languageNext= moves through the list.
+The language being asked for, which must be one of =config.languages= or =auto=.
+=languageSelect= opens a chooser; =languageNext= moves through the list, with =auto= last.
 
 #+begin_src js   :exports both
 whisper.config.languages = ["en", "ja", "es"]
 whisper.languageSet("ja")
+whisper.languageSet("auto")
 #+end_src
+
+** translateSet(enable) / translateToggle()
+
+Translate into English, or transcribe in the language spoken. It does the same as the
+*Output* menu, applies from the next dictation, and is refused during one.
+
+#+begin_src js   :exports both
+whisper.translateSet(true)
+#+end_src
+
+** Language and translation
+
+The Spoon always offers =auto= after the languages in =config.languages=, so it does not
+need to be added to them. With =auto=, Whisper detects the language of each recording. With
+the =streaming= recorder it detects it for each chunk separately, so one dictation can come
+out in more than one language. Detection is least reliable on short chunks, and accented
+English is the case it most often gets wrong. Choosing the language is more accurate when
+you know it.
+
+Whisper can translate only into English, so the output is either the language spoken or
+English. Translating from English to English is the same as transcribing it.
+
+Models with /turbo/ in their name, such as =ggml-large-v3-turbo.bin=, were fine-tuned
+without translation data. Asked to translate, they often return the language spoken
+unchanged. The Spoon warns when translation is on and the model file, followed through any
+symbolic link, has /turbo/ in its name. =large-v3= and =medium= can translate.
 
 ** inputDeviceSet(name)
 
@@ -597,7 +637,8 @@ Whether a recording is in progress, and the state machine's state: =IDLE=, =RECO
 ** bindHotkeys(mapping) / start() / stop()
 
 =bindHotkeys= takes any of =transcribeToggle=, =transcribeToClipboardToggle=,
-=transcribeToProcessorToggle=, =languageSelect=, =languageNext=, =filterSelect=,
+=transcribeToProcessorToggle=, =languageSelect=, =languageNext=, =translateToggle=,
+=filterSelect=,
 =processorSelect=, =chunkInsertToggle=, =transcribeAgain= and =transcribeAbort=, each
 holding =[[modifiers], key]=. All are optional. =transcribeToggle= and
 =transcribeToClipboardToggle= both call =transcribeToggle()=, with and without the argument
@@ -612,7 +653,8 @@ block Hammerspoon. A key pressed in that window is answered rather than ignored.
 All on =config=.
 
 #+begin_src js   :exports both
-languages: ["en"]            // offered by languageSelect; the first is selected at startup
+languages: ["en"]            // offered by languageSelect, then "auto"; the first is selected at startup
+translate: false             // translate into English instead of transcribing
 recorder: "sox"              // "sox" | "streaming"
 transcriber: "whispercli"    // "whispercli" | "whisperkit" | "whisperserver"
 
