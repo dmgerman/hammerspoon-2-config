@@ -465,7 +465,7 @@ const readers = {
          *
          * @example
          * interactive.define({
-         *     name: "system-volume",
+         *     name: "system-volume-set",
          *     interactive: [{
          *         name: "volume (0-100)",
          *         reader: interactive.readers.number.ranged({
@@ -998,7 +998,7 @@ function record(name, state, ms, error) {
  * directories exist, and what they are called, is the configuration's to decide, so
  * `init.js` adds them:
  *
- *     interactive.searchPath.push("dmgSpoons")
+ *     interactive.searchPath.push("mySpoons")
  */
 const searchPath = ["Spoons"]
 
@@ -1154,7 +1154,7 @@ function init() {
     })
 
     define({
-        name: "commands-describe-key",
+        name: "commands-key-describe",
         doc: "Report which command a chord runs.",
         interactive: [{ name: "chord", reader: readers.string.prompted }],
         fn: (chord) => {
@@ -1165,7 +1165,7 @@ function init() {
     })
 
     define({
-        name: "commands-set-order",
+        name: "commands-order-set",
         doc: "Choose how the command chooser orders commands.",
         interactive: [{
             name: "order",
@@ -1193,7 +1193,7 @@ function init() {
     })
 
     define({
-        name: "commands-list-bindings",
+        name: "commands-bindings-list",
         doc: "Log every key binding and the command it runs.",
         fn: () => {
             for (const b of bindings()) console.log(`[hs_interactive-gt] ${b.chord}  ${b.command}`)

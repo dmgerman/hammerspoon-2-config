@@ -119,7 +119,7 @@ way.
 
 #+begin_src js   :exports both
 interactive.define({
-    name: "menubar-interactive",
+    name: "menubar-choose",
     doc:  "Choose a macOS menu bar extra and press it.",
     // This command opens a chooser, so it waits for the command chooser to close first.
     runDelay: 0.05,
@@ -232,7 +232,7 @@ function returning the value to offer, which may be omitted and may return null.
 
 #+begin_src js   :exports both
 interactive.define({
-    name: "system-volume",
+    name: "system-volume-set",
     doc:  "Set the system's output volume, as a percentage.",
     interactive: [{
         name: "volume (0-100)",
@@ -427,7 +427,7 @@ interactive.commands()                    // in the configured order
 interactive.commands("alphabetic")        // in a given order, whatever the setting
 #+end_src
 
-Or change it from the chooser itself, with the built-in =commands-set-order=.
+Or change it from the chooser itself, with the built-in =commands-order-set=.
 
 Only invocations by name are recorded: from the chooser, or through =call= and
 =callInteractively=. Invoking a command from a key does not change its position, so the
@@ -490,7 +490,7 @@ loads from the first one that holds the Spoon:
 
 #+begin_src js   :exports both
 interactive.searchPath              // ["Spoons"]
-interactive.searchPath.push("dmgSpoons")
+interactive.searchPath.push("mySpoons")
 #+end_src
 
 =Spoons/= alone by default, since that is where Hammerspoon 2 itself looks. Which further
@@ -605,9 +605,9 @@ that.
 | Command                  | Does                                          |
 |--------------------------+-----------------------------------------------|
 | =commands-execute=       | Chooses a command by name and runs it.        |
-| =commands-set-order=     | Sets =mru= or =alphabetic= ordering.          |
-| =commands-describe-key=  | Reports which command a key runs.             |
-| =commands-list-bindings= | Logs every binding and the command it runs.   |
+| =commands-order-set=     | Sets =mru= or =alphabetic= ordering.          |
+| =commands-key-describe=  | Reports which command a key runs.             |
+| =commands-bindings-list= | Logs every binding and the command it runs.   |
 | =spoons-list=            | Logs the outcome of every =use()= call.       |
 
 These names are an exception to the prefix rule described under /Naming a command that

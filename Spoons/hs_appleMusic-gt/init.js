@@ -11,9 +11,9 @@
 // album is then chosen by identifier rather than by whichever card came first, which is
 // what kept turning a plain album into its deluxe edition.
 
-// Commands go through dmg-libs/shell.js, whose result has the same shape whether the
+// Commands go through ../lib/shell.js, whose result has the same shape whether the
 // command succeeds, fails or cannot be started.
-const shell = require(hs.appinfo.configDir + "/dmg-libs/shell.js")
+const shell = require(__dirname + "/../lib/shell.js")
 
 // MARK: - User-configurable settings
 

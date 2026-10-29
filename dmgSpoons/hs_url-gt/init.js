@@ -14,9 +14,9 @@
 // Decoders run before either route, since they repair the URL itself rather than decide
 // where it goes.
 
-// Commands go through dmg-libs/shell.js, whose result has the same shape whether the
+// Commands go through Spoons/lib/shell.js, whose result has the same shape whether the
 // command succeeds, fails or cannot be started.
-const shell = require(hs.appinfo.configDir + "/dmg-libs/shell.js")
+const shell = require(hs.appinfo.configDir + "/Spoons/lib/shell.js")
 
 // MARK: - User-configurable settings
 

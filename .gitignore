@@ -16,7 +16,7 @@ ai/
 # npm packages, and the single-file bundles bundle.js builds from them. Both are products
 # of `npm install` and `npm run bundle`; package.json records what to rebuild from.
 node_modules/
-lib/
+/lib/
 
 # Emacs backups
 *~

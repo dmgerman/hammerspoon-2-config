@@ -7,9 +7,9 @@
 //     const kitty = hs.loadSpoon("hs_kitty-gt")
 //     kitty.chooseTab()                      // pick a tab from a chooser
 //     kitty.tabs()                           // what is open, most recently used first
-//     kitty.focusTab("neon")                 // by title
-//     kitty.newTab("neon", "autossh neon")   // create one, optionally running something
-//     kitty.goToTab("neon", "autossh neon")  // focus it, creating it if it is not there
+//     kitty.focusTab("logs")                                   // by title
+//     kitty.newTab("logs", "tail -f /var/log/system.log")      // create one, optionally running something
+//     kitty.goToTab("logs", "tail -f /var/log/system.log")     // focus it, creating it if it is not there
 //
 // A port of the Hammerspoon 1 hs_kitty Spoon, which was itself a port of kitty.el. Only
 // the parts concerned with tabs are here. Creating particular tabs — a tab holding an ssh

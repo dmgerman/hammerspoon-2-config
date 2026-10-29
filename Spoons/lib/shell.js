@@ -1,4 +1,5 @@
-// Running external commands, resolving to one result shape.
+// Running external commands, resolving to one result shape. Shared by the Spoons in this
+// directory, which load it with require(__dirname + "/../lib/shell.js").
 //
 // Nothing here rejects. A command that cannot be started, or that exits non-zero, resolves
 // with a non-zero `code` and whatever output arrived, so a caller reads one shape in all
@@ -9,8 +10,7 @@
 // This module began as a workaround for upstream #267: hs.task kept no reference to a
 // running task, so a garbage collection killed the child and left hs.task.shell()'s promise
 // pending for good. That was fixed in 58f4e39f, which keeps a running task alive until it
-// terminates, so tasks are no longer held here. ai/resolved_issue_267_task-gc.md has the
-// report.
+// terminates, so tasks are no longer held here.
 
 /**
  * Run a command, resolving to its output and exit code.

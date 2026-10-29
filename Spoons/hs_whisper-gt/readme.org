@@ -267,13 +267,20 @@ and the Spoon connects to it over a WebSocket on =config.streamingUrl=
    it do not. Measured on 2026-10-15: the built-in microphone opened in 0.03 s.
 
 It needs =pip install numpy sounddevice scipy torch torchaudio websockets= in the Python that
-the LaunchAgent runs, =~/.config/dmg/python/bin/python3=:
+the LaunchAgent runs. Check that Python with:
 
 #+begin_src sh   :exports both
-~/.config/dmg/python/bin/python3 whisper_stream.py --check-deps
+/path/to/python3 whisper_stream.py --check-deps
 #+end_src
 
-The LaunchAgent is =launchd/org.turingmachine.whisper-stream.plist=. Install it once:
+The LaunchAgent is =launchd/org.turingmachine.whisper-stream.plist=. It is written for its
+author's machine and names paths under =/Users/dmg= in five places: the Python, the path to
+=whisper_stream.py=, the =PATH= and =HOME= in its environment, and the two log files. Change
+them to your own before installing it. The Python must be the one you installed the packages
+into. =makefile= and =tests/lib/hs2.sh= name the same Python
+as their default; set =PYTHON= to override it, as in =make PYTHON=/path/to/python3=.
+
+Install the LaunchAgent once:
 
 #+begin_src sh   :exports both
 cp launchd/org.turingmachine.whisper-stream.plist ~/Library/LaunchAgents/
@@ -363,7 +370,7 @@ the first chunk, the Spoon sends the server a quarter of a second of silence
 
 A recorder or transcriber that cannot be used does not leave the Spoon unusable. =streaming=
 falls back to =sox=, and =whisperkit= and =whisperserver= fall back to =whispercli=. The
-fallback is reported, so it is clear which one is actually in use; =whisper-diagnose= also
+fallback is reported, so it is clear which one is actually in use; =diagnose()= also
 says.
 
 * Filters
@@ -727,7 +734,7 @@ object would silently replace the whole object and discard every other default i
 
 * Troubleshooting
 
-Start with =whisper-diagnose=, or =whisper.diagnose()=. It reports both permissions, which
+Start with =diagnose()=. It reports both permissions, which
 backends are actually in use rather than which were asked for, and whether any task or timer
 is being leaked.
 
@@ -763,12 +770,12 @@ the default input in *System Settings → Sound* also closes it, because the ser
 
 ** The streaming server cannot be reached
 
-=whisper-diagnose= says whether the Spoon is connected. If it is not:
+=diagnose()= says whether the Spoon is connected. If it is not:
 
 #+begin_src sh   :exports both
 launchctl print gui/$(id -u)/org.turingmachine.whisper-stream | grep -E 'state|pid'
 tail ~/Library/Logs/whisper-stream.log
-~/.config/dmg/python/bin/python3 whisper_stream.py --check-deps
+/path/to/python3 whisper_stream.py --check-deps
 #+end_src
 
 The log's first line after a start is ={"status": "listening", "port": 12341, ...}=, written

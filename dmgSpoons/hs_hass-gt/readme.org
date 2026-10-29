@@ -97,7 +97,7 @@ Switching it on takes a few seconds to appear, so =marantzEnsureOn()= selects it
 * Commands
 
 =init.js= defines these, so they are reachable from the command chooser, from a key, and
-from a menu: =hass-office-brightness= (prompts for 1 to 255), =hass-office-on=,
+from a menu: =hass-office-brightness-set= (prompts for 1 to 255), =hass-office-on=,
 =hass-office-off=, =hass-office-toggle=, =hass-teac-toggle=, =hass-teac-volume-up=,
 =hass-teac-volume-down=, =hass-marantz-toggle=, =hass-marantz-select= and
 =hass-desk-amps-toggle=.

@@ -437,8 +437,8 @@ function describeEntry(entry) {
 // empty; two items here were empty for that reason. The function is held here and is simply
 // called.
 //
-// instrument() must run before the Spoons that create items do, which is why this Spoon is
-// loaded first in init.js.
+// instrument() must run before the Spoons that create items do, so this Spoon has to be
+// loaded before them.
 
 // One record per item that still exists.
 const ownRecords = []
@@ -1412,7 +1412,7 @@ function list(deep) {
 // No watcher, no cache and no command defined per extra. The one thing start() does is wrap
 // hs.menubar, which has to happen before any other Spoon creates an item: a menu registered
 // before the wrapping is in place is not recorded, and that item falls back to being read
-// through accessibility. This Spoon is therefore loaded first in init.js.
+// through accessibility. This Spoon therefore has to be loaded before the others.
 
 function start() {
     instrument()

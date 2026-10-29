@@ -30,10 +30,10 @@
 // read by 10 ms and called that async, so Hammerspoon froze for the length of every
 // transcription. Here a transcriber returns a promise and the state machine awaits it.
 //
-// Commands run through dmg-libs/shell.js, whose result has the same shape whether the
+// Commands run through ../lib/shell.js, whose result has the same shape whether the
 // command succeeds, fails or cannot be started.
 
-const shell = require(hs.appinfo.configDir + "/dmg-libs/shell.js")
+const shell = require(__dirname + "/../lib/shell.js")
 
 // MARK: - User-configurable settings
 

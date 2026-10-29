@@ -10,8 +10,7 @@
 //     sw.selectApp()                       // one window per application
 //     sw.selectPreviousWindow()            // straight to the last used, no chooser
 //
-// No keys are bound. bindHotkeys() is available for a caller that wants them, and the
-// commands are meant to be reached from hs_interactive-gt in this configuration.
+// No keys are bound. bindHotkeys() is available for a caller that wants them.
 //
 // Both the list of windows and their order come from hs_windowfilter-gt. That Spoon already
 // tracks every window and holds its title, application, screen and flags, kept current by

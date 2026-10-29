@@ -37,7 +37,7 @@ interactive.use("hs_menubar-gt", {
         // quick; the second also offers what is inside each of their menus, which means
         // reading every menu and takes a few seconds.
         interactive.define({
-            name: "menubar-interactive",
+            name: "menubar-choose",
             doc: "Choose a macOS menu bar icon and open it.",
             // This command opens a chooser, so it waits for the command chooser to close
             // first. Created while that one is still closing, its own chooser does not hold
@@ -47,7 +47,7 @@ interactive.use("hs_menubar-gt", {
         });
 
         interactive.define({
-            name: "menubar-interactive-deep",
+            name: "menubar-choose-deep",
             doc: "Choose a macOS menu bar icon or any entry inside its menu. Slower: every menu is read.",
             runDelay: 0.05,
             fn: () => menubar.choose(true)
@@ -68,8 +68,8 @@ interactive.use("hs_menubar-gt", {
         });
     },
     keys: {
-        "cmd-ctrl-alt-shift m": "menubar-interactive",
-        "cmd-ctrl-alt-shift n": "menubar-interactive-deep",
+        "cmd-ctrl-alt-shift m": "menubar-choose",
+        "cmd-ctrl-alt-shift n": "menubar-choose-deep",
         "cmd-ctrl-alt-shift b": "menubar-peek"
     }
 });
@@ -113,7 +113,7 @@ interactive.use("hs_countdown-gt", {
         });
 
         interactive.define({
-            name: "countdown-set-progress",
+            name: "countdown-progress-set",
             doc: "Move the running countdown to a point in its progress, 0.0 to 1.0.",
             interactive: [{ name: "progress", reader: interactive.readers.number.prompted, default: 0.5 }],
             fn: (progress) => countDown.setProgress(progress)
@@ -152,7 +152,7 @@ interactive.use("hs_time-gt", {
         });
 
         interactive.define({
-            name: "time-set-format",
+            name: "time-format-set",
             doc: "Change the clock's time format, in strftime terms such as %H:%M:%S.",
             interactive: [{ name: "format", reader: interactive.readers.string.prompted, default: "%H:%M" }],
             fn: (format) => {
@@ -174,7 +174,7 @@ interactive.use("hs_network-gt", {
 
         // No Shortcut for the network's name: hs.wifi reads it directly.
         //
-        // The Spoon runs the dmg-ssid Shortcut because macOS treats an SSID as location data
+        // The Spoon runs a Shortcut by default because macOS treats an SSID as location data
         // and hs.wifi returns null for it until Location Services is authorized. That
         // authorization has now been granted to Hammerspoon 2, so hs.wifi.currentNetwork()
         // answers and the Shortcut is redundant. Both returned "shonan-village-center" when
@@ -196,7 +196,7 @@ interactive.use("hs_network-gt", {
             network.networkName().then((name) => name ? fn(name) : "no network");
 
         interactive.define({
-            name: "network-show-name",
+            name: "network-name-show",
             doc: "Show the name of the current network, whether or not it is ignored.",
             fn: () => network.networkNameShow(true)
         });
@@ -214,7 +214,7 @@ interactive.use("hs_network-gt", {
         });
 
         interactive.define({
-            name: "network-set-delta",
+            name: "network-delta-set",
             doc: "Alert every this many MB consumed on the current network, replacing its other thresholds. 0 stops the alerts.",
             interactive: [{ name: "megabytes", reader: interactive.readers.number.prompted, default: 100 }],
             fn: (megabytes) => network.networkName().then((name) => name
@@ -223,7 +223,7 @@ interactive.use("hs_network-gt", {
         });
 
         interactive.define({
-            name: "network-set-cap",
+            name: "network-cap-set",
             doc: "Alert once when this many MB have been consumed on the current network this session, replacing its other thresholds. 0 removes the cap.",
             interactive: [{ name: "megabytes", reader: interactive.readers.number.prompted, default: 1024 }],
             fn: (megabytes) => network.networkName().then((name) => name
@@ -266,7 +266,7 @@ interactive.use("hs_network-gt", {
 interactive.use("hs_kitty-gt", {
     commands: (interactive, kitty) => {
         interactive.define({
-            name: "kitty-tab-interactive",
+            name: "kitty-tab-choose",
             doc: "Choose one of kitty's tabs and switch to it.",
             // Opens a chooser, so it waits for the command chooser to close first.
             runDelay: 0.05,
@@ -302,7 +302,7 @@ interactive.use("hs_kitty-gt", {
             "autossh neon");
     },
     keys: {
-        "cmd-ctrl-alt k": "kitty-tab-interactive"
+        "cmd-ctrl-alt k": "kitty-tab-choose"
     }
 });
 
@@ -380,7 +380,7 @@ interactive.use("hs_clipboard-gt", {
         });
 
         interactive.define({
-            name: "clipboard-delete-last",
+            name: "clipboard-last-delete",
             doc: "Drop the newest entry, for when something was copied that should not have been.",
             fn: () => clipboard.historyLastDelete()
         });
@@ -403,9 +403,9 @@ interactive.use("hs_clipboard-gt", {
 // Stream Deck by hs_streamdeck-gt. Editing menus.js takes effect on the next reload.
 const menus = require(hs.appinfo.configDir + "/menus.js");
 
-// Commands go through dmg-libs/shell.js, whose result has the same shape whether the
+// Commands go through Spoons/lib/shell.js, whose result has the same shape whether the
 // command succeeds, fails or cannot be started.
-const shell = require(hs.appinfo.configDir + "/dmg-libs/shell.js");
+const shell = require(hs.appinfo.configDir + "/Spoons/lib/shell.js");
 
 // Runs a hs_interactive-gt command named in a dictation; used as a hs_whisper-gt processor.
 const voiceCommands = require(hs.appinfo.configDir + "/dmg-libs/voice-commands.js");
@@ -483,7 +483,7 @@ interactive.use("hs_emacs-gt", {
         });
 
         interactive.define({
-            name: "emacs-toggle-keys",
+            name: "emacs-keys-toggle",
             doc: "Turn the keys forwarded to Emacs on or off.",
             fn: () => emacs.toggleAllKeys()
         });
@@ -543,28 +543,28 @@ interactive.use("hs_appleMusic-gt", {
         command("appleMusic-pause", "Pause Apple Music, if it is playing.", () => {
             if (music.isPlaying()) music.togglePlayPause();
         });
-        command("appleMusic-next-track", "Skip to the next track.", () => music.nextTrack());
-        command("appleMusic-previous-track", "Go back to the previous track.", () => music.previousTrack());
-        command("appleMusic-next-album", "Skip forward to the next album.", () => music.nextAlbum());
-        command("appleMusic-previous-album", "Skip back to the previous album.", () => music.previousAlbum());
-        command("appleMusic-now-playing", "Show the track playing, and copy it.", () => music.showCurrentTrack());
-        command("appleMusic-volume", "Show Apple Music's volume.", () => music.showVolume());
+        command("appleMusic-track-next", "Skip to the next track.", () => music.nextTrack());
+        command("appleMusic-track-previous", "Go back to the previous track.", () => music.previousTrack());
+        command("appleMusic-album-next", "Skip forward to the next album.", () => music.nextAlbum());
+        command("appleMusic-album-previous", "Skip back to the previous album.", () => music.previousAlbum());
+        command("appleMusic-track-current-show", "Show the track playing, and copy it.", () => music.showCurrentTrack());
+        command("appleMusic-volume-show", "Show Apple Music's volume.", () => music.showVolume());
         command("appleMusic-focus", "Bring Apple Music forward.", () => music.focus());
-        command("appleMusic-random-album", "Play a random album from the list.", () => music.playRandomAlbum());
+        command("appleMusic-album-random-play", "Play a random album from the list.", () => music.playRandomAlbum());
         interactive.define({
-            name: "appleMusic-choose-album",
+            name: "appleMusic-album-choose",
             doc: "Choose an album from the list and play it.",
             // Opens a chooser, so it waits for the command chooser to close first.
             runDelay: 0.05,
             fn: () => music.chooseAlbum()
         });
-        command("appleMusic-add-current-album", "Add the album playing to the list.", () => music.addCurrentAlbum());
-        command("appleMusic-toggle-auto-play", "Turn auto-play on or off.", () => music.toggleAutoPlay());
+        command("appleMusic-album-current-add-to-music-file", "Add the album playing to the list.", () => music.addCurrentAlbum());
+        command("appleMusic-auto-play-toggle", "Turn auto-play on or off.", () => music.toggleAutoPlay());
 
         // The system's output volume, not Music's own. The prompt opens showing the volume
         // now, and refuses anything outside 0 to 100 rather than clamping it silently.
         interactive.define({
-            name: "system-volume",
+            name: "system-volume-set",
             doc: "Set the system's output volume, as a percentage.",
             interactive: [{
                 name: "volume (0-100)",
@@ -592,21 +592,21 @@ interactive.use("hs_appleMusic-gt", {
         });
 
         interactive.define({
-            name: "appleMusic-adjust-volume",
+            name: "appleMusic-volume-adjust",
             doc: "Change Apple Music's volume by an amount, which may be negative.",
             interactive: [{ name: "delta", reader: interactive.readers.number.prompted, default: 10 }],
             fn: (delta) => music.adjustVolume(delta)
         });
 
         interactive.define({
-            name: "appleMusic-set-volume",
+            name: "appleMusic-volume-set",
             doc: "Set Apple Music's volume, 0 to 100.",
             interactive: [{ name: "level", reader: interactive.readers.number.prompted, default: 50 }],
             fn: (level) => music.setVolume(level)
         });
 
         interactive.define({
-            name: "appleMusic-play-album",
+            name: "appleMusic-album-play",
             doc: "Play an album, given the band and the album.",
             interactive: [
                 { name: "band", reader: interactive.readers.string.prompted },
@@ -619,7 +619,7 @@ interactive.use("hs_appleMusic-gt", {
 
 // Ported from dmg-url.lua. Loaded after hs_emacs-gt, which it reaches through hs.spoons
 // for the "emacs" route and for add-video. Its start() claims http and https, so loading
-// it is what puts Hammerspoon 2 in charge of links; url-restore-default-browser gives
+// it is what puts Hammerspoon 2 in charge of links; url-default-browser-restore gives
 // them back.
 interactive.use("hs_url-gt", {
     commands: (interactive, url) => {
@@ -657,13 +657,13 @@ interactive.use("hs_url-gt", {
         });
 
         interactive.define({
-            name: "url-become-default-browser",
+            name: "url-default-browser-set",
             doc: "Make Hammerspoon 2 the system handler for http and https.",
             fn: () => url.setAsDefaultBrowser()
         });
 
         interactive.define({
-            name: "url-restore-default-browser",
+            name: "url-default-browser-restore",
             doc: "Give http and https back to the handler displaced earlier.",
             interactive: [{ name: "bundleID", reader: interactive.readers.string.prompted, optional: true, default: "org.hammerspoon.Hammerspoon" }],
             fn: (bundleID) => url.restoreDefaultBrowser(bundleID)
@@ -674,7 +674,7 @@ interactive.use("hs_url-gt", {
 interactive.use("hs_hass-gt", {
     commands: (interactive, hass) => {
         interactive.define({
-            name: "hass-office-brightness",
+            name: "hass-office-brightness-set",
             doc: "Set the office dimmer to a brightness, 1 to 255.",
             interactive: [{ name: "brightness", reader: interactive.readers.number.prompted, default: 128 }],
             fn: (brightness) => hass.officeDimmerOn(brightness)
@@ -844,16 +844,16 @@ interactive.use("hs_window-gt", {
         onWindow("window-move-up", "Move a window up by its own height.", (w) => win.moveByOwnSize("up", w));
         onWindow("window-move-down", "Move a window down by its own height.", (w) => win.moveByOwnSize("down", w));
 
-        onWindow("window-next-screen", "Move a window to the next screen.", (w) => win.moveToScreen("next", w));
-        onWindow("window-previous-screen", "Move a window to the previous screen.", (w) => win.moveToScreen("previous", w));
+        onWindow("window-screen-next", "Move a window to the next screen.", (w) => win.moveToScreen("next", w));
+        onWindow("window-screen-previous", "Move a window to the previous screen.", (w) => win.moveToScreen("previous", w));
         onWindow("window-swap-behind", "Swap a window's position with the window behind it.", (w) => win.swapWithPrevious(w));
         onWindow("window-send-to-back", "Put a window behind all the others.", (w) => win.sendToBack(w));
         onWindow("mouse-window-center", "Put the pointer in the middle of a window.", (w) => win.mouseWindowCenter(w));
-        onWindow("window-info", "Show the application, title, screen and frame of a window.", (w) => win.info(w));
+        onWindow("window-info-show", "Show the application, title, screen and frame of a window.", (w) => win.info(w));
 
         onWindow("window-screenshot", "Copy a window to the clipboard and save it as a PNG.", (w) => win.screenshot(w));
 
-        onWindow("window-toggle-fullscreen", "Enter or leave fullscreen for a window.", (w) => w.toggleFullscreen());
+        onWindow("window-fullscreen-toggle", "Enter or leave fullscreen for a window.", (w) => w.toggleFullscreen());
         onWindow("window-minimize", "Minimize a window.", (w) => w.minimize());
 
         // Two windows at a time. The second is always asked for, and the window the command
@@ -916,7 +916,7 @@ interactive.use("hs_window-gt", {
                  (w) => win.attachKeyToWindow(w));
 
         interactive.define({
-            name: "window-detach-keys",
+            name: "window-keys-detach",
             doc: "Release every number key a window has been attached to.",
             fn: () => win.detachAllKeys()
         });
@@ -928,7 +928,7 @@ interactive.use("hs_window-gt", {
         });
 
         interactive.define({
-            name: "window-toggle-isolation",
+            name: "window-isolation-toggle",
             doc: "Dim everything except the focused window, or stop dimming.",
             fn: () => win.toggleIsolation()
         });
@@ -1169,7 +1169,7 @@ interactive.use("hs_whisper-gt", {
         // Japanese is translated often enough to deserve its own command. The language and
         // output selected in the Spoon's menu are left as they were.
         interactive.define({
-            name: "dmg-whisper-translate-from-japanese",
+            name: "whisper-translate-from-japanese-toggle",
             doc: "Start dictating in Japanese, or stop and paste the English translation.",
             fn: () => whisper.transcribeToggle(true, { lang: "ja", translate: true })
         });
@@ -1366,7 +1366,7 @@ interactive.use("hs_sidecar-gt", {
 });
 
 interactive.define({
-    name: "paste",
+    name: "keyboard-paste-simulate",
     doc: "Send cmd-v to the focused application.",
     fn: () => hs.eventtap.keyStroke(["cmd"], "v")
 });

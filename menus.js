@@ -88,9 +88,9 @@ const busMenu = [
 // The menu stays displayed after a press, since lights and volume are usually adjusted
 // several times in a row. Leave with Back on the deck, or Delete or Escape on screen.
 const hassMenu = [
-    { label: "On 100%", key: "1", command: "hass-office-brightness", args: [250] },
-    { label: "On 50%", key: "2", command: "hass-office-brightness", args: [128] },
-    { label: "On 1%", key: "3", command: "hass-office-brightness", args: [1] },
+    { label: "On 100%", key: "1", command: "hass-office-brightness-set", args: [250] },
+    { label: "On 50%", key: "2", command: "hass-office-brightness-set", args: [128] },
+    { label: "On 1%", key: "3", command: "hass-office-brightness-set", args: [1] },
     { label: "On", key: "o", command: "hass-office-on" },
     { label: "Off", key: "f", command: "hass-office-off" },
     { label: "Toggle", key: "g", command: "hass-office-toggle" },
@@ -278,7 +278,7 @@ const windowMenu = {
         { label: "Left half", icon: "symbol:rectangle.lefthalf.filled", key: "h", command: "window-left-half" },
         { label: "Right half", icon: "symbol:rectangle.righthalf.filled", key: "l", command: "window-right-half" },
         { label: "Centre", icon: "symbol:rectangle.center.inset.filled", key: "c", command: "window-center" },
-        { label: "Fullscreen", icon: "symbol:arrow.up.left.and.down.right.magnifyingglass", key: "f", command: "window-toggle-fullscreen" },
+        { label: "Fullscreen", icon: "symbol:arrow.up.left.and.down.right.magnifyingglass", key: "f", command: "window-fullscreen-toggle" },
         { label: "Minimize", icon: "symbol:arrow.down.right.and.arrow.up.left", key: "n", command: "window-minimize" },
 
         { label: "Vert max", icon: "symbol:arrow.up.and.down", key: "V", command: "window-vertical-maximize" },
@@ -292,8 +292,8 @@ const windowMenu = {
         { label: "Move down", icon: "symbol:arrow.down", key: "down", command: "window-move-down" },
 
         { label: "To screen", icon: "symbol:display.2", key: "s", command: "window-move-to-screen" },
-        { label: "Next screen", icon: "symbol:rectangle.on.rectangle", key: "space", command: "window-next-screen" },
-        { label: "Prev screen", icon: "symbol:rectangle.on.rectangle", key: "B", command: "window-previous-screen" },
+        { label: "Next screen", icon: "symbol:rectangle.on.rectangle", key: "space", command: "window-screen-next" },
+        { label: "Prev screen", icon: "symbol:rectangle.on.rectangle", key: "B", command: "window-screen-previous" },
 
         { label: "Swap behind", icon: "symbol:arrow.left.arrow.right", key: "S", command: "window-swap-behind" },
         // Both ask for the second window, so both stay drawn while the chooser is
@@ -303,8 +303,8 @@ const windowMenu = {
         { label: "To back", icon: "symbol:square.on.square", key: "0", command: "window-send-to-back" },
         { label: "Prev window", icon: "symbol:arrow.uturn.left", key: "p", command: "window-previous" },
 
-        { label: "Isolate", icon: "symbol:moon.fill", key: "I", command: "window-toggle-isolation" },
-        { label: "Info", icon: "symbol:info.circle", key: "i", command: "window-info" },
+        { label: "Isolate", icon: "symbol:moon.fill", key: "I", command: "window-isolation-toggle" },
+        { label: "Info", icon: "symbol:info.circle", key: "i", command: "window-info-show" },
         { label: "Screenshot", icon: "symbol:camera", key: "P", command: "window-screenshot" },
         { label: "Centre mouse", icon: "symbol:cursorarrow", key: "M", command: "mouse-window-center" },
         { label: "Mouse next", icon: "symbol:cursorarrow.motionlines", key: "N", command: "mouse-screen-center-next" },
@@ -398,7 +398,7 @@ const clipboardMenu = [
         command: "clipboard-show", navigate: "stay", keepOpen: false
     },
     stays({ label: "Paste-on-select", icon: "symbol:arrow.down.doc", key: "s", command: "clipboard-paste-on-select-toggle" }),
-    stays({ label: "Drop last", icon: "symbol:delete.left", key: "d", command: "clipboard-delete-last" }),
+    stays({ label: "Drop last", icon: "symbol:delete.left", key: "d", command: "clipboard-last-delete" }),
     stays({ label: "Clear all", icon: "symbol:trash", key: "c", command: "clipboard-clear" })
 ]
 
@@ -412,7 +412,7 @@ const whisperMenu = [
     { label: "Dictate", icon: "whisper.png", key: "t", command: "whisper-transcribe-toggle" },
     { label: "To clipboard", icon: "symbol:doc.on.clipboard", key: "c", command: "whisper-transcribe-to-clipboard-toggle" },
     { label: "To processor", icon: "symbol:gearshape.2", key: "p", command: "whisper-transcribe-to-processor-toggle" },
-    { label: "Japanese → English", icon: "symbol:character.bubble", key: "j", command: "dmg-whisper-translate-from-japanese" },
+    { label: "Japanese → English", icon: "symbol:character.bubble", key: "j", command: "whisper-translate-from-japanese-toggle" },
     { label: "Abort", icon: "symbol:xmark.circle", key: "a", command: "whisper-transcribe-abort" },
     { label: "Again", icon: "symbol:arrow.clockwise", key: "g", command: "whisper-transcribe-again" },
 
@@ -442,21 +442,21 @@ const whisperMenu = [
 // u/U for a coarse and a fine volume rise, d/D for the fall.
 const musicMenu = [
     { label: "Play/Pause", icon: "symbol:playpause.fill", key: "p", command: "appleMusic-play-pause", keepOpen: false },
-    { label: "Prev track", icon: "symbol:backward.fill", key: "b", command: "appleMusic-previous-track" },
-    { label: "Next track", icon: "symbol:forward.fill", key: "n", command: "appleMusic-next-track" },
-    { label: "Prev album", icon: "symbol:backward.end.fill", key: "B", command: "appleMusic-previous-album" },
-    { label: "Next album", icon: "symbol:forward.end.fill", key: "N", command: "appleMusic-next-album" },
-    { label: "Now playing", icon: "symbol:info.circle", key: "i", command: "appleMusic-now-playing", keepOpen: false },
+    { label: "Prev track", icon: "symbol:backward.fill", key: "b", command: "appleMusic-track-previous" },
+    { label: "Next track", icon: "symbol:forward.fill", key: "n", command: "appleMusic-track-next" },
+    { label: "Prev album", icon: "symbol:backward.end.fill", key: "B", command: "appleMusic-album-previous" },
+    { label: "Next album", icon: "symbol:forward.end.fill", key: "N", command: "appleMusic-album-next" },
+    { label: "Now playing", icon: "symbol:info.circle", key: "i", command: "appleMusic-track-current-show", keepOpen: false },
 
-    { label: "Volume", icon: "symbol:speaker.wave.2", key: "v", command: "appleMusic-volume" },
-    { label: "Vol +20", icon: "symbol:speaker.plus.fill", key: "u", command: "appleMusic-adjust-volume", args: [20] },
-    { label: "Vol −20", icon: "symbol:speaker.minus.fill", key: "d", command: "appleMusic-adjust-volume", args: [-20] },
-    { label: "Vol +5", icon: "symbol:speaker.plus", key: "U", command: "appleMusic-adjust-volume", args: [5] },
-    { label: "Vol −5", icon: "symbol:speaker.minus", key: "D", command: "appleMusic-adjust-volume", args: [-5] },
+    { label: "Volume", icon: "symbol:speaker.wave.2", key: "v", command: "appleMusic-volume-show" },
+    { label: "Vol +20", icon: "symbol:speaker.plus.fill", key: "u", command: "appleMusic-volume-adjust", args: [20] },
+    { label: "Vol −20", icon: "symbol:speaker.minus.fill", key: "d", command: "appleMusic-volume-adjust", args: [-20] },
+    { label: "Vol +5", icon: "symbol:speaker.plus", key: "U", command: "appleMusic-volume-adjust", args: [5] },
+    { label: "Vol −5", icon: "symbol:speaker.minus", key: "D", command: "appleMusic-volume-adjust", args: [-5] },
 
-    { label: "Random album", icon: "symbol:shuffle", key: "r", command: "appleMusic-random-album", keepOpen: false },
-    { label: "Add current", icon: "symbol:plus.circle", key: "a", command: "appleMusic-add-current-album" },
-    { label: "Auto-play", icon: "symbol:infinity", key: "t", command: "appleMusic-toggle-auto-play", keepOpen: false },
+    { label: "Random album", icon: "symbol:shuffle", key: "r", command: "appleMusic-album-random-play", keepOpen: false },
+    { label: "Add current", icon: "symbol:plus.circle", key: "a", command: "appleMusic-album-current-add-to-music-file" },
+    { label: "Auto-play", icon: "symbol:infinity", key: "t", command: "appleMusic-auto-play-toggle", keepOpen: false },
 
     // The exception to `stays`, and the case that separated the two questions: the chooser
     // takes the keyboard, so the on-screen menu has to close — but closing is all it should
@@ -464,7 +464,7 @@ const musicMenu = [
     // was, and the on-screen menu reopens here rather than at the root.
     {
         label: "Choose album", icon: "symbol:list.bullet", key: "c",
-        command: "appleMusic-choose-album", navigate: "stay", keepOpen: false
+        command: "appleMusic-album-choose", navigate: "stay", keepOpen: false
     },
     { label: "Music app", key: "m", app: "com.apple.Music", navigate: "stay", keepOpen: true },
 
@@ -536,7 +536,7 @@ const rootMenu = [
 
     { label: "Countdown", icon: "tomato.jpeg", key: "t", command: "countdown-start" },
     { label: "Whisper", icon: "whisper.png", key: "d", children: whisperMenu },
-    { label: "Paste", icon: "symbol:doc.on.clipboard", key: "v", command: "paste" },
+    { label: "Paste", icon: "symbol:doc.on.clipboard", key: "v", command: "keyboard-paste-simulate" },
 
     // Capital V, since v sends cmd-v: the same letter for the same subject.
     { label: "Clipboard", icon: "symbol:list.clipboard", key: "V", children: clipboardMenu },

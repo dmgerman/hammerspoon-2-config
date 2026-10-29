@@ -4,7 +4,8 @@ Spoons in this directory are written to be useful to anyone. They read their set
 a =config= object, take no personal detail from the machine they run on, and each has a
 readme of its own.
 
-Spoons written for one person's machine are in =../dmgSpoons/= instead.
+=lib/= holds code shared by several of them. A Spoon loads it with
+=require(__dirname + "/../lib/shell.js")=, so the Spoons and =lib/= must stay side by side.
 
 * What is here
 

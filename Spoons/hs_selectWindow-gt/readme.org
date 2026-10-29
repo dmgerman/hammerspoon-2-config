@@ -17,9 +17,6 @@ sw.selectApp()                     // choose an application, by its most recent 
 sw.selectPreviousWindow()          // switch to the last used window, with no chooser
 #+end_src
 
-In this configuration the same functions are available as commands, so they can be run from
-the command chooser or put in a menu without writing any JavaScript. See /Commands/ below.
-
 No keys are bound by default.
 
 * The chooser
@@ -145,23 +142,12 @@ sw.bindHotkeys({
 })
 #+end_src
 
-* Commands
+* selectPreviousWindow() and hs_window-gt's previousWindow()
 
-Defined in =init.js= rather than by the Spoon, and reachable from the command chooser.
-
-| Command                                    | Function                                |
-|--------------------------------------------+-----------------------------------------|
-| =window-select=                            | =selectWindow()=                        |
-| =window-select-in-application=             | =selectApplicationWindow()=             |
-| =window-select-application=                | =selectApp()=                           |
-| =window-select-previous=                   | =selectPreviousWindow()=                |
-| =window-select-previous-in-application=    | =selectPreviousApplicationWindow()=     |
-
-Note that =window-previous=, from
-[[file:../hs_window-gt/readme.org][hs_window-gt]], does something similar to
-=window-select-previous=. They differ in what they count: =window-previous= follows the
-focus history that Spoon records, while =window-select-previous= follows this Spoon's
-ordering, which also includes minimized windows and windows of hidden applications.
+=previousWindow()= in [[file:../hs_window-gt/readme.org][hs_window-gt]] does something similar
+to =selectPreviousWindow()=. They differ in what they count. =previousWindow()= follows the
+focus history that Spoon records. =selectPreviousWindow()= follows this Spoon's ordering,
+which also includes minimized windows and windows of hidden applications.
 
 * Settings
 

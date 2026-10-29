@@ -16,9 +16,9 @@ const kitty = hs.loadSpoon("hs_kitty-gt")
 
 kitty.chooseTab()                       // pick a tab from a chooser
 kitty.tabs()                            // what is open, most recently used first
-kitty.focusTab("neon")                  // by title
+kitty.focusTab("logs")                  // by title
 kitty.newTab("logs", "tail -f /var/log/system.log")
-kitty.goToTab("neon", "autossh neon")   // focus it, creating it if it is not there
+kitty.goToTab("logs", "tail -f /var/log/system.log")   // focus it, creating it if it is not there
 kitty.list()                            // the tabs as lines, for the console
 #+end_src
 
@@ -42,12 +42,11 @@ because the first row is the tab already in use.
 tabs a setup wants is defined in a configuration rather than in this Spoon.
 
 #+begin_src js   :exports both
-// In init.js: a tab holding an ssh tunnel, created on the first press and reached on later
-// ones.
+// A tab holding an ssh tunnel, created on the first press and reached on later ones.
 interactive.define({
-    name: "kitty-tab-neon",
-    doc:  "Switch to the neon tab, opening the tunnel if it is not there.",
-    fn:   () => kitty.goToTab("neon", "autossh neon")
+    name: "kitty-tab-db-tunnel",
+    doc:  "Switch to the database tunnel's tab, opening the tunnel if it is not there.",
+    fn:   () => kitty.goToTab("db-tunnel", "ssh -N -L 5432:localhost:5432 db.example.com")
 })
 #+end_src
 
@@ -133,23 +132,9 @@ a tab that should always be available.
 | =startRow=                    | =1=                         | which row to start on then; counts from 0 |
 | =logCommands=                 | =false=                     | log every kitty command and its duration |
 
-* Commands
-
-In this configuration, from =init.js=:
-
-| Command                 | Key   | Does                                      |
-|-------------------------+-------+-------------------------------------------|
-| =kitty-tab-interactive= | ⌘⌃⌥K  | choose a tab and switch to it             |
-| =kitty-tab-new=         |       | create a tab, asking for a title          |
-| =kitty-tab-list=        |       | list the tabs to the console              |
-| =kitty-tab-neon=        |       | switch to =neon=, opening the tunnel      |
-
-=⌥K= is separate and belongs to =hs_selectWindow-gt=: it switches to kitty as an
-application, and pressing it a second time returns to the previous application.
-
 * Not ported
 
 =executeInTab=, =sendTextToTabId=, the process inspection, =newOsWindow=, OS window
-switching, and the =connectToNeon= / =neLocal= / =neRemote= ssh layer. The last of those is
-specific to particular machines, and a tab holding a tunnel is reachable through
-=goToTab= instead.
+switching, and the functions that opened ssh connections to one particular host. Those last
+ones belonged to one machine, and a tab holding a tunnel is reachable through =goToTab=
+instead.

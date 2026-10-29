@@ -159,7 +159,7 @@ item. A Spoon loaded earlier registers its menu unrecorded, and its icon then fa
 being read through accessibility — which cannot see a menu built only on opening, and cannot
 reach an icon that is not on screen.
 
-In this configuration =hs_menubar-gt= is therefore the first =use()= in =init.js=.
+Load it, and call =start()=, before any other Spoon that creates a menu bar item.
 
 An icon whose menu is a plain array, such as Hammerspoon's own built-in one, is read through
 accessibility either way and does not depend on this.
@@ -410,19 +410,11 @@ list:
 mb.config.skipApplications.push("Control Center")
 #+end_src
 
-* Commands
+* Calling it from hs_interactive-gt
 
-In this configuration, from =init.js=:
-
-| Command                          | Key   | Does                                  |
-|----------------------------------+-------+---------------------------------------|
-| =menubar-interactive=            | ⇧⌃⌘M  | choose an icon and open it            |
-| =menubar-interactive-deep=       | ⇧⌃⌘N  | choose an icon or any entry in a menu |
-| =menubar-peek=                   | ⇧⌃⌘B  | show the icons that cannot be seen    |
-
-The first two set =runDelay= so they wait for the command chooser to close before opening
-their own; see the =hs_interactive-gt= readme for why. =menubar-peek= draws rather than
-opening a chooser, so it has nothing to wait for.
+A command that calls =choose()= should set =runDelay=, so that it waits for the command
+chooser to close before opening its own; see the =hs_interactive-gt= readme for why. =peek()=
+draws rather than opening a chooser, so a command that calls it has nothing to wait for.
 
 * Known rough edges
 

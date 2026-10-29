@@ -48,10 +48,11 @@
 ;; Hammerspoon 2 must have run `hs.ipc.start()`, and the client must be
 ;; installed with `hs.ipc.installBinary()` from the Hammerspoon console.
 ;;
-;; A Hammerspoon that does not answer must not stall Emacs, because the clock
-;; code in dmg-org-helpers calls it once a minute.  So every call has a time
-;; limit, and after `hammerspoon-failure-threshold' failures in a row the calls
-;; stop for `hammerspoon-cooldown' seconds.  `hammerspoon-reset' resumes them.
+;; A Hammerspoon that does not answer must not stall Emacs, because code that
+;; updates a status display can call it as often as once a minute.  So every
+;; call has a time limit, and after `hammerspoon-failure-threshold' failures in
+;; a row the calls stop for `hammerspoon-cooldown' seconds.  `hammerspoon-reset'
+;; resumes them.
 
 ;;; Code:
 

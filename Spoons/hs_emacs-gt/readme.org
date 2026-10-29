@@ -29,7 +29,7 @@ interactive.use("hs_emacs-gt", {
         interactive.define({
             name: "emacs-agenda",
             doc:  "Show the org agenda.",
-            fn:   () => emacs.executeAndRaise("(dmg-agenda)")
+            fn:   () => emacs.executeAndRaise("(org-agenda nil \"a\")")
         });
     }
 });

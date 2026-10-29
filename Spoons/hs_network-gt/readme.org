@@ -134,7 +134,7 @@ rest at each use.
 | Setting             | Default                    | Meaning                                            |
 |---------------------+----------------------------+----------------------------------------------------|
 | =ignoredNetworks=   | =[]=                       | Networks whose name is not announced.              |
-| =nameShortcut=      | ="dmg-ssid"=               | Shortcut run to read the network name. =null= to use =hs.wifi=, which needs Location Services. |
+| =nameShortcut=      | ="Wi-Fi Name"=             | Shortcut run to read the network name. =null= to use =hs.wifi=, which needs Location Services. |
 | =vpnServices=       | =[]=                       | VPN services that may be announced. =[]= accepts any. |
 | =pollSeconds=       | =15=                       | Seconds between traffic samples.                   |
 | =bannerInterval=    | =120=                      | Seconds between announcements. =0= for none.       |
@@ -216,7 +216,7 @@ just nothing — so =hs.wifi.currentNetwork()= cannot name the network.
 There are two ways round it, and which one applies is a permission decision rather than a
 code one.
 
-** Granting Location Services, which is what this configuration does
+** Granting Location Services
 
 #+begin_src js   :exports both
 hs.permissions.checkLocation()     // false until it has been granted
@@ -234,8 +234,8 @@ The permission is standing and belongs to Hammerspoon 2 as a whole, not to this 
 
 ** A Shortcut, which needs no permission
 
-=config.nameShortcut= names a Shortcut to run instead. The stock /Get current Wi-Fi network/
-action followed by /Get name of/ is enough to build one. macOS resolves the name on the
+=config.nameShortcut= names a Shortcut to run instead, /Wi-Fi Name/ by default. The stock
+/Get current Wi-Fi network/ action followed by /Get name of/ is enough to build one. macOS resolves the name on the
 caller's behalf, so no Location Services authorization is involved.
 
 It is not free. macOS shows the Shortcuts icon in the menu bar for as long as any Shortcut

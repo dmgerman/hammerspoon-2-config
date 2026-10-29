@@ -36,7 +36,7 @@ const config = {
 
     // Shortcut run to read the current network name, or null to rely on
     // hs.wifi.currentNetwork() alone. The Shortcut is expected to print the name.
-    nameShortcut: "dmg-ssid",
+    nameShortcut: "Wi-Fi Name",
 
     // VPN services whose name may be appended to the announcement. Empty accepts any
     // service that scutil reports as connected.

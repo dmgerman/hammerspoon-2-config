@@ -10,16 +10,16 @@
 //   4. Telling Emacs how long the screen has been unlocked.
 //
 //     const emacs = hs.loadSpoon("hs_emacs-gt")
-//     emacs.execute("(dmg-agenda)", { raise: true })
+//     emacs.execute("(org-agenda nil \"a\")", { raise: true })
 //     emacs.bindKey(["cmd", "ctrl"], "space")
 //     emacs.message("saved")
 //
 // The elisp this Spoon runs is the caller's: nothing here names a function that is not
 // part of Emacs itself.
 
-// Commands go through dmg-libs/shell.js, whose result has the same shape whether the
+// Commands go through ../lib/shell.js, whose result has the same shape whether the
 // command succeeds, fails or cannot be started.
-const shell = require(hs.appinfo.configDir + "/dmg-libs/shell.js")
+const shell = require(__dirname + "/../lib/shell.js")
 
 // MARK: - User-configurable settings
 
