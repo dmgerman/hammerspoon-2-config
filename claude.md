@@ -298,7 +298,7 @@ SSID to naming the interface.
 including how to run Hammerspoon 2 with allocation tracing. Read it before investigating
 memory, and update it when a leak is found, fixed or re-measured.
 
-Two rules prevent the leaks found so far:
+Two rules prevent most leaks in a Spoon:
 
 1. Every `hs.timer.doEvery()` needs a place where it is stopped, on every path that ends
    what it serves: a user closing something, a device going away, and the Spoon's `stop()`.
@@ -306,8 +306,9 @@ Two rules prevent the leaks found so far:
 2. Code that runs during teardown must not open, show or start anything. A deferred
    callback must check that its object is still registered before acting.
 
-`hs.reload()` leaves the previous JavaScript context alive, about 15 MB each time (#365).
-Restart Hammerspoon 2 instead when memory matters, and avoid reloading in tests.
+`hs.reload()` frees the previous JavaScript context only in builds that include upstream
+PR #366. In a build without it, each reload keeps about 15 MB alive, so restart Hammerspoon 2
+instead when memory matters.
 
 ## Workarounds, and when to ask upstream
 
