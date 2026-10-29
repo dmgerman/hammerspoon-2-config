@@ -1842,6 +1842,8 @@ function sessionNew(lang, translate) {
         // The filter given for this dictation alone, null for none, or undefined to use the
         // selected one; see sessionFilter().
         filter: undefined,
+        // Called by sessionAbort() when the dictation is abandoned, or null.
+        onAbort: null,
 
         // The processor the dictation goes to, or null when it produces text.
         processor: null,
@@ -1958,7 +1960,7 @@ function chunkReceived(mine, audioFile, chunkNum, isFinal, peak, speech) {
     // microphone that is delivering no signal. Later chunks are not judged: a pause between phrases is ordinary.
     if (chunkNum === 1 && peak !== null && peak < SILENCE_PEAK_FLOOR) {
         notify("recording", "error", silentAudioExplain(peak))
-        transcribeAbort()
+        sessionAbort("the microphone delivered no audio", true)
         return
     }
 
@@ -2659,7 +2661,9 @@ function backendsReady() {
  * @param {object} [options] Settings for this dictation only, leaving the selected ones
  *        alone: `lang`, a language code or "auto"; `translate`, true to translate into
  *        English; and `filter`, the name of one of config.filters, or null for none. Each
- *        defaults to the one selected.
+ *        defaults to the one selected. `onAbort(from, reason)` is called if the dictation
+ *        is abandoned, with the state it was in, as "recording", and why. It is not called
+ *        when the Spoon itself is stopped.
  */
 async function transcribeBegin(callbackOrPaste, options = {}) {
     if (!backendsReady()) return module.exports
@@ -2715,6 +2719,7 @@ async function transcribeBegin(callbackOrPaste, options = {}) {
     const mine = sessionNew(options.lang ?? languageGet(),
         options.translate ?? config.translate)
     mine.filter = filter
+    mine.onAbort = typeof options.onAbort === "function" ? options.onAbort : null
     sessionDeliveryChoose(mine, toProcessor)
     session = mine
     if (!stateTransition(STATES.recording, "starting to record")) {
@@ -2812,6 +2817,18 @@ function transcribeToProcessorToggle() {
 
 /** Abandon the recording or transcription in progress. Does nothing when idle. */
 function transcribeAbort() {
+    return sessionAbort("aborted", true)
+}
+
+/**
+ * Abandon the session in progress.
+ *
+ * @param {string} reason Why, for the session's onAbort callback.
+ * @param {boolean} report Whether to call that callback. stop() passes false, because code
+ *        that runs during teardown must not start anything, and the callback may run a
+ *        command.
+ */
+function sessionAbort(reason, report) {
     if (state === STATES.idle) {
         notify("recording", "info", "Nothing to abort")
         return module.exports
@@ -2836,6 +2853,14 @@ function transcribeAbort() {
     stateTransition(STATES.idle, "aborted")
     menuBarIdle()
     notify("recording", "info", `Aborted (${from.toLowerCase()})`)
+
+    if (report && mine && mine.onAbort) {
+        try {
+            mine.onAbort(from.toLowerCase(), reason)
+        } catch (e) {
+            notify("recording", "error", `The abort callback threw: ${e.message}`)
+        }
+    }
     return module.exports
 }
 
@@ -3141,7 +3166,7 @@ async function backendsStart() {
 
 /** Abandon anything in progress and take everything down. */
 function stop() {
-    if (state !== STATES.idle) transcribeAbort()
+    if (state !== STATES.idle) sessionAbort("the Spoon stopped", false)
 
     for (const hotkey of hotkeys) {
         if (hotkey) hotkey.destroy()

@@ -526,8 +526,15 @@ one to use instead of the current one, or =null= for the current one.
 that applies to that dictation only. =filter= is the name of one of =config.filters=, or
 =null= for none. Each one left out is the one selected, and the language, output and filter
 selected in the menu are left as they were. A filter name that is not configured is refused
-before anything is recorded. This dictates in Japanese, translates it into English, and
-pastes the English:
+before anything is recorded.
+
+The same object can hold =onAbort(from, reason)=, called when the dictation is abandoned:
+by =transcribeAbort=, by the menu's /Abort/, or because the microphone delivered no audio.
+=from= is the state it was in, such as ="recording"=, and =reason= says why. It is not called
+when the Spoon is stopped, as on a reload. This is how a caller that passed a callback for
+the text learns that no text is coming.
+
+This dictates in Japanese, translates it into English, and pastes the English:
 
 #+begin_src js   :exports both
 whisper.transcribeToggle(true, {lang: "ja", translate: true})
