@@ -17,39 +17,35 @@ clock.config.textColor = "#1891C3"
 clock.config.showDuration = 4
 
 clock.bindHotkeys({
-    toggleShow: [["cmd", "ctrl", "alt"], "t"]
+    show: [["cmd", "ctrl", "alt"], "t"]
 })
 
 clock.start()
 #+end_src
 
 Pressing the key displays the clock for four seconds. Pressing it again while the clock is
-displayed hides it immediately.
+displayed shows it afresh for another four seconds. Escape hides it.
 
 * Methods
 
 ** show()
 
-Show the clock and leave it displayed. The text is updated every second, so the displayed
-time stays current.
+Show the clock for /showDuration/ seconds, then hide it. Calling it while the clock is
+displayed shows it afresh and starts the time again. This is the method to bind to a key.
+The text is updated every second, so the displayed time stays current.
 
 #+begin_src js   :exports both
 hs.spoons["hs_time-gt"].show()
 #+end_src
 
+** showPersistent()
+
+Show the clock with no time limit. It stays until =hide()= is called or Escape is pressed.
+
 ** hide()
 
-Hide the clock. Calling this when the clock is already hidden has no effect.
-
-** toggleShow()
-
-Show the clock for /showDuration/ seconds, then hide it. If it is already displayed, hide
-it immediately and cancel the pending hide. This is the method to bind to a key.
-
-** toggleShowPersistent()
-
-Show the clock with no time limit, or hide it if it is already displayed. Escape also
-hides it.
+Hide the clock, and cancel the pending hide from =show()=. Calling this when the clock is
+already hidden has no effect.
 
 ** isShowing()
 
@@ -71,12 +67,12 @@ a key:
 
 #+begin_src js   :exports both
 clock.bindHotkeys({
-    toggleShow:           [["cmd", "ctrl", "alt"], "t"],
-    toggleShowPersistent: [["cmd", "ctrl", "alt", "shift"], "t"]
+    show:           [["cmd", "ctrl", "alt"], "t"],
+    showPersistent: [["cmd", "ctrl", "alt", "shift"], "t"]
 })
 #+end_src
 
-The four actions are =toggleShow=, =toggleShowPersistent=, =show= and =hide=. An unknown
+The three actions are =show=, =showPersistent= and =hide=. An unknown
 name is reported in the console and skipped.
 
 ** start() and stop()
@@ -96,7 +92,7 @@ Settings are properties of =config=, and take effect at the next =show()=.
 | =textColor=    | ="#1891C3"= | Hex colour.                                               |
 | =width=        | ="full"=    | ="full"= spans the screen; a number is a width in points. |
 | =height=       | =230=       | Height of the clock's area, in points.                    |
-| =showDuration= | =4=         | Seconds =toggleShow()= displays the clock for.            |
+| =showDuration= | =4=         | Seconds =show()= displays the clock for.                  |
 | =hotkey=       | ="escape"=  | Key that hides the clock while it is displayed. =null= for none. |
 | =hotkeyMods=   | =[]=        | Modifiers for that key.                                   |
 | =level=        | ="floating"= | Stacking: ="floating"=, ="status"=, ="screenSaver"=, ="popUpMenu"=. |

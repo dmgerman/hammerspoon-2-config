@@ -4,8 +4,8 @@
 // everything else. Show it for a few seconds, or leave it up until dismissed.
 //
 //     const clock = hs.loadSpoon("hs_time-gt")
-//     clock.toggleShow()             // displayed for a few seconds
-//     clock.toggleShowPersistent()   // displayed until toggled again, or Escape
+//     clock.show()             // displayed for a few seconds
+//     clock.showPersistent()   // displayed until hide() is called, or Escape
 //
 // The clock is an hs.canvas: one text element, drawn in whatever font `textFont` names.
 // It is built at each show() rather than moved, so it appears on whichever screen is
@@ -27,7 +27,7 @@ const config = {
     // fixed width in points, as the v1 Spoon had.
     width: "full",
     height: 230,
-    // Seconds toggleShow() leaves the clock on screen.
+    // Seconds show() leaves the clock on screen.
     showDuration: 4,
     // Dismisses the clock while it is showing. Set hotkey to null for none.
     hotkey: "escape",
@@ -190,10 +190,21 @@ function isShowing() {
 }
 
 /**
+ * Show the clock for `config.showDuration` seconds. Calling it while the clock is displayed
+ * shows it afresh and restarts the time.
+ */
+function show() {
+    showPersistent()
+    if (!clockCanvas) return module.exports
+    showTimer = hs.timer.doAfter(config.showDuration, () => hide())
+    return module.exports
+}
+
+/**
  * Show the clock, centred on the screen holding the focused window. It stays until
  * `hide()` is called, or Escape is pressed.
  */
-function show() {
+function showPersistent() {
     if (clockCanvas) hide()
 
     build()
@@ -217,12 +228,17 @@ function show() {
     return module.exports
 }
 
-/** Hide the clock, if it is showing. */
+/** Hide the clock, if it is showing, and cancel a pending hide from show(). */
 function hide() {
     // The hotkey goes first: if anything below throws, Escape is not left bound.
     if (cancelHotkey) {
         cancelHotkey.destroy()
         cancelHotkey = null
+    }
+    // Otherwise a timer left by show() could hide a clock shown persistently since.
+    if (showTimer) {
+        showTimer.stop()
+        showTimer = null
     }
     if (tickTimer) {
         tickTimer.stop()
@@ -232,43 +248,17 @@ function hide() {
     return module.exports
 }
 
-/** Show the clock for `config.showDuration` seconds, or hide it if it is showing. */
-function toggleShow() {
-    if (isShowing()) {
-        hide()
-        if (showTimer) {
-            showTimer.stop()
-            showTimer = null
-        }
-        return module.exports
-    }
-
-    show()
-    showTimer = hs.timer.doAfter(config.showDuration, () => {
-        hide()
-        showTimer = null
-    })
-    return module.exports
-}
-
-/** Show the clock until it is toggled again or dismissed. No timeout. */
-function toggleShowPersistent() {
-    if (isShowing()) hide()
-    else show()
-    return module.exports
-}
 
 /**
  * Bind hotkeys for the clock.
  *
- * @param {object} [mapping] Keyed by action name — `toggleShow`, `toggleShowPersistent`,
- *        `show`, `hide` — each holding `[[modifiers], key]`.
+ * @param {object} [mapping] Keyed by action name — `show`, `showPersistent`, `hide` — each
+ *        holding `[[modifiers], key]`.
  */
 function bindHotkeys(mapping) {
     const actions = {
-        toggleShow: () => toggleShow(),
-        toggleShowPersistent: () => toggleShowPersistent(),
         show: () => show(),
+        showPersistent: () => showPersistent(),
         hide: () => hide()
     }
 
@@ -291,10 +281,6 @@ function start() {
 /** Hide the clock and release every hotkey this Spoon bound. */
 function stop() {
     hide()
-    if (showTimer) {
-        showTimer.stop()
-        showTimer = null
-    }
     for (const hotkey of hotkeys) {
         if (hotkey) hotkey.destroy()
     }
@@ -307,9 +293,8 @@ module.exports = {
     formatTime,
     isShowing,
     show,
+    showPersistent,
     hide,
-    toggleShow,
-    toggleShowPersistent,
     bindHotkeys,
     start,
     stop
