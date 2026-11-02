@@ -221,12 +221,18 @@ function networkAlertsDisabled(name) {
 
 // MARK: - Reading the network
 
-// A Wi-Fi interface that is powered on and associated. hs.wifi.interfaceDetails() reports
-// `active` for the interface the v1 Spoon detected through its IPv4 addresses.
+// A Wi-Fi interface that is associated with a network: one that has a network name.
+//
+// Not hs.wifi.interfaceDetails(), although its `active` field answers the same question. It
+// leaks memory in macOS on every call: CoreWLAN keeps the configuration it returns, and the
+// cached scan results whenever macOS has refreshed them. Polled once a minute, that can reach
+// 65 MB a day. currentNetwork() leaks nothing.
+//
+// currentNetwork() needs Location Services. Without it this finds no Wi-Fi interface, and
+// interfaceActive() falls back to the interface carrying the default route.
 function interfaceWifi() {
     for (const iface of hs.wifi.interfaces() || []) {
-        const details = hs.wifi.interfaceDetails(iface)
-        if (details && details.active === true) return iface
+        if (hs.wifi.currentNetwork(iface)) return iface
     }
     return null
 }

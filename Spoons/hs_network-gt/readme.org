@@ -266,6 +266,13 @@ services; empty accepts any connected one.
 - *Which interface.* The active Wi-Fi interface, or the interface carrying the default
   route. Tunnel interfaces (=utun=, =ppp=, =ipsec=) are rejected, because their counters
   measure traffic that is also counted on the physical interface underneath.
+- *Finding the Wi-Fi interface needs Location Services.* A Wi-Fi interface counts as active
+  when =hs.wifi.currentNetwork()= names its network. Without Location Services that is always
+  =null=, so the Spoon uses the interface carrying the default route instead, which is
+  usually the same one. It does not use =hs.wifi.interfaceDetails()=, because every call to
+  it leaks memory inside macOS. CoreWLAN keeps the Wi-Fi configuration that call reads, and
+  the cached scan results whenever macOS has refreshed them. Once a minute, that can reach
+  tens of megabytes a day.
 - *Counter resets.* A counter that moves backwards means the interface was reset, not
   negative traffic; the difference is discarded rather than subtracted.
 - *A session ends* when the interface or the network name changes, which the Wi-Fi watcher

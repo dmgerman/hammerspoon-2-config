@@ -6,9 +6,28 @@ changes can make any of them out of date.
 
 ## What normal memory use looks like
 
-A fresh launch of Hammerspoon 2 with this configuration has a footprint of 66–92 MB (Debug
-build, measured 2026-10-28 and 2026-10-29). Use adds to that, and some of the growth is not a
-leak:
+A fresh launch of Hammerspoon 2 with this configuration has a footprint of 56–92 MB (Debug
+build, measured 2026-10-28 to 2026-10-29). After 12 hours of use it is about 108 MB, with a
+heap of 46.7 MB and 256 bytes reported by `leaks` (measured 2026-10-30). Use adds to the
+launch figure, and some of the growth is not a leak.
+
+After 21 hours, with the configuration reloaded about six times, the footprint was 123 MB
+with a peak of 151 MB, and the heap 53.4 MB in 263,564 blocks (measured 2026-10-30). One
+`JSContext` remained, so the reloads had freed their contexts. `leaks` reported 704 bytes:
+22 `JSValue` objects of 32 bytes each, with nothing reachable from them. The 222
+`HSAXWatcherObject`s matched what `hs_windowfilter-gt` was tracking exactly: 27 windows with
+6 notifications each and 20 applications with 3 each.
+
+The same process after 42¾ hours had a footprint of 136 MB with a peak of 192 MB, and a heap
+of 54.3 MB in 275,877 blocks (measured 2026-10-31). The heap had grown by 0.9 MB in 21 hours.
+Most of the difference from the footprint was fragmentation: the `malloc` zones held 52.2 MB
+of allocations and 28.9 MB of freed space kept for reuse. Every object count was unchanged,
+and the 168 watchers again matched 19 windows and 18 applications. `leaks` reported 36
+`JSValue` objects of 32 bytes, 1,152 bytes in all, up from 22. That is about 14 a day, and
+they do not come from `hs2` evaluations: 22 evaluations added none. Their origin needs a run
+with allocation tracing, which this process did not have.
+
+Some of the growth is not a leak:
 
 | Growth | Why it is not a leak |
 |--------|----------------------|
@@ -182,26 +201,35 @@ reference counts" turned on records every retain and release with its stack.
 
 ## The macOS Wi-Fi leak
 
-Each call to `hs.wifi.interfaceDetails()` leaves one `CWConfiguration` object alive for the
-rest of the process. The leak is in macOS: CoreWLAN's `-[CWInterface configuration]` keeps a
-reference to the object it returns. An Objective-C program built without ARC, which never
-retains the result, leaks the same way. Hammerspoon 2 only triggers it, because
-`interfaceDetails()` calls `configuration()` every time. `hs.wifi.currentNetwork()` does not
-leak. The full investigation is in `ai/not-a-hs2-issue_wifi-configuration-leak.md`, which is
-not checked in: `ai/` is listed in `.gitignore`.
+Do not poll `hs.wifi.interfaceDetails()`. Every call leaks memory that is never freed, and
+`hs.wifi.currentNetwork()` answers the usual question, whether Wi-Fi is associated, without
+leaking. `currentNetwork()` needs Location access; without it, it returns `null`.
+`hs_network-gt` uses `currentNetwork()` for this reason.
 
-It is present on macOS 27.0.1: 200 calls add 201 objects, and 200 calls to
-`currentNetwork()` add none (measured 2026-10-28). To check a newer macOS, count
-`CWConfiguration` with `heap` before and after such a loop.
+`interfaceDetails()` leaks two things:
 
-The cost per call depends on what CoreWLAN attaches to the leaked object:
+1. **The Wi-Fi configuration, on every call.** CoreWLAN's `-[CWInterface configuration]`
+   keeps a reference to the `CWConfiguration` it returns. An Objective-C program built
+   without ARC, which never retains the result, leaks the same way, so the leak is in macOS.
+   Most leaked configurations are 32 bytes. Some carry every known network with its access
+   points, including each access point's router address and location, and those reach
+   300 KB.
+2. **The cached scan results, once for each time macOS refreshes them.** The
+   `cachedScanResults` field comes from `-[CWInterface cachedScanResults]`, which returns
+   an `NSSet` of every network in range, about 480 KB for 73 networks. Repeated calls between
+   refreshes add nothing. Whether this leak is in CoreWLAN or in the conversion of the set to
+   Swift has not been tested.
 
-| Measured in | Per call | At one call a minute |
-|-------------|----------|----------------------|
-| A standalone test program | about 92 bytes | about 130 KB a day |
-| A Hammerspoon 2 process whose leaked objects keep their network profiles | about 290 bytes | about 420 KB a day |
+Measured on macOS 27.0.1 (2026-10-29), with `interfaceDetails()` called about once a minute:
+`leaks <pid>` reported 28.8 MB leaked after 10½ hours, about 65 MB a day. Of that, 22.9 MB was
+48 scan result sets and 4.6 MB was 614 configurations. The 515,669 leaked blocks were mostly
+strings and dictionaries inside them. With `currentNetwork()` in its place, a 12-hour run
+leaked 256 bytes in total and held no `CWConfiguration` or `CWNetwork` objects (measured
+2026-10-30).
 
-In this configuration, `interfaceWifi()` in `hs_network-gt` is the only caller. It runs
-about once a minute, when the banner is shown and on each idle poll. Calling
-`hs.wifi.currentNetwork()` there instead avoids the leak, provided Hammerspoon 2 has
-Location access. Without it, `currentNetwork()` returns `null`.
+To check a newer macOS, run `leaks <pid>` on a process that has called `interfaceDetails()`
+for some hours, and look for `ROOT LEAK` entries of type `CWConfiguration` and `NSSet`. To
+count the configuration leak alone, count `CWConfiguration` with `heap` before and after
+200 calls; on macOS 27.0.1, 200 calls add 200. The investigation of the configuration leak
+is in `ai/not-a-hs2-issue_wifi-configuration-leak.md`, which is not checked in: `ai/` is
+listed in `.gitignore`.
