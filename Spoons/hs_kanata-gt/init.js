@@ -50,6 +50,15 @@ const config = {
     xPos: 0.5,
     yPos: 0.75,
 
+    // Lines of text drawn to the right of a layer's name, keyed by layer name, such as
+    // {nav: ["h  left", "l  right"]}. A layer without an entry shows only its name.
+    layerDetails: {},
+    detailsTextSize: 24,
+    // A monospaced font keeps columns written with spaces aligned.
+    detailsFont: "Menlo",
+    // Space between the layer name and its details, in points.
+    detailsGap: 24,
+
     // Functions keyed by message type, such as LayerChange or MessagePush. Each receives
     // the message as {type, ...payload}: {"LayerChange":{"new":"nav"}} arrives as
     // {type: "LayerChange", new: "nav"}.
@@ -70,7 +79,7 @@ let running = false
 // while connected. A run is logged only once, and ended after config.reconnectTimeout.
 let failingSince = null
 let layerCurrent = null
-// One canvas per screen, all showing the same layer name.
+// One canvas per screen, all showing the same layer name and details.
 let canvases = []
 let screenWatcher = null
 
@@ -261,39 +270,88 @@ function canvasColor(value) {
     }
 }
 
-// The canvas frame centred on (xPos, yPos) of `screen`'s usable area.
+// The sizes of the layer name and of its detail lines, or of the name alone when the layer
+// has none. Without details the name keeps the fixed canvasWidth by canvasHeight box.
 //
-// hs.screen measures y downwards from the top of the primary display and a canvas window
-// upwards from its bottom, so the top of the canvas has to be converted.
-function canvasFrame(screen, primary) {
-    const area = screen.frame
-    const reference = primary.fullFrame
-    const left = area.x + area.w * config.xPos - config.canvasWidth / 2
-    const top = area.y + area.h * config.yPos - config.canvasHeight / 2
+// minimumTextSize() needs a canvas to be called on but does not depend on its contents, so
+// a canvas is made only to measure with.
+function layoutCompute(text, details) {
+    if (!details || details.length === 0) {
+        return { w: config.canvasWidth, h: config.canvasHeight, nameW: config.canvasWidth, details: null }
+    }
+    const measure = hs.canvas.create({ x: 0, y: 0, w: 1, h: 1 })
+    const detailsText = details.join("\n")
+    const name = measure.minimumTextSize({ textSize: config.textSize }, text)
+    const block = measure.minimumTextSize(
+        { textSize: config.detailsTextSize, textFont: config.detailsFont }, detailsText)
+    measure.destroy()
+
+    const nameW = Math.ceil(name.w)
+    const contentH = Math.ceil(Math.max(name.h, block.h))
     return {
-        x: left,
-        y: (reference.y + reference.h) - (top + config.canvasHeight),
-        w: config.canvasWidth,
-        h: config.canvasHeight
+        w: nameW + config.detailsGap + Math.ceil(block.w),
+        h: Math.max(config.canvasHeight, contentH),
+        nameW,
+        // Both the name and the details are centred vertically on the taller of the two.
+        nameY: (contentH - name.h) / 2,
+        details: {
+            text: detailsText,
+            x: nameW + config.detailsGap,
+            y: (contentH - block.h) / 2,
+            w: Math.ceil(block.w),
+            h: Math.ceil(block.h)
+        }
     }
 }
 
-function canvasBuild(screen, primary, text) {
-    const frame = canvasFrame(screen, primary)
+// The canvas frame for `layout` on `screen`. The centre of the layer name sits on
+// (xPos, yPos) of the screen's usable area, and any details extend to its right.
+//
+// hs.screen measures y downwards from the top of the primary display and a canvas window
+// upwards from its bottom, so the top of the canvas has to be converted.
+function canvasFrame(screen, primary, layout) {
+    const area = screen.frame
+    const reference = primary.fullFrame
+    const left = area.x + area.w * config.xPos - layout.nameW / 2
+    const top = area.y + area.h * config.yPos - layout.h / 2
+    return {
+        x: left,
+        y: (reference.y + reference.h) - (top + layout.h),
+        w: layout.w,
+        h: layout.h
+    }
+}
+
+function canvasBuild(screen, primary, text, layout) {
+    const frame = canvasFrame(screen, primary, layout)
     const canvas = hs.canvas.create(frame)
         .level("status")
         // The name is displayed for as long as the layer is held, often while typing or
         // clicking, so it must not take the clicks behind it.
         .ignoreMouseEvents(true)
         .behaviorList(["canJoinAllSpaces", "stationary"])
-    canvas.appendElements([{
+    const color = canvasColor(config.textColor)
+    const elements = [{
         type: "text",
         text: text,
         textSize: config.textSize,
-        textColor: canvasColor(config.textColor),
+        textColor: color,
         textAlignment: "center",
-        frame: { x: 0, y: 0, w: frame.w, h: frame.h }
-    }])
+        frame: { x: 0, y: layout.nameY ?? 0, w: layout.nameW, h: frame.h - (layout.nameY ?? 0) }
+    }]
+    if (layout.details) {
+        const d = layout.details
+        elements.push({
+            type: "text",
+            text: d.text,
+            textSize: config.detailsTextSize,
+            textFont: config.detailsFont,
+            textColor: color,
+            textAlignment: "left",
+            frame: { x: d.x, y: d.y, w: d.w, h: d.h }
+        })
+    }
+    canvas.appendElements(elements)
     canvas.show()
     return canvas
 }
@@ -310,7 +368,9 @@ function canvasesBuild(text) {
     const screens = hs.screen.all()
     const primary = hs.screen.primary() || screens[0]
     if (!primary) return
-    canvases = screens.map((screen) => canvasBuild(screen, primary, text))
+    const details = config.layerDetails && config.layerDetails[text]
+    const layout = layoutCompute(text, Array.isArray(details) ? details : details ? [details] : null)
+    canvases = screens.map((screen) => canvasBuild(screen, primary, text, layout))
 }
 
 // Records `layerName` as the active layer, and shows it on every screen unless it is the
@@ -321,11 +381,9 @@ function layerDisplay(layerName) {
         canvasesDestroy()
         return
     }
-    if (canvases.length === 0) {
-        canvasesBuild(layerName)
-        return
-    }
-    for (const canvas of canvases) canvas.setElementAttribute(0, "text", layerName)
+    // Rebuilt rather than updated in place, because each layer's details give the canvas a
+    // different size.
+    canvasesBuild(layerName)
 }
 
 // A screen added, removed or rearranged leaves the canvases where the old layout put them.

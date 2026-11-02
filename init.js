@@ -1309,6 +1309,16 @@ interactive.use("hs_kanata-gt", {
     // then fail in start() on hs.socket being undefined.
     when: () => typeof hs.socket !== "undefined",
     config: {
+        // The home row modifiers of the test layer in kanata.kbd, held to give the modifier.
+        layerDetails: {
+            test: [
+                "C        jf",
+                "M        kd",
+                "Opt      sl",
+                "Sh       a;",
+                "C-M-Opt  mc"
+            ]
+        },
         // Carried over from dmg_load_kanata(). The alert repeats what the Spoon already
         // draws, and MessagePush "hello" is the test message my kanata.kbd pushes.
         callbacks: {

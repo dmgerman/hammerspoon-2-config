@@ -95,7 +95,27 @@ the name is drawn.
 | =textColor=         | ="#FF0000"=    | A ="#RRGGBB"= string, or ={red, green, blue, alpha}= in 0..1. |
 | =xPos=              | =0.5=          | Horizontal centre of the name: 0 is the left edge, 1 the right. |
 | =yPos=              | =0.75=         | Vertical centre of the name: 0 is the top edge, 1 the bottom. |
+| =layerDetails=      | ={}=           | Lines drawn to the right of a layer's name, keyed by layer name. |
+| =detailsTextSize=   | =24=           | Text size of the details, in points.                         |
+| =detailsFont=       | ="Menlo"=      | Font of the details.                                         |
+| =detailsGap=        | =24=           | Space between the name and its details, in points.           |
 | =callbacks=         | ={}=           | Functions keyed by message type.                             |
+
+=layerDetails= is for reminders of what a layer does, such as its home row modifiers. Each
+entry is an array of lines, or a single string:
+
+#+begin_src js
+kanata.config.layerDetails = {
+    nav: [
+        "h  left",
+        "l  right"
+    ]
+}
+#+end_src
+
+A layer with details is drawn in a box sized to fit the name and the lines, rather than in the
+=canvasWidth= by =canvasHeight= box. The name stays centred on =xPos=, and the lines extend to
+its right. The font is monospaced by default, so columns lined up with spaces stay aligned.
 
 =xPos= and =yPos= are fractions of each screen's usable area, which excludes the menu bar and
 the Dock.
