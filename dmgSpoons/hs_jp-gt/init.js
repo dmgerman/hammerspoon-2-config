@@ -52,12 +52,22 @@
 // A key is read the first time its backend is used and kept until the next reload, so gpg
 // is asked once per backend.
 //
+// ## Jisho
+//
+// selectionJisho() shows jisho.org's page for the selection in the panel, as version 1's
+// toggle_jisho() did. The page is live: its links can be followed and its search box typed
+// in.
+//
 // ## The panel
 //
-// Results are shown in a floating window holding an hs.ui.webview. Escape in it, or its
-// close button, hides it and gives focus back to the window that had it before. The window
-// is created again for every result, because an hs.ui window takes its frame when it is
-// created and the panel goes on the screen being worked on.
+// Results are shown in a floating window holding an hs.ui.webview. Escape in it, its close
+// button, or panelToggle() hides it and gives focus back to the window that had it before.
+// Hiding keeps the window and its page, so panelToggle() shows it again as it was left:
+// the same definition, or the same Jisho page with whatever was followed or typed in it.
+// Each command that looks something up replaces what the panel holds.
+//
+// The window is created once, on the screen being worked on at the time, and stays where
+// it was put; an hs.ui window takes its frame when it is created.
 
 const shell = require(hs.appinfo.configDir + "/Spoons/lib/shell.js")
 const authinfo = require(hs.appinfo.configDir + "/Spoons/lib/authinfo.js")
@@ -95,6 +105,13 @@ const config = {
     googlePublic: {
         url: "https://translate.googleapis.com/translate_a/single",
         client: "gtx"
+    },
+
+    // Jisho's search page. A single character is searched for with kanjiTag added, which
+    // gives its kanji page rather than the words containing it.
+    jisho: {
+        url: "https://jisho.org/search/",
+        kanjiTag: "#kanji"
     },
 
     // How long to wait for the application to answer ⌘C when the selection cannot be read
@@ -142,8 +159,16 @@ const keys = {}
 // file has run.
 let backendChosen = null
 
+// The panel's window and webview. Created once and kept when the panel is hidden, so that
+// showing it again shows what it held; destroyed only by stop().
 let panelWindow = null
 let panelView = null
+
+// Whether the panel is displayed, as opposed to hidden or not created yet.
+let panelShown = false
+
+// The panel's title, which is how panelFocus() finds its window.
+let panelTitle = null
 
 // The window that had focus before the panel was shown, given focus again when it hides.
 let panelPreviousWindow = null
@@ -431,11 +456,28 @@ function htmlEscape(text) {
         .replace(/"/g, "&quot;")
 }
 
+// Run in every page the panel shows: the pages it builds, and the ones it loads from a URL.
+//
+// It posts "close" to PANEL_MESSAGE_HANDLER when Escape is pressed, which is how a key
+// pressed in a webview reaches the Spoon. It also gives the page focus: without that the
+// webview never receives a key, even when its window has focus. A page can run it twice,
+// once from its own <script> and once from onNavigate, so the second run does nothing.
+const PANEL_PAGE_SCRIPT = `
+  if (!window.hsJpPanel) {
+    window.hsJpPanel = true
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") window.webkit.messageHandlers.${PANEL_MESSAGE_HANDLER}.postMessage("close")
+    })
+  }
+  window.focus()
+  if (document.body && document.activeElement === document.body) {
+    document.body.tabIndex = -1
+    document.body.focus()
+  }
+`
+
 /**
  * A complete page around a fragment of HTML.
- *
- * The page posts "close" to PANEL_MESSAGE_HANDLER when Escape is pressed, which is how a key
- * pressed in a webview reaches the Spoon.
  *
  * @param {string} body HTML for the body.
  * @returns {string}
@@ -456,15 +498,7 @@ function panelPage(body) {
   .error { color: #d33; white-space: pre-wrap; }
 </style></head>
 <body>${body}
-<script>
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") window.webkit.messageHandlers.${PANEL_MESSAGE_HANDLER}.postMessage("close")
-  })
-  // Without this the webview never receives a key, even when its window has focus.
-  window.focus()
-  document.body.tabIndex = -1
-  document.body.focus()
-</script>
+<script>${PANEL_PAGE_SCRIPT}</script>
 </body></html>`
 }
 
@@ -492,55 +526,142 @@ function panelFrame() {
     }
 }
 
-/** Hide the panel and give focus back to the window that had it. */
-function panelHide() {
-    if (panelWindow) {
-        const window = panelWindow
-        panelWindow = null
-        panelView = null
-        window.destroy()
-    }
+/**
+ * Note that the panel is hidden, and give focus back to the window that had it.
+ *
+ * Called by panelHide(), and by the window's onHide when its close button is clicked. It
+ * does nothing the second time, which is what happens when panelHide()'s own hide() also
+ * fires onHide.
+ */
+function panelHidden() {
+    if (!panelShown) return
+    panelShown = false
     const previous = panelPreviousWindow
     panelPreviousWindow = null
     if (previous) {
         try { previous.focus() } catch (e) { /* the window has gone */ }
     }
-    return module.exports
 }
 
 /**
- * Show HTML in the panel, creating it if it is not displayed.
+ * Hide the panel and give focus back to the window that had it.
  *
- * @param {string} title For the window's title bar.
- * @param {string} body HTML for the page's body.
+ * The window and its page are kept, and panelReveal() shows them again as they were.
  */
-function panelShow(title, body) {
-    if (panelView) {
-        panelView.loadHTML(panelPage(body))
-        panelWindow.windowTitle(title)
-        return module.exports
-    }
+function panelHide() {
+    if (!panelShown) return module.exports
+    panelWindow.hide()
+    panelHidden()
+    return module.exports
+}
 
-    panelPreviousWindow = hs.window.focusedWindow()
+/** Destroy the panel, releasing its window and webview. */
+function panelDestroy() {
+    panelHide()
+    if (panelWindow) panelWindow.destroy()
+    panelWindow = null
+    panelView = null
+    panelTitle = null
+    return module.exports
+}
+
+/** Hide the panel if it is displayed, and otherwise show it with what it last held. */
+function panelToggle() {
+    if (panelShown) return panelHide()
+    if (!panelReveal()) hs.ui.alert("Nothing has been shown yet").show()
+    return module.exports
+}
+
+/** Set the panel's title. */
+function panelTitleSet(title) {
+    panelTitle = title
+    panelWindow.windowTitle(title)
+}
+
+/** Create the panel's window and webview, hidden. */
+function panelCreate() {
     panelView = hs.ui.webview()
         .onMessage(PANEL_MESSAGE_HANDLER, (message) => {
             if (message === "close") panelHide()
         })
-        .loadHTML(panelPage(body))
+        // A page loaded from a URL has no script of ours, so it is given one once it has
+        // loaded, and again after each link followed in it.
+        .onNavigate(() => {
+            if (panelView) panelView.execJS(PANEL_PAGE_SCRIPT)
+        })
 
     panelWindow = hs.ui.window(panelFrame())
         .titled(true)
         .closable(true)
         .allowResize(true)
-        .windowTitle(title)
         .level(config.panel.level)
-        // The close button only hides an hs.ui window. Hiding it this way also destroys it
-        // and gives focus back, exactly as Escape does.
-        .onHide(() => { if (panelWindow) panelHide() })
+        // The close button only hides an hs.ui window, which is what Escape does too.
+        .onHide(panelHidden)
         .webview(panelView)
-        .show()
-    panelFocus(title)
+}
+
+/**
+ * Show the panel with what it holds, and give it keyboard focus.
+ *
+ * @returns {boolean} False when there is no panel yet, so nothing to show.
+ */
+function panelReveal() {
+    if (!panelWindow) return false
+    if (!panelShown) {
+        panelPreviousWindow = hs.window.focusedWindow()
+        panelShown = true
+        panelWindow.show()
+    }
+    panelFocus()
+    return true
+}
+
+/**
+ * Load something into the panel, creating the panel if there is none, and show it.
+ *
+ * @param {string} title For the window's title bar.
+ * @param {function(object)} load Given the webview, loads the page into it.
+ */
+function panelLoad(title, load) {
+    if (!panelWindow) panelCreate()
+    panelTitleSet(title)
+    load(panelView)
+    panelReveal()
     return module.exports
+}
+
+/**
+ * Replace what the panel holds without showing it, so that a result arriving after the
+ * panel was hidden is there when it is shown again.
+ *
+ * @param {string} title For the window's title bar.
+ * @param {string} body HTML for the page's body.
+ */
+function panelUpdate(title, body) {
+    if (!panelWindow) return module.exports
+    panelTitleSet(title)
+    panelView.loadHTML(panelPage(body))
+    return module.exports
+}
+
+/**
+ * Show HTML in the panel.
+ *
+ * @param {string} title For the window's title bar.
+ * @param {string} body HTML for the page's body.
+ */
+function panelShow(title, body) {
+    return panelLoad(title, (view) => view.loadHTML(panelPage(body)))
+}
+
+/**
+ * Show a web page in the panel.
+ *
+ * @param {string} title For the window's title bar.
+ * @param {string} url The page.
+ */
+function panelShowURL(title, url) {
+    return panelLoad(title, (view) => view.loadURL(url))
 }
 
 /**
@@ -548,23 +669,23 @@ function panelShow(title, body) {
  *
  * show() puts an hs.ui window in front without making it the key window, and an HSUIWindow
  * cannot be focused itself. So the panel is found among Hammerspoon 2's own windows, by its
- * title, once the window server has it.
- *
- * @param {string} title The panel's title.
+ * title, once the window server has it. The page's script is then run again, because a page
+ * shown again without being reloaded has to be given focus again too.
  */
-function panelFocus(title) {
+function panelFocus() {
     hs.timer.doAfter(config.panel.focusDelay, () => {
-        if (!panelWindow) return
+        if (!panelShown) return
         const window = hs.window.allWindows().find((candidate) =>
-            candidate.title === title && candidate.application &&
+            candidate.title === panelTitle && candidate.application &&
             candidate.application.bundleID === hs.appinfo.bundleIdentifier)
         if (window) window.focus()
+        panelView.execJS(PANEL_PAGE_SCRIPT)
     })
 }
 
 /** Whether the panel is displayed. */
 function panelIsShown() {
-    return panelWindow !== null
+    return panelShown
 }
 
 // MARK: - Commands on the selection
@@ -585,13 +706,15 @@ async function selectionShow(title, pending, operation) {
     }
 
     panelShow(title, pending(text))
+    // panelUpdate rather than panelShow: if the panel was hidden while the operation ran,
+    // the result is put in it without showing it again.
     try {
         const html = await operation(text)
-        if (panelIsShown()) panelShow(title, html)
+        panelUpdate(title, html)
         return html
     } catch (e) {
         console.error(`${LOG_PREFIX} ${title} ${text}: ${e.message}`)
-        if (panelIsShown()) panelShow(title, `<div class="error">${htmlEscape(e.message)}</div>`)
+        panelUpdate(title, `<div class="error">${htmlEscape(e.message)}</div>`)
         return null
     }
 }
@@ -623,10 +746,37 @@ function selectionTranslate(backend) {
         })
 }
 
+/**
+ * The Jisho page for a word: its search results, or for a single character its kanji page.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function jishoURL(text) {
+    const word = text.trim()
+    const query = [...word].length === 1 ? `${word} ${config.jisho.kanjiTag}` : word
+    return config.jisho.url + encodeURIComponent(query)
+}
+
+/**
+ * Show Jisho's page for the selection in the panel.
+ *
+ * Version 1's toggle_jisho() did this and also hid the panel. Here hiding is panelToggle()'s
+ * job, and Escape's, and both keep the page as it was left.
+ */
+async function selectionJisho() {
+    const text = await selection()
+    if (!text) {
+        hs.ui.alert("Nothing is selected").show()
+        return module.exports
+    }
+    return panelShowURL("Jisho", jishoURL(text))
+}
+
 // MARK: - Starting and stopping
 
 function stop() {
-    panelHide()
+    panelDestroy()
     return module.exports
 }
 
@@ -644,8 +794,13 @@ module.exports = {
     selection,
     selectionDefine,
     selectionTranslate,
+    selectionJisho,
+    jishoURL,
     panelShow,
+    panelShowURL,
     panelHide,
+    panelToggle,
+    panelIsShown,
 
     stop,
 

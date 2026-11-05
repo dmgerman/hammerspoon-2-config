@@ -434,7 +434,8 @@ const whisperMenu = [
 ].map(navigates)
 
 // Japanese, through hs_jp-gt. The keys are the ones the Hammerspoon 1 jp grid used where it
-// had the same thing: d for the local dictionary, t for translation, l for DeepL. Capital G
+// had the same thing: d for the local dictionary, j for Jisho, t for translation, l for
+// DeepL. p shows or hides the panel the results are shown in. Capital G
 // is Google Cloud, which needs a key, beside lower case g for Google's public interface.
 //
 // Every button acts on the selection, so every one closes the menu: the selection is read
@@ -442,6 +443,8 @@ const whisperMenu = [
 // application. Backend opens a chooser, which needs the keyboard, so it closes the menu too.
 const jpMenu = [
     { label: "Define", icon: "myougiden.png", key: "d", command: "jp-selection-define" },
+    { label: "Jisho", icon: "jisho-square.png", key: "j", command: "jp-selection-jisho" },
+    { label: "Panel", icon: "symbol:macwindow", key: "p", command: "jp-panel-toggle" },
     { label: "Translate", icon: "symbol:character.bubble", key: "t", command: "jp-selection-translate" },
     { label: "macOS", icon: "symbol:apple.logo", key: "m", command: "jp-selection-translate-macos" },
     { label: "DeepL", icon: "deepl-square.png", key: "l", command: "jp-selection-translate-deepl" },

@@ -385,8 +385,20 @@ interactive.use("hs_jp-gt", {
         });
 
         interactive.define({
+            name: "jp-selection-jisho",
+            doc: "Show jisho.org's page for the selection in the Japanese panel.",
+            fn: () => jp.selectionJisho()
+        });
+
+        interactive.define({
+            name: "jp-panel-toggle",
+            doc: "Hide the Japanese panel, or show it again with what it last held.",
+            fn: () => jp.panelToggle()
+        });
+
+        interactive.define({
             name: "jp-panel-hide",
-            doc: "Hide the Japanese panel.",
+            doc: "Hide the Japanese panel, keeping what it holds.",
             fn: () => jp.panelHide()
         });
     }
