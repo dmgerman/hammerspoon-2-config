@@ -1,0 +1,7 @@
+{
+    "name": "hs_jp-gt",
+    "version": "0.3",
+    "author": "dmg <dmg@turingmachine.org>",
+    "license": "MIT - https://opensource.org/licenses/MIT",
+    "description": "Japanese tools: dictionary lookup, and translation through macOS, DeepL, Google or Google Cloud. A port of the hs_jp Spoon."
+}

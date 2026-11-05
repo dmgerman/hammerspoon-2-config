@@ -352,6 +352,46 @@ interactive.use("hs_keyboard-gt", {
     }
 });
 
+// Japanese dictionary lookup and translation, shown in a floating panel. A port of the hs_jp
+// Spoon in ~/.hammerspoon. The DeepL and Google keys are read from ~/.authinfo.gpg; the
+// Spoon's readme comment names the entries it looks for.
+interactive.use("hs_jp-gt", {
+    commands: (interactive, jp) => {
+        interactive.define({
+            name: "jp-selection-define",
+            doc: "Look up the selected word in the Japanese dictionary, and show the definition.",
+            fn: () => jp.selectionDefine()
+        });
+
+        interactive.define({
+            name: "jp-selection-translate",
+            doc: "Translate the selection between Japanese and English with the current backend, and show the translation.",
+            fn: () => jp.selectionTranslate()
+        });
+
+        // One command per backend, so that each can have its own key in the menu.
+        for (const backend of jp.backends()) {
+            interactive.define({
+                name: `jp-selection-translate-${backend}`,
+                doc: `Translate the selection between Japanese and English with ${jp.backendLabel(backend)}, and show the translation.`,
+                fn: () => jp.selectionTranslate(backend)
+            });
+        }
+
+        interactive.define({
+            name: "jp-translate-backend-select",
+            doc: "Choose the backend jp-selection-translate uses, until the next reload.",
+            fn: () => jp.translateBackendSelect()
+        });
+
+        interactive.define({
+            name: "jp-panel-hide",
+            doc: "Hide the Japanese panel.",
+            fn: () => jp.panelHide()
+        });
+    }
+});
+
 // A port of ClipboardTool.spoon, loaded in ~/.hammerspoon by dmg_load_clipboard(). The
 // two chords are the ones it bound there. Everything the chooser offers is also a
 // command, so the history can be managed without opening it.
@@ -782,6 +822,12 @@ interactive.use("hs_menu-gt", {
         });
 
         interactive.define({
+            name: "menu-show-jp",
+            doc: "Show the Japanese menu on screen.",
+            fn: () => menu.showOnScreen(menus.jpMenu, { name: "Japanese" })
+        });
+
+        interactive.define({
             name: "menu-hide",
             doc: "Dismiss the on-screen menu.",
             fn: () => menu.hideScreen()
@@ -793,6 +839,7 @@ interactive.use("hs_menu-gt", {
         "cmd-ctrl-alt z": "menu-show",
         "cmd-ctrl-alt m": "menu-show-music",
         "cmd-ctrl-alt w": "menu-show-whisper",
+        "cmd-ctrl-alt j": "menu-show-jp",
         "alt w": "menu-show-windows"
     }
 });

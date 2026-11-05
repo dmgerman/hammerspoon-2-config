@@ -433,6 +433,23 @@ const whisperMenu = [
     { label: "Prune recordings", icon: "symbol:trash", key: "X", command: "whisper-recordings-prune" }
 ].map(navigates)
 
+// Japanese, through hs_jp-gt. The keys are the ones the Hammerspoon 1 jp grid used where it
+// had the same thing: d for the local dictionary, t for translation, l for DeepL. Capital G
+// is Google Cloud, which needs a key, beside lower case g for Google's public interface.
+//
+// Every button acts on the selection, so every one closes the menu: the selection is read
+// from the application that has focus, and while the menu is displayed that is not the
+// application. Backend opens a chooser, which needs the keyboard, so it closes the menu too.
+const jpMenu = [
+    { label: "Define", icon: "myougiden.png", key: "d", command: "jp-selection-define" },
+    { label: "Translate", icon: "symbol:character.bubble", key: "t", command: "jp-selection-translate" },
+    { label: "macOS", icon: "symbol:apple.logo", key: "m", command: "jp-selection-translate-macos" },
+    { label: "DeepL", icon: "deepl-square.png", key: "l", command: "jp-selection-translate-deepl" },
+    { label: "Google", icon: "symbol:globe", key: "g", command: "jp-selection-translate-google" },
+    { label: "Google Cloud", icon: "symbol:cloud", key: "G", command: "jp-selection-translate-google-cloud" },
+    { label: "Backend", icon: "symbol:list.bullet", key: "b", command: "jp-translate-backend-select" }
+]
+
 // MARK: - Root
 //
 // The order follows largeMenu in dmg-streamdeck.lua.
@@ -566,6 +583,7 @@ module.exports = {
     clipboardMenu,
     musicMenu,
     whisperMenu,
+    jpMenu,
     applicationsMenu,
     windowSwitcherMenu
 }
