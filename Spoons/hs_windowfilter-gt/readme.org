@@ -15,7 +15,7 @@ Hammerspoon 1/).
 * Simple usage
 
 #+begin_src js   :exports both
-const wf = hs.loadSpoon("hs_windowfilter-gt")
+const wf = hs.spoons.load("hs_windowfilter-gt")
 
 // Every visible window, whatever the application.
 wf.default.on("windowCreated", (event, window) => {
@@ -204,7 +204,7 @@ hs.spoons["hs_windowfilter-gt"].status()
 * Settings
 
 #+begin_src js   :exports both
-const wf = hs.loadSpoon("hs_windowfilter-gt")
+const wf = hs.spoons.load("hs_windowfilter-gt")
 wf.config.moveDebounce = 0.2
 #+end_src
 

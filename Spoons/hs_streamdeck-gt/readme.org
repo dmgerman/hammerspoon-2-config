@@ -9,7 +9,7 @@ What is added here is the hardware, and the furniture the hardware needs: a back
 an on/off button, and a fixed grid to fit them into.
 
 #+begin_src js   :exports both
-const deck = hs.loadSpoon("hs_streamdeck-gt")
+const deck = hs.spoons.load("hs_streamdeck-gt")
 
 deck.setMenu("A00NA33332Q8DH", mainMenu, "Main")   // one particular deck
 deck.setMenu("large", mainMenu)                    // any deck of 15 keys or more

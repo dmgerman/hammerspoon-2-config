@@ -12,7 +12,7 @@ JavaScript.
 * Simple usage
 
 #+begin_src js   :exports both
-const whisper = hs.loadSpoon("hs_whisper-gt")
+const whisper = hs.spoons.load("hs_whisper-gt")
 
 whisper.config.languages = ["en"]
 whisper.config.recorder = "sox"

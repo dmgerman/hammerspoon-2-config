@@ -5,7 +5,7 @@
 // ~/.hammerspoon/while-not-integrated/window_filter_new.lua, which serves as the
 // specification; the design notes are in /tmp/ai/window_filter.org.
 //
-//     const wf = hs.loadSpoon("hs_windowfilter-gt")
+//     const wf = hs.spoons.load("hs_windowfilter-gt")
 //
 //     const editors = wf.create({ allowApplications: ["Emacs"], visible: true })
 //     editors.on("windowFocused", (event, window) => console.log(window.title))

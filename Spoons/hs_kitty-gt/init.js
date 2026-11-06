@@ -4,7 +4,7 @@
 // inside it: every tab is the same window. This Spoon asks kitty what it has and switches
 // tabs by name, so a tab is reachable in the same way as a window.
 //
-//     const kitty = hs.loadSpoon("hs_kitty-gt")
+//     const kitty = hs.spoons.load("hs_kitty-gt")
 //     kitty.chooseTab()                      // pick a tab from a chooser
 //     kitty.tabs()                           // what is open, most recently used first
 //     kitty.focusTab("logs")                                   // by title

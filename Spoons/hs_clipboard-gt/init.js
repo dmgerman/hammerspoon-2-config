@@ -4,7 +4,7 @@
 // TextClipboardHistory.spoon and from code by VFS and asmagill, plus the password
 // detection added to the local copy of it.
 //
-//     const clipboard = hs.loadSpoon("hs_clipboard-gt")
+//     const clipboard = hs.spoons.load("hs_clipboard-gt")
 //     clipboard.start()
 //     hs.hotkey.bind(hyper, "v", () => clipboard.historyShow(), null)
 //

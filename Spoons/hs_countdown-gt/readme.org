@@ -12,7 +12,7 @@ JavaScript.
 * Simple usage
 
 #+begin_src js   :exports both
-const countDown = hs.loadSpoon("hs_countdown-gt")
+const countDown = hs.spoons.load("hs_countdown-gt")
 
 countDown.config.defaultLenMinutes = 25
 countDown.config.barColorToPass = "#FF3B30"

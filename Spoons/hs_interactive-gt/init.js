@@ -11,7 +11,7 @@
 // a command can be redefined without rebinding, and every binding can be listed and
 // reported.
 //
-//     const interactive = hs.loadSpoon("hs_interactive-gt")
+//     const interactive = hs.spoons.load("hs_interactive-gt")
 //
 //     interactive.define({
 //         name: "window-move-left-half",
@@ -984,57 +984,106 @@ function record(name, state, ms, error) {
 
 // MARK: - Where Spoons are found
 //
-// hs.loadSpoon() reads from one directory, Spoons/, and registers what it loads in
-// hs.spoons under the exact string it was given. searchPath names directories relative to
-// the configuration directory, so that Spoons can be kept in more than one — those meant
-// for anyone apart from those written for one machine, say. Directories other than Spoons/
-// are addressed by a path relative to it, and the Spoon is then re-registered under its
-// bare name, so that a Spoon reading hs.spoons["hs_menu-gt"] resolves it from any of them.
+// hs.spoons.load() reads from one directory, Spoons/, and refuses a name containing "/",
+// so it cannot be pointed at any other directory. spoonsLoadPath lists the directories,
+// inside the configuration directory, from which Spoons may be loaded, so that Spoons can
+// be kept in more than one — those meant for anyone apart from those written for one
+// machine, say. A Spoon in Spoons/ is loaded by hs.spoons.load(). A Spoon in any other
+// listed directory is loaded by spoonLoadFrom(), which repeats what hs.spoons.load() does.
+// Either way the Spoon is registered in hs.spoons under its bare name, so that a Spoon
+// reading hs.spoons["hs_menu-gt"] finds it whichever directory it is in.
 
 /**
- * Directories holding Spoons, relative to the configuration directory, in search order.
+ * The directories from which Spoons may be loaded, in search order. Each is the name of a
+ * directory directly inside the configuration directory, and may not contain a "/".
  *
- * Only `Spoons/` by default, which is where Hammerspoon 2 itself looks. Which further
+ * Only `Spoons` by default, which is where Hammerspoon 2 itself looks. Which further
  * directories exist, and what they are called, is the configuration's to decide, so
  * `init.js` adds them:
  *
- *     interactive.searchPath.push("mySpoons")
+ *     interactive.spoonsLoadPath.push("mySpoons")
  */
-const searchPath = ["Spoons"]
+const spoonsLoadPath = ["Spoons"]
+
+// The names Hammerspoon 2 accepts for a Spoon, from SpoonManager.isValidSpoonName(). The
+// same rule is applied to directory names, and in both it keeps out "/", "." and "..".
+const SPOON_NAME_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/
+
+/** The directories in `spoonsLoadPath`, read through the export so init.js may replace it. */
+function spoonsLoadPathGet() {
+    return module.exports.spoonsLoadPath || spoonsLoadPath
+}
 
 /**
- * Load a Spoon by name, from the first directory in `searchPath` that holds it.
+ * Load a Spoon from one of the directories in `spoonsLoadPath`. A Spoon in `Spoons` is
+ * loaded by `hs.spoons.load()`. A Spoon in any other directory is loaded here, by the same
+ * steps, because Hammerspoon 2 offers no way to load a Spoon from anywhere else.
  *
- * A name containing a "/" is taken as a path relative to `Spoons/` and used as given, for
- * a Spoon somewhere the search path does not name.
+ * `spoon.json` must give a `name`, `author`, `version` and `description` that are not
+ * empty or only whitespace. The last three are copied onto the Spoon's object, and its
+ * `init()` is called if it has one.
  *
- * @param {string} name The Spoon's directory name.
+ * @param {string} name The Spoon's directory name. It may not contain a "/".
+ * @param {string} directory An entry of `spoonsLoadPath`. It may not contain a "/".
  * @returns {object} The Spoon, also registered as `hs.spoons[name]`.
- * @throws If no directory in `searchPath` holds a Spoon of that name.
+ * @throws If either argument is not a plain name, if `directory` is not in
+ *     `spoonsLoadPath`, if `spoon.json` or `init.js` is missing or malformed, or if the
+ *     Spoon itself throws.
+ */
+function spoonLoadFrom(name, directory) {
+    if (typeof name !== "string" || !SPOON_NAME_PATTERN.test(name)) {
+        throw new Error(`'${name}' is not a valid Spoon name; it may not contain "/"`)
+    }
+    if (typeof directory !== "string" || !SPOON_NAME_PATTERN.test(directory)) {
+        throw new Error(`'${directory}' is not a valid directory name; it may not contain "/"`)
+    }
+    const directories = spoonsLoadPathGet()
+    if (!directories.includes(directory)) {
+        throw new Error(`'${directory}' is not in spoonsLoadPath (${directories.join(", ")})`)
+    }
+
+    if (directory === "Spoons") return hs.spoons.load(name)
+
+    const dir = `${hs.appinfo.configDir}/${directory}/${name}`
+    if (!hs.fs.exists(`${dir}/spoon.json`)) throw new Error(`Spoon ${name} has no spoon.json in ${dir}`)
+    if (!hs.fs.exists(`${dir}/init.js`)) throw new Error(`Spoon ${name} has no init.js in ${dir}`)
+
+    const metadata = JSON.parse(hs.fs.read(`${dir}/spoon.json`))
+    for (const field of ["name", "author", "version", "description"]) {
+        if (typeof metadata[field] !== "string" || metadata[field].trim() === "") {
+            throw new Error(`Spoon ${name}: spoon.json needs a non-empty "${field}"`)
+        }
+    }
+
+    const spoon = require(`${dir}/init.js`)
+    if (spoon === null || (typeof spoon !== "object" && typeof spoon !== "function")) {
+        throw new Error(`Spoon ${name} must set module.exports to an object`)
+    }
+    spoon.author = metadata.author
+    spoon.description = metadata.description
+    spoon.version = metadata.version
+    if (typeof spoon.init === "function") spoon.init()
+
+    hs.spoons[name] = spoon
+    return spoon
+}
+
+/**
+ * Load a Spoon by name, from the first directory in `spoonsLoadPath` that holds it.
+ *
+ * @param {string} name The Spoon's directory name. It may not contain a "/".
+ * @returns {object} The Spoon, also registered as `hs.spoons[name]`.
+ * @throws If no directory in `spoonsLoadPath` holds a Spoon of that name.
  */
 function loadSpoon(name) {
-    if (name.includes("/")) return hs.loadSpoon(name)
-
-    // Read through the export, so that init.js can either add to searchPath or replace it
-    // outright. Reading the local const would honour only the first.
-    const directories = module.exports.searchPath || searchPath
+    const directories = spoonsLoadPathGet()
 
     for (const directory of directories) {
         if (!hs.fs.isDirectory(`${hs.appinfo.configDir}/${directory}/${name}`)) continue
 
-        // hs.loadSpoon() resolves its argument against Spoons/, so every other directory
-        // is named by a path relative to Spoons/.
-        const path = directory === "Spoons" ? name : `../${directory}/${name}`
-
         // Not wrapped in try: a Spoon that is present but throws while loading is an error
         // to report, not a reason to continue searching and then report it as missing.
-        const spoon = hs.loadSpoon(path)
-
-        if (path !== name) {
-            hs.spoons[name] = spoon
-            delete hs.spoons[path]
-        }
-        return spoon
+        return spoonLoadFrom(name, directory)
     }
 
     throw new Error(`no Spoon named ${name} in ${directories.join(", ")}`)
@@ -1043,7 +1092,7 @@ function loadSpoon(name) {
 /**
  * Load and configure a Spoon.
  *
- * @param {string} name The Spoon's directory name, looked for in each `searchPath` entry.
+ * @param {string} name The Spoon's directory name, looked for in each `spoonsLoadPath` entry.
  * @param {object} [spec] Any of:
  *        `disabled` — skip it, keeping the form;
  *        `when` — a predicate; the Spoon loads only if it returns true;
@@ -1145,7 +1194,7 @@ use.report = function () {
 // MARK: - Spoon lifecycle
 
 function init() {
-    // init() runs on every hs.loadSpoon(), so these are re-registered after a reload.
+    // init() runs on every hs.spoons.load(), so these are re-registered after a reload.
     // The file's top level runs only once, because require() caches it.
     define({
         name: "commands-execute",
@@ -1221,7 +1270,8 @@ module.exports = {
     SKIP,
     use,
     loadSpoon,
-    searchPath,
+    spoonLoadFrom,
+    spoonsLoadPath,
     readers,
     describe,
     define,

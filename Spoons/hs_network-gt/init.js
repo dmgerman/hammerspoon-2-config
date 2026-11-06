@@ -4,7 +4,7 @@
 // traffic per network and alerts on thresholds, and the network_* functions of
 // hs_annoyances.spoon, which announce the current network on screen every few minutes.
 //
-//     const network = hs.loadSpoon("hs_network-gt")
+//     const network = hs.spoons.load("hs_network-gt")
 //     network.start()
 //     network.thresholdsSet("HomeWiFi", {absolute: [1024 ** 3], delta: 500 * 1024 ** 2})
 //     network.networkMute("CoffeeShop")

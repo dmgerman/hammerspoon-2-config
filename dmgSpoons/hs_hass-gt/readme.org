@@ -7,7 +7,7 @@ Every call runs =hass-cli= through a wrapper script that supplies the server add
 the access token, so no credentials appear in this Spoon or in the configuration.
 
 #+begin_src js   :exports both
-const hass = hs.loadSpoon("hs_hass-gt")
+const hass = hs.spoons.load("hs_hass-gt")
 
 hass.officeDimmerOn(128)    // half brightness
 hass.officeLightToggle()

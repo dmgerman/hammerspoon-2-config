@@ -3,7 +3,7 @@
 // Every call goes through a shell script that holds the server address and the access
 // token and invokes hass-cli, so no credentials appear here or in the configuration.
 //
-//     const hass = hs.loadSpoon("hs_hass-gt")
+//     const hass = hs.spoons.load("hs_hass-gt")
 //     hass.officeDimmerOn(128)
 //     hass.teacToggle()
 //

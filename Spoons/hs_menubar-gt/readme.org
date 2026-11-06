@@ -10,7 +10,7 @@ icons themselves. Reaching the entries inside them is new.
 * Simple usage
 
 #+begin_src js   :exports both
-const mb = hs.loadSpoon("hs_menubar-gt")
+const mb = hs.spoons.load("hs_menubar-gt")
 
 mb.choose()                    // choose an icon and open it
 mb.choose(true)                // also offer every entry inside every menu

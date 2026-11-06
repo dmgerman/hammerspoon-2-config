@@ -14,7 +14,7 @@ function. The routing itself is not personal; the table is.
 * Simple usage
 
 #+begin_src js   :exports both
-const url = hs.loadSpoon("hs_url-gt");
+const url = hs.spoons.load("hs_url-gt");
 url.start();
 #+end_src
 

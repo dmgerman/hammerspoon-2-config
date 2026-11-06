@@ -15,7 +15,7 @@ windows records an entry for each and takes two undos.
 * Simple usage
 
 #+begin_src js   :exports both
-const win = hs.loadSpoon("hs_window-gt")
+const win = hs.spoons.load("hs_window-gt")
 
 win.start()
 

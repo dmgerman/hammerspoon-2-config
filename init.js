@@ -2,12 +2,12 @@ console.log("Hey I'm an init.js");
 
 hs.ipc.start();
 
-// hs_interactive-gt provides use(), so it is loaded first and directly, by hs.loadSpoon(),
+// hs_interactive-gt provides use(), so it is loaded first and directly, by hs.spoons.load(),
 // which reads only from Spoons/. Every Spoon after it is loaded by one use() call, which
-// searches the directories in interactive.searchPath and also applies the Spoon's
+// searches the directories in interactive.spoonsLoadPath and also applies the Spoon's
 // settings, defines its commands and binds its keys. Skip one with `disabled: true` and
 // reload.
-const interactive = hs.loadSpoon("hs_interactive-gt");
+const interactive = hs.spoons.load("hs_interactive-gt");
 
 // Two directories hold Spoons, and which one a Spoon is in records who it is for:
 //
@@ -16,7 +16,7 @@ const interactive = hs.loadSpoon("hs_interactive-gt");
 //
 // hs_interactive-gt searches Spoons/ on its own, that being where Hammerspoon 2 looks.
 // Which further directories exist is this configuration's business, so they are added here.
-interactive.searchPath.push("dmgSpoons");
+interactive.spoonsLoadPath.push("dmgSpoons");
 
 // The icons on the right of the menu bar, pressed from the keyboard. A port of the
 // hs_menubar Spoon in ~/.hammerspoon.

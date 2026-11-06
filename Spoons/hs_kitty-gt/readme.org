@@ -12,7 +12,7 @@ to the parts concerned with tabs.
 * Simple usage
 
 #+begin_src js   :exports both
-const kitty = hs.loadSpoon("hs_kitty-gt")
+const kitty = hs.spoons.load("hs_kitty-gt")
 
 kitty.chooseTab()                       // pick a tab from a chooser
 kitty.tabs()                            // what is open, most recently used first

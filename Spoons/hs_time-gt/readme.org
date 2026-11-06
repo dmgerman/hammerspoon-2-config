@@ -10,7 +10,7 @@ This is a port of the Hammerspoon 1 /AClock/ spoon to Hammerspoon 2 and JavaScri
 * Simple usage
 
 #+begin_src js   :exports both
-const clock = hs.loadSpoon("hs_time-gt")
+const clock = hs.spoons.load("hs_time-gt")
 
 clock.config.format = "%H:%M"
 clock.config.textColor = "#1891C3"

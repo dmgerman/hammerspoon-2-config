@@ -4,7 +4,7 @@
 // most-recently-used order, searches title and application name together, and shows a
 // picture of the selected window while you move through the list.
 //
-//     const sw = hs.loadSpoon("hs_selectWindow-gt")
+//     const sw = hs.spoons.load("hs_selectWindow-gt")
 //     sw.selectWindow()                    // every window
 //     sw.selectApplicationWindow()         // the focused application's windows
 //     sw.selectApp()                       // one window per application
@@ -138,7 +138,7 @@ function noteFocused(id) {
 function startTrackingFocus() {
     if (filter) return
 
-    const windowfilter = hs.loadSpoon("hs_windowfilter-gt")
+    const windowfilter = hs.spoons.load("hs_windowfilter-gt")
     if (!windowfilter) {
         log("hs_windowfilter-gt is not available, so windows are listed front to back rather than by use")
         return

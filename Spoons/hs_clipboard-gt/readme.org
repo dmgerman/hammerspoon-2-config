@@ -13,7 +13,7 @@ paste-on-select is enabled, types =⌘V= into the window that had focus.
 * Simple usage
 
 #+begin_src js   :exports both
-const clipboard = hs.loadSpoon("hs_clipboard-gt")
+const clipboard = hs.spoons.load("hs_clipboard-gt")
 clipboard.start()
 
 hs.hotkey.bind(hyper, "v", () => clipboard.historyShow(), null)

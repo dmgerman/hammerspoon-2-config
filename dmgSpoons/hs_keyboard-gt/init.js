@@ -4,7 +4,7 @@
 // pressing it as many times as it takes, and which one you land on depends on where you
 // started. This Spoon names them instead, so one key goes to one input source.
 //
-//     const keyboard = hs.loadSpoon("hs_keyboard-gt")
+//     const keyboard = hs.spoons.load("hs_keyboard-gt")
 //     keyboard.methodToggle()        // between the default layout and the input method
 //     keyboard.kanaToggle()          // between Hiragana and Katakana
 //     keyboard.layoutDefault()       // back to the default layout

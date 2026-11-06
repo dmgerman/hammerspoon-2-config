@@ -9,7 +9,7 @@ This is a port of the Hammerspoon 1 =hs_select_window= Spoon.
 * Simple usage
 
 #+begin_src js   :exports both
-const sw = hs.loadSpoon("hs_selectWindow-gt")
+const sw = hs.spoons.load("hs_selectWindow-gt")
 
 sw.selectWindow()                  // choose from every window
 sw.selectApplicationWindow()       // choose from the focused application's windows
@@ -152,7 +152,7 @@ which also includes minimized windows and windows of hidden applications.
 * Settings
 
 #+begin_src js   :exports both
-const sw = hs.loadSpoon("hs_selectWindow-gt")
+const sw = hs.spoons.load("hs_selectWindow-gt")
 sw.config.rowsToDisplay = 20
 sw.config.showThumbnail = false
 #+end_src

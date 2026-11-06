@@ -13,7 +13,7 @@ Two Emacs Lisp files ship beside this readme:
 | =hammerspoon-emacs-everywhere.el= | Editing a text field, through =emacs-everywhere=.  |
 
 #+begin_src js   :exports both
-const emacs = hs.loadSpoon("hs_emacs-gt")
+const emacs = hs.spoons.load("hs_emacs-gt")
 
 emacs.executeAndRaise("(bookmark-bmenu-list)")
 emacs.bindKey(["cmd", "ctrl"], "space")

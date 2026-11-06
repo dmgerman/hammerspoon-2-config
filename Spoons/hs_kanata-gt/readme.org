@@ -18,7 +18,7 @@ released builds can load the Spoon only when the module exists:
 
 #+begin_src js
 if (typeof hs.socket !== "undefined") {
-    const kanata = hs.loadSpoon("hs_kanata-gt")
+    const kanata = hs.spoons.load("hs_kanata-gt")
     kanata.start()
 }
 #+end_src
@@ -42,7 +42,7 @@ and the five minutes are counted afresh from then.
 * Simple usage
 
 #+begin_src js
-const kanata = hs.loadSpoon("hs_kanata-gt")
+const kanata = hs.spoons.load("hs_kanata-gt")
 
 kanata.config.callbacks = {
     LayerChange: (msg) => console.log(`Kanata layer: ${msg.new}`),

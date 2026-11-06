@@ -9,7 +9,7 @@
 //   3. Showing what Emacs has to say, on screen and in the menu bar.
 //   4. Telling Emacs how long the screen has been unlocked.
 //
-//     const emacs = hs.loadSpoon("hs_emacs-gt")
+//     const emacs = hs.spoons.load("hs_emacs-gt")
 //     emacs.execute("(org-agenda nil \"a\")", { raise: true })
 //     emacs.bindKey(["cmd", "ctrl"], "space")
 //     emacs.message("saved")

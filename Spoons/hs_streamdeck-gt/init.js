@@ -5,7 +5,7 @@
 // time. What is added here is the hardware and the chrome the hardware needs — a back
 // button, an on/off button, and a fixed grid to fit them into.
 //
-//     const deck = hs.loadSpoon("hs_streamdeck-gt")
+//     const deck = hs.spoons.load("hs_streamdeck-gt")
 //     deck.setMenu("A00NA33332Q8DH", busMenu, "Buses")   // a particular deck
 //     deck.setMenu("large", mainMenu)                    // any deck with 15 or more keys
 //     deck.setDefaultMenu(smallMenu)

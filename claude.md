@@ -31,6 +31,7 @@ uses one keeps running and quietly does the wrong thing. Use the current names:
 
 | Old                          | Current                                        | Since      |
 |------------------------------|------------------------------------------------|------------|
+| `hs.loadSpoon(name)`         | `hs.spoons.load(name)`, which refuses a `/`    | 2026-11-02 |
 | `HSApplication.title`        | `HSApplication.name`                           | 2026-10-23 |
 | `HSFont.customSize(name, n)` | `HSFont.custom(name, n)`                       | 2026-10-21 |
 | `HSImage.copyImage()`        | `HSImage.duplicate()`                          | 2026-10-17 |

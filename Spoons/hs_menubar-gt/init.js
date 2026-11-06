@@ -4,7 +4,7 @@
 // This Spoon finds them and presses one for you, so a VPN or a clipboard manager can be
 // opened without the mouse.
 //
-//     const mb = hs.loadSpoon("hs_menubar-gt")
+//     const mb = hs.spoons.load("hs_menubar-gt")
 //     mb.extras()                  // what is in the menu bar now
 //     mb.choose()                  // pick one from a chooser
 //     mb.menu()                    // the same list as menu buttons

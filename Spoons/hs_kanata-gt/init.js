@@ -6,7 +6,7 @@
 // layer on every screen while it is not the base layer, and passes each message to a
 // callback chosen by its type.
 //
-//     const kanata = hs.loadSpoon("hs_kanata-gt")
+//     const kanata = hs.spoons.load("hs_kanata-gt")
 //     kanata.config.callbacks = {
 //         LayerChange: (msg) => console.log(`layer: ${msg.new}`)
 //     }

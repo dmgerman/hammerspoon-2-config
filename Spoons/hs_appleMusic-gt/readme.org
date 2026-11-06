@@ -8,7 +8,7 @@ This is a port of the Hammerspoon 1 /hs_music/ spoon to Hammerspoon 2 and JavaSc
 * Simple usage
 
 #+begin_src js   :exports both
-const music = hs.loadSpoon("hs_appleMusic-gt");
+const music = hs.spoons.load("hs_appleMusic-gt");
 
 music.config.albumListPath = hs.appinfo.configDir + "/albums.txt";
 music.start();

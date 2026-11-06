@@ -7,7 +7,7 @@
 // carries a letter to press. hs_streamdeck-gt adds a presenter for Stream Deck hardware.
 // Both display the same menu definition.
 //
-//     const menu = hs.loadSpoon("hs_menu-gt")
+//     const menu = hs.spoons.load("hs_menu-gt")
 //     menu.showOnScreen([
 //         { label: "Emacs", app: "org.gnu.Emacs", key: "e" },
 //         { label: "Clock", command: "time-show" }

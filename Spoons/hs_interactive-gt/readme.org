@@ -37,7 +37,7 @@ Two further consequences follow from commands having names:
 * Simple usage
 
 #+begin_src js   :exports both
-const interactive = hs.loadSpoon("hs_interactive-gt")
+const interactive = hs.spoons.load("hs_interactive-gt")
 
 interactive.define({
     name: "window-left-half",
@@ -440,13 +440,13 @@ when the configuration is reloaded.
 
 * Loading Spoons
 
-=use()= replaces the several statements a Spoon otherwise needs: =hs.loadSpoon=, a
+=use()= replaces the several statements a Spoon otherwise needs: =hs.spoons.load=, a
 =try=/=catch= around it, the assignment of its settings, the =define()= calls for its
 commands, and =setKeys= for its keys.
 
 #+begin_src js   :exports both
 // init.js — this Spoon loads by hand, since it provides use()
-const interactive = hs.loadSpoon("hs_interactive-gt")
+const interactive = hs.spoons.load("hs_interactive-gt")
 
 interactive.use("hs_countdown-gt", {
     config: {
@@ -484,24 +484,47 @@ first.
 
 ** Where Spoons are looked for
 
-=hs.loadSpoon()= resolves a name against =Spoons/= and no other directory. =use()= searches
-the directories named in =searchPath= instead, relative to the configuration directory, and
-loads from the first one that holds the Spoon:
+=hs.spoons.load()= reads only from =Spoons/=, and refuses a name containing a =/=. =use()=
+searches the directories listed in =spoonsLoadPath= instead, in order, and loads from the
+first one that holds the Spoon:
 
 #+begin_src js   :exports both
-interactive.searchPath              // ["Spoons"]
-interactive.searchPath.push("mySpoons")
+interactive.spoonsLoadPath              // ["Spoons"]
+interactive.spoonsLoadPath.push("mySpoons")
 #+end_src
 
-=Spoons/= alone by default, since that is where Hammerspoon 2 itself looks. Which further
+=Spoons= alone by default, since that is where Hammerspoon 2 itself looks. Which further
 directories exist, and what they are called, is for the configuration to decide, so add
 them in =init.js= before the first =use()= call. This is what allows Spoons meant for
 anyone and Spoons written for one machine to be kept in separate directories.
 
+Each entry is the name of a directory directly inside the configuration directory. Neither
+an entry nor a Spoon's name may contain a =/=, so a Spoon can only be loaded from a
+directory this list names.
+
 Whichever directory it came from, a Spoon is registered under its bare name, so
-=hs.spoons["hs_menu-gt"]= finds it after a move from one directory to another. A directory
-must be inside the configuration directory. A name containing a =/= is used as given,
-relative to =Spoons/=, for a Spoon the search path does not cover.
+=hs.spoons["hs_menu-gt"]= finds it after a move from one directory to another.
+
+** spoonLoadFrom(name, directory)
+
+Loads the Spoon =name= from =directory=, which must be an entry of =spoonsLoadPath=:
+
+#+begin_src js   :exports both
+const keyboard = interactive.spoonLoadFrom("hs_keyboard-gt", "dmgSpoons")
+#+end_src
+
+A Spoon in =Spoons= is loaded by =hs.spoons.load()=. A Spoon in any other directory is
+loaded by this function itself, because Hammerspoon 2 has no way to load one from anywhere
+else. It follows the same steps as =hs.spoons.load()=:
+
+1. It checks that =spoon.json= gives a =name=, =author=, =version= and =description=, none
+   of them empty.
+2. It checks that =init.js= exists, and loads it with =require()=.
+3. It copies =author=, =version= and =description= onto the Spoon.
+4. It calls the Spoon's =init()=, if it has one.
+5. It registers the Spoon as =hs.spoons[name]=.
+
+It throws if either argument contains a =/=, or if =directory= is not in =spoonsLoadPath=.
 
 ** loadSpoon(name)
 
@@ -511,7 +534,7 @@ The search =use()= performs, on its own, for a Spoon that needs no configuring:
 const deck = interactive.loadSpoon("hs_streamdeck-gt")
 #+end_src
 
-It throws if no directory in =searchPath= holds that Spoon, and it does not catch what the
+It throws if no directory in =spoonsLoadPath= holds that Spoon, and it does not catch what the
 Spoon's own loading throws — a Spoon that is present but broken is reported as broken,
 rather than as missing.
 
@@ -531,7 +554,7 @@ The equivalent =use-package= keyword is given for reference:
 | =start=    | —           | Pass false to skip the Spoon's =start()=, called otherwise.    |
 
 Each call catches its own exceptions. A Spoon that fails to load is reported to the
-console and the calls after it still run, whereas a bare =hs.loadSpoon= that throws stops
+console and the calls after it still run, whereas a bare =hs.spoons.load= that throws stops
 the rest of =init.js= from executing.
 
 ** use.file(path, spec)

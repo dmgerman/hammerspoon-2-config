@@ -4,7 +4,7 @@
 // waits `delay` seconds, connects, and shows a second alert saying whether that worked.
 // Unplugging the iPad during the wait cancels it.
 //
-//     const sidecar = hs.loadSpoon("hs_sidecar-gt")
+//     const sidecar = hs.spoons.load("hs_sidecar-gt")
 //     sidecar.start()
 //
 // Hammerspoon 2 has no Sidecar API, and neither does macOS publicly. The connection is made

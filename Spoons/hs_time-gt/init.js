@@ -3,7 +3,7 @@
 // A large clock, centred on the screen holding the focused window and floating above
 // everything else. Show it for a few seconds, or leave it up until dismissed.
 //
-//     const clock = hs.loadSpoon("hs_time-gt")
+//     const clock = hs.spoons.load("hs_time-gt")
 //     clock.show()             // displayed for a few seconds
 //     clock.showPersistent()   // displayed until hide() is called, or Escape
 //
