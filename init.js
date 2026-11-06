@@ -1049,6 +1049,11 @@ interactive.use("hs_window-gt", {
 // No keys are bound. These are reachable from the command chooser and can go in a menu; a
 // switcher is worth a key, but which one is not settled yet.
 interactive.use("hs_selectWindow-gt", {
+    config: {
+        // A window chosen on a screen showing a fullscreen window is moved to the next
+        // screen that is not showing one, rather than replacing the fullscreen window.
+        fullscreenScreenSkip: true
+    },
     commands: (interactive, switcher) => {
         interactive.define({
             name: "window-select",

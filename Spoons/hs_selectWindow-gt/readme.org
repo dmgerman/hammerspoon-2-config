@@ -170,6 +170,7 @@ sw.config.showThumbnail = false
 | =thumbnailToggleKey=       |   "tab" | Key that turns the picture off and on                    |
 | =thumbnailRefreshKey=      |   "tab" | Key, with shift, that retakes the picture                |
 | =skipApplications=         |  a list | Applications whose windows are never offered             |
+| =fullscreenScreenSkip=     |   false | Move the window off a screen showing a fullscreen window |
 
 =width= and =wideWidth= are fractions, not percentages: 0.4 is four tenths of the screen.
 This is what =hs.chooser= takes, and it differs from the Hammerspoon 1 chooser, which took
@@ -181,6 +182,28 @@ picture lag behind the selection.
 
 Setting =persistentThumbnailCache= to true makes the chooser faster to open and its pictures
 older. =Shift+Tab= retakes the selected one.
+
+** Windows on a screen showing a fullscreen window
+
+A fullscreen window has a Space of its own. When the window you switch to is on a screen
+that is showing a fullscreen window, macOS leaves the fullscreen window's Space and shows
+the window you chose instead. This is what happens when =fullscreenScreenSkip= is false,
+which is the default.
+
+When =fullscreenScreenSkip= is true and there is more than one screen, the window is first
+moved to the next screen that is not showing a fullscreen window, and focused there. The
+fullscreen window stays where it is. Screens are tried in order, starting with the one after
+the window's own. When every other screen is showing a fullscreen window too, the window is
+focused where it is, as if the setting were false.
+
+The setting applies to every function that switches windows. It does not move a window that
+is itself fullscreen, nor a minimized one.
+
+Hammerspoon 2 cannot say which Space a window is on, so a screen counts as showing a
+fullscreen window when the window at its centre is fullscreen. A small window in front of
+the centre of a fullscreen window hides it from this test. When
+[[file:../hs_window-gt/readme.org][hs_window-gt]] is loaded, its =fullscreenScreenIds()= and
+=moveToScreen()= are used, so the window lands where that Spoon would put it.
 
 * What this Spoon does not do
 

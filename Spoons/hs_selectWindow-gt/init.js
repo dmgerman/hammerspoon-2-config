@@ -73,6 +73,14 @@ const config = {
     // Windows never offered.
     skipApplications: ["Hammerspoon", "Hammerspoon 2"],
 
+    // What happens when the chosen window is on a screen that is showing a fullscreen
+    // window. When false, macOS leaves the fullscreen window's Space and shows the chosen
+    // window in its place. When true, the chosen window is first moved to the next screen
+    // that is not showing a fullscreen window, so the fullscreen window stays where it is.
+    // When every other screen is showing one as well, the window is focused where it is,
+    // as with false.
+    fullscreenScreenSkip: false,
+
     // Log how long each step of opening the chooser took, and which application was in
     // front at the time. Opening it should be under about 100ms; set this when it is not,
     // and the next slow one says which step was slow rather than leaving it to guesswork.
@@ -639,15 +647,98 @@ function finishChoosing() {
 }
 
 /**
+ * The ids of the screens showing a fullscreen window.
+ *
+ * The window at the centre of each screen is asked whether it is fullscreen. The hit test
+ * finds only windows on the visible Space, whereas hs.window.allWindows() would also count a
+ * fullscreen window on a Space that is not showing. hs_window-gt does the same, and is used
+ * when it is loaded.
+ *
+ * @returns {Set<number>}
+ */
+function fullscreenScreenIds() {
+    const helper = hs.spoons ? hs.spoons["hs_window-gt"] : null
+    if (helper && typeof helper.fullscreenScreenIds === "function") return helper.fullscreenScreenIds()
+
+    const ids = new Set()
+    for (const screen of hs.screen.all()) {
+        const f = screen.fullFrame
+        const window = hs.window.windowAtPoint(new HSPoint(f.x + f.w / 2, f.y + f.h / 2))
+        if (window && window.isFullscreen) ids.add(screen.id)
+    }
+    return ids
+}
+
+/**
+ * Move a window off a screen showing a fullscreen window, when config.fullscreenScreenSkip
+ * asks for it.
+ *
+ * Focusing a window on such a screen makes macOS leave the fullscreen window's Space to show
+ * it. Moving the window first to a screen that is not showing a fullscreen window leaves the
+ * fullscreen window in place. The screens are tried in order, starting with the one after the
+ * window's own.
+ *
+ * Nothing is moved when the window is itself fullscreen or minimized, when there is only one
+ * screen, or when every other screen is showing a fullscreen window too.
+ *
+ * @returns {boolean} Whether the window was moved.
+ */
+function fullscreenScreenLeave(window) {
+    if (!config.fullscreenScreenSkip) return false
+    if (window.isFullscreen || window.isMinimized) return false
+
+    const screens = hs.screen.all()
+    if (screens.length < 2) return false
+    const current = window.screen
+    if (!current) return false
+
+    const occupied = fullscreenScreenIds()
+    if (!occupied.has(current.id)) return false
+
+    const index = screens.findIndex((s) => s.id === current.id)
+    let target = null
+    for (let n = 1; n < screens.length; n++) {
+        const candidate = screens[(index + n) % screens.length]
+        if (!occupied.has(candidate.id)) {
+            target = candidate
+            break
+        }
+    }
+    if (!target) return false
+
+    // hs_window-gt steps over the same screens in the same order, so it arrives at the same
+    // target. It also remembers where the window was on each screen, which brings it back
+    // to the same place when it is moved back.
+    const helper = hs.spoons ? hs.spoons["hs_window-gt"] : null
+    if (helper && typeof helper.moveToScreen === "function") return helper.moveToScreen("next", window)
+
+    // Otherwise keep the window where it sat within its screen, proportionally.
+    const from = current.frame
+    const to = target.frame
+    const frame = window.frame
+    window.frame = new HSRect(
+        to.x + ((frame.x - from.x) / from.w) * to.w,
+        to.y + ((frame.y - from.y) / from.h) * to.h,
+        frame.w * (to.w / from.w),
+        frame.h * (to.h / from.h)
+    )
+    return true
+}
+
+/**
  * Focus a window by id, bringing its application forward.
  *
  * Through hs_window-gt when it is loaded, so that both Spoons focus windows the same way.
+ * See fullscreenScreenLeave() for what happens when the window is on a screen showing a
+ * fullscreen window.
  */
 function focusWindowById(id) {
     // From the chooser's own list when one is open, so that choosing a window does not pay
     // to enumerate them all over again.
     const window = sessionWindows.get(id) || switchable().find((w) => w.id === id)
     if (!window) return false
+
+    fullscreenScreenLeave(window)
 
     const helper = hs.spoons ? hs.spoons["hs_window-gt"] : null
     if (helper && typeof helper.focusWindow === "function") return helper.focusWindow(window)
