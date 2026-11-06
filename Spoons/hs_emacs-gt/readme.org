@@ -113,12 +113,14 @@ whatever is in front instead, so the key is never simply swallowed.
 
 | Function              | Does                                                     |
 |-----------------------+----------------------------------------------------------|
-| =message(text, secs)= | Shows text on screen for a few seconds.                  |
+| =message(text, secs, options)= | Shows text on screen for a few seconds.         |
 | =messageHide()=       | Hides it now.                                            |
 | =setStatus(text)=     | Shows text in the menu bar until it is cleared.          |
 | =clearStatus()=       | Returns the menu bar to its resting icon.                |
-| =windowAlert(text, secs)= | Shows text across the middle of the focused window.  |
+| =windowAlert(text, secs, options)= | Shows text across the middle of the focused window. |
 | =windowAlertHide()=   | Removes every window alert still on screen.              |
+| =dialogAlert(text, options)= | Shows text across the focused window until it is clicked. |
+| =dialogAlertHide()=   | Removes every dialog alert without waiting for a click.  |
 
 The message is an =hs.canvas= in the upper left of the screen that holds the focused
 window. It is rebuilt at each message rather than moved.
@@ -154,7 +156,23 @@ Spoon was loaded.
 
 =config.message= holds =width=, =height=, =duration=, =font=, =textSize=, =textColor=,
 =background= and =level=. =config.windowAlert= holds =duration=, =textSize=, =textColor=,
-=background=, =cornerRadius= and =level=. =config.menubar= holds =enabled=, =iconEmpty= and =iconMessage=.
+=background=, =cornerRadius= and =level=. =config.dialogAlert= holds the same fields as
+=config.windowAlert= except =duration=, and adds =hint=, =hintSize= and =hintColor= for the
+smaller line beneath the text, "Click to dismiss" by default. =config.menubar= holds =enabled=, =iconEmpty= and =iconMessage=.
+
+=message()= and =windowAlert()= take an optional third argument, and =dialogAlert()= an
+optional second one. It is an object whose fields override the same fields of
+=config.message=, =config.windowAlert= or =config.dialogAlert= for that call only. Pass =null=
+for a duration to keep the configured one:
+
+#+begin_src js   :exports both
+emacs.message("Meeting in 15 minutes", 10, { textColor: "#FF0000", textSize: 44, width: 900, height: 140 })
+emacs.windowAlert("Meeting now", null, { textColor: "#FF0000" })
+emacs.dialogAlert("Meeting now", { textColor: "#FF0000" })
+#+end_src
+
+=dialogAlert()= has no duration: it stays until a left click anywhere on it removes it. The
+click does not bring Hammerspoon 2 to the front.
 
 * Editing a text field in Emacs
 

@@ -76,6 +76,19 @@ const config = {
         level: "floating"
     },
 
+    // The alert drawn like windowAlert, but which stays until it is clicked. hint is the
+    // smaller line beneath the text; an empty string leaves it out.
+    dialogAlert: {
+        textSize: 90,
+        textColor: "#FFFFFF",
+        background: "#000000CC",
+        cornerRadius: 10,
+        level: "floating",
+        hint: "Click to dismiss",
+        hintSize: 18,
+        hintColor: "#FFFFFFAA"
+    },
+
     // The menu bar indicator.
     menubar: {
         enabled: true,
@@ -94,6 +107,9 @@ let messageTimer = null
 // Each window alert on screen, with the timer that will remove it. Several can be on
 // screen at once, since each lasts its own duration.
 const windowAlerts = new Set()
+
+// Each dialog alert on screen. They stay until clicked, so several can accumulate.
+const dialogAlerts = new Set()
 
 // When the screen was last unlocked, in milliseconds since the epoch. It starts at the
 // time the Spoon was loaded, so that until the first unlock it counts from then.
@@ -644,11 +660,13 @@ function messageHide() {
  *
  * @param {string} text What to show.
  * @param {number} [duration] Seconds. Defaults to `config.message.duration`.
+ * @param {object} [options] Settings for this message only, overriding the same fields of
+ *        `config.message`, as in `{ textColor: "#FF0000", textSize: 44 }`.
  */
-function message(text, duration) {
+function message(text, duration, options) {
     messageHide()
 
-    const settings = config.message
+    const settings = Object.assign({}, config.message, options || {})
     const screen = currentScreen()
     const reference = hs.screen.primary() || screen
     if (!screen || !reference) return module.exports
@@ -696,7 +714,7 @@ function message(text, duration) {
     messageWindow.show()
 
     messageTimer = hs.timer.doAfter(
-        duration === undefined ? settings.duration : duration,
+        duration === undefined || duration === null ? settings.duration : duration,
         () => {
             messageTimer = null
             messageHide()
@@ -732,20 +750,41 @@ function windowAlertRemove(alert) {
  *
  * @param {string} text What to show.
  * @param {number} [duration] Seconds. Defaults to `config.windowAlert.duration`.
+ * @param {object} [options] Settings for this alert only, overriding the same fields of
+ *        `config.windowAlert`, as in `{ textColor: "#FF0000" }`.
  */
-function windowAlert(text, duration) {
-    const settings = config.windowAlert
-    const seconds = duration === undefined ? settings.duration : duration
+function windowAlert(text, duration, options) {
+    const settings = Object.assign({}, config.windowAlert, options || {})
+    const seconds = duration === undefined || duration === null ? settings.duration : duration
     const window = hs.window.focusedWindow()
-    const reference = hs.screen.primary()
-    if (!window || !reference) {
+    if (!window || !hs.screen.primary()) {
         hs.ui.alert(String(text)).duration(seconds).show()
         return module.exports
     }
 
-    const frame = window.frame
-    const primary = reference.fullFrame
-    const height = settings.textSize + 40
+    // Clicks pass through to the window beneath, since this alert removes itself.
+    const canvas = alertBand(window.frame, String(text), settings).ignoreMouseEvents(true)
+    canvas.show()
+
+    const alert = { canvas: canvas, timer: null }
+    alert.timer = hs.timer.doAfter(seconds, () => windowAlertRemove(alert))
+    windowAlerts.add(alert)
+    return module.exports
+}
+
+/**
+ * A canvas holding a band of text across the middle of `frame`, as wide as `frame`, ready
+ * to be shown. windowAlert() and dialogAlert() both draw with it.
+ *
+ * @param {object} frame The area to centre on, in screen coordinates, as a window frame.
+ * @param {string} text What to show.
+ * @param {object} settings textSize, textColor, background, cornerRadius and level, and
+ *        optionally hint, hintSize and hintColor for a smaller line beneath the text.
+ */
+function alertBand(frame, text, settings) {
+    const primary = hs.screen.primary().fullFrame
+    const hintHeight = settings.hint ? settings.hintSize + 12 : 0
+    const height = settings.textSize + 40 + hintHeight
     const top = frame.y + (frame.h - height) / 2
 
     // A window frame measures y downwards from the top of the primary display, and a
@@ -757,10 +796,9 @@ function windowAlert(text, duration) {
         h: height
     })
         .level(settings.level)
-        .ignoreMouseEvents(true)
         .behaviorList(["canJoinAllSpaces", "stationary"])
 
-    canvas.appendElements([
+    const elements = [
         {
             type: "rectangle",
             action: "fill",
@@ -770,19 +808,25 @@ function windowAlert(text, duration) {
         },
         {
             type: "text",
-            text: String(text),
+            text: text,
             textSize: settings.textSize,
             textColor: canvasColor(settings.textColor),
             textAlignment: "center",
-            frame: { x: 0, y: (height - settings.textSize) / 2 - 2, w: frame.w, h: height }
+            frame: { x: 0, y: 18, w: frame.w, h: settings.textSize + 20 }
         }
-    ])
-    canvas.show()
-
-    const alert = { canvas: canvas, timer: null }
-    alert.timer = hs.timer.doAfter(seconds, () => windowAlertRemove(alert))
-    windowAlerts.add(alert)
-    return module.exports
+    ]
+    if (settings.hint) {
+        elements.push({
+            type: "text",
+            text: settings.hint,
+            textSize: settings.hintSize,
+            textColor: canvasColor(settings.hintColor),
+            textAlignment: "center",
+            frame: { x: 0, y: height - hintHeight - 6, w: frame.w, h: hintHeight }
+        })
+    }
+    canvas.appendElements(elements)
+    return canvas
 }
 
 /**
@@ -793,6 +837,55 @@ function windowAlert(text, duration) {
 function windowAlertHide() {
     const count = windowAlerts.size
     for (const alert of Array.from(windowAlerts)) windowAlertRemove(alert)
+    return count
+}
+
+/**
+ * Show text across the middle of the focused window until it is clicked.
+ *
+ * Drawn as windowAlert() is, with `config.dialogAlert.hint` beneath the text, but it does
+ * not go away by itself. A left click anywhere on it removes it. When no window has focus,
+ * it is centred on the primary display instead.
+ *
+ * @param {string} text What to show.
+ * @param {object} [options] Settings for this alert only, overriding the same fields of
+ *        `config.dialogAlert`, as in `{ textColor: "#FF0000" }`.
+ */
+function dialogAlert(text, options) {
+    const settings = Object.assign({}, config.dialogAlert, options || {})
+    const primary = hs.screen.primary()
+    if (!primary) return module.exports
+
+    const window = hs.window.focusedWindow()
+    const frame = window ? window.frame : primary.fullFrame
+
+    const canvas = alertBand(frame, String(text), settings)
+        // So that clicking it does not bring Hammerspoon 2 to the front.
+        .clickActivating(false)
+        .canvasMouseEvents(true, false, false, false)
+    const alert = { canvas: canvas }
+    canvas.mouseCallback((which, message) => {
+        if (message === "mouseDown") dialogAlertRemove(alert)
+    })
+    canvas.show()
+    dialogAlerts.add(alert)
+    return module.exports
+}
+
+function dialogAlertRemove(alert) {
+    if (!dialogAlerts.has(alert)) return
+    dialogAlerts.delete(alert)
+    alert.canvas.destroy()
+}
+
+/**
+ * Remove every dialog alert still on screen without waiting for a click.
+ *
+ * @returns {number} How many were removed.
+ */
+function dialogAlertHide() {
+    const count = dialogAlerts.size
+    for (const alert of Array.from(dialogAlerts)) dialogAlertRemove(alert)
     return count
 }
 
@@ -841,6 +934,7 @@ function stop() {
     unbindAll()
     messageHide()
     windowAlertHide()
+    dialogAlertHide()
 
     for (const [event, listener] of unlockListeners) hs.power.off(event, listener)
     unlockListeners.clear()
@@ -889,6 +983,8 @@ module.exports = {
     clearStatus,
     windowAlert,
     windowAlertHide,
+    dialogAlert,
+    dialogAlertHide,
     // How long the screen has been unlocked.
     unlockSeconds,
     start,
